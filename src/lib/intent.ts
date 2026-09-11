@@ -3,13 +3,13 @@ export function wantsAppBuild(message: string, hasPreview: boolean): boolean {
   const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 
   const explicitBuild =
-    /\b(cree|creer|gener[eè]e?|construire|fabrique|build|genere moi|fais[- ]moi (un|une|le|la)|site web|landing|mini[- ]?app|application web|page web|boutique en ligne|menu restaurant)\b/.test(
+    /\b(cree|creer|gener[eè]e?|construire|fabrique|build|genere moi|fais[- ]moi (un|une|le|la)|site web|landing|mini[- ]?app|application web|page web|boutique en ligne|menu restaurant|fullstack|full[- ]?stack|supabase|backend|back[- ]?end|avec (une )?base|api rest)\b/.test(
       m,
     );
 
   const previewEdit =
     hasPreview &&
-    /\b(change|modifie|ajoute|enleve|supprime|mets|met a jour|update|couleur|titre|logo|bouton|section|header|footer|panier|whatsapp)\b/.test(
+    /\b(change|modifie|ajoute|enleve|supprime|mets|met a jour|update|couleur|titre|logo|bouton|section|header|footer|panier|whatsapp|table|sql|auth|api)\b/.test(
       m,
     );
 

@@ -20,7 +20,7 @@ export function LoginPanel({ onBack, onSuccess }: LoginPanelProps) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!configured) {
-      setStatus("Supabase non configuré (.env.local).");
+      setStatus("Compte temporairement indisponible. Réessaie plus tard.");
       return;
     }
     if (!email.trim() || password.length < 6) {
@@ -57,7 +57,7 @@ export function LoginPanel({ onBack, onSuccess }: LoginPanelProps) {
             <h1 className="font-[family-name:var(--font-syne)] text-2xl font-bold">
               Compte
             </h1>
-            <p className="mt-1 text-sm text-okapi-ink/50">Session Supabase active</p>
+            <p className="mt-1 text-sm text-okapi-ink/50">Connecté à Okapi</p>
           </div>
           {onBack ? (
             <button
@@ -97,7 +97,7 @@ export function LoginPanel({ onBack, onSuccess }: LoginPanelProps) {
             Connexion
           </h1>
           <p className="mt-1 text-sm text-okapi-ink/50">
-            Compte Okapi · sauvegarde cloud Supabase
+            Compte Okapi · MMC SARL
           </p>
         </div>
         {onBack ? (
@@ -193,7 +193,7 @@ export function LoginPanel({ onBack, onSuccess }: LoginPanelProps) {
           </button>
 
           <p className="mt-4 text-center text-xs text-okapi-ink/40">
-            Full stack : Auth Supabase → API projets → base RLS.
+            Tes projets sont sauvegardés en toute sécurité avec Okapi · MMC SARL.
           </p>
         </form>
       </div>

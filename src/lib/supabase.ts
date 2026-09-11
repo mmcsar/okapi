@@ -25,7 +25,7 @@ export function isSupabaseConfigured() {
 export function getSupabaseConfig() {
   if (!url || !key) {
     throw new Error(
-      "Supabase non configuré. Ajoute NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY dans .env.local",
+      "Okapi n’est pas encore prêt pour les comptes. Réessaie plus tard.",
     );
   }
   return { url, key };

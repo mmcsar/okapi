@@ -4,6 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { AdminClientsDashboard } from "@/components/admin-clients-dashboard";
+import { AdminExecutiveDashboard } from "@/components/admin-executive-dashboard";
+import { GeminiStatus } from "@/components/gemini-status";
+import { HeygenStatus } from "@/components/heygen-status";
 import { SupabaseStatus } from "@/components/supabase-status";
 
 const stats = [
@@ -22,12 +25,12 @@ const users = [
 
 const systemRows = [
   { name: "App publique /", status: "OK" },
-  { name: "Supabase", status: "OK" },
-  { name: "LLM (OpenAI)", status: "Config Vercel" },
+  { name: "Base Okapi", status: "OK" },
+  { name: "Moteur IA", status: "Config" },
   { name: "PWA", status: "OK" },
 ] as const;
 
-type AdminTab = "clients" | "system";
+type AdminTab = "clients" | "executive" | "system";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -139,7 +142,7 @@ export default function AdminPage() {
 
   return (
     <div className="relative z-10 min-h-screen p-3 lg:p-5">
-      <div className="app-shell mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col overflow-hidden rounded-[28px]">
+      <div className="app-shell mx-auto flex min-h-[calc(100vh-2rem)] max-w-7xl flex-col overflow-hidden rounded-[28px]">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--okapi-stroke)] px-5 py-4">
           <div className="flex items-center gap-3">
             <div className="relative h-10 w-10 overflow-hidden rounded-xl">
@@ -181,6 +184,7 @@ export default function AdminPage() {
           {(
             [
               { id: "clients" as const, label: "Clients" },
+              { id: "executive" as const, label: "Exécutif" },
               { id: "system" as const, label: "Système" },
             ] as const
           ).map((t) => (
@@ -202,11 +206,65 @@ export default function AdminPage() {
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-6">
           {tab === "clients" ? (
             <AdminClientsDashboard />
+          ) : tab === "executive" ? (
+            <AdminExecutiveDashboard />
           ) : (
             <>
-              <p className="mb-5 text-sm text-okapi-ink/55">
-                Santé produit & utilisateurs de l’app publique.
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-okapi-amber-deep">
+                Technique · secret
               </p>
+              <h2 className="font-[family-name:var(--font-syne)] text-2xl font-bold">
+                Architecture & APIs
+              </h2>
+              <p className="mb-5 mt-1 text-sm text-okapi-ink/55">
+                Invisible pour les utilisateurs. Clés uniquement dans Vercel /
+                `.env.local` — jamais dans l’app publique.
+              </p>
+
+              <section className="mb-5 rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
+                <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+                  Connexions API
+                </h3>
+                <p className="mt-1 text-sm text-okapi-ink/45">
+                  Provider actif côté serveur :{" "}
+                  <code className="text-okapi-forest">LLM_PROVIDER</code> (env)
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <SupabaseStatus />
+                  <GeminiStatus />
+                  <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-4 py-3 text-left">
+                    <p className="text-sm font-semibold">OpenAI</p>
+                    <p className="mt-1 text-xs text-okapi-ink/45">
+                      Variables :{" "}
+                      <code className="text-okapi-forest">OPENAI_API_KEY</code>,{" "}
+                      <code className="text-okapi-forest">LLM_PROVIDER</code>
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-okapi-forest">
+                      Recommandé en RDC
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-4 py-3 text-left">
+                    <p className="text-sm font-semibold">Claude</p>
+                    <p className="mt-1 text-xs text-okapi-ink/45">
+                      Variable :{" "}
+                      <code className="text-okapi-forest">ANTHROPIC_API_KEY</code>
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-okapi-ink/45">
+                      Optionnel (fallback)
+                    </p>
+                  </div>
+                  <HeygenStatus />
+                  <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-4 py-3 text-left">
+                    <p className="text-sm font-semibold">Clé service base</p>
+                    <p className="mt-1 text-xs text-okapi-ink/45">
+                      Variable serveur pour le CRM admin
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-okapi-ink/45">
+                      CRM onglet Clients
+                    </p>
+                  </div>
+                </div>
+              </section>
 
               <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {stats.map((stat) => (
@@ -250,32 +308,29 @@ export default function AdminPage() {
                   </ul>
                 </div>
 
-                <div className="flex flex-col gap-5">
-                  <SupabaseStatus />
-                  <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
-                    <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
-                      Système
-                    </h2>
-                    <ul className="mt-3 space-y-2">
-                      {systemRows.map((row) => (
-                        <li
-                          key={row.name}
-                          className="flex items-center justify-between text-sm"
+                <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
+                  <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+                    Stack
+                  </h2>
+                  <ul className="mt-3 space-y-2">
+                    {systemRows.map((row) => (
+                      <li
+                        key={row.name}
+                        className="flex items-center justify-between text-sm"
+                      >
+                        <span className="text-okapi-ink/65">{row.name}</span>
+                        <span
+                          className={
+                            row.status === "OK"
+                              ? "font-medium text-okapi-forest"
+                              : "font-medium text-okapi-amber-deep"
+                          }
                         >
-                          <span className="text-okapi-ink/65">{row.name}</span>
-                          <span
-                            className={
-                              row.status === "OK"
-                                ? "font-medium text-okapi-forest"
-                                : "font-medium text-okapi-amber-deep"
-                            }
-                          >
-                            {row.status}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                          {row.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </section>
             </>

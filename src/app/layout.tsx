@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Manrope, Syne } from "next/font/google";
+import { Atmosphere3d } from "@/components/atmosphere-3d";
 import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
@@ -16,9 +17,9 @@ const syne = Syne({
 });
 
 export const metadata: Metadata = {
-  title: "Okapi — AI Agent RDC",
+  title: "Okapi — Plateforme IA de MMC SARL",
   description:
-    "Okapi: multilingual AI agent that answers and builds sites & apps for DRC.",
+    "Okapi est la plateforme IA de MMC SARL : agent multilingue qui répond et construit sites & apps pour la RDC.",
   applicationName: "Okapi",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="relative min-h-full font-sans text-okapi-ink">
         <PwaRegister />
+        <Atmosphere3d />
         <div className="relative z-10 flex min-h-full flex-col">{children}</div>
       </body>
     </html>

@@ -16,7 +16,7 @@ export function SupabaseStatus() {
       if (!isSupabaseConfigured()) {
         if (!cancelled) {
           setStatus("missing");
-          setDetail("Variables .env.local manquantes");
+          setDetail("Base Okapi non configurée");
         }
         return;
       }
@@ -35,7 +35,7 @@ export function SupabaseStatus() {
       } catch (err) {
         if (cancelled) return;
         setStatus("error");
-        setDetail(err instanceof Error ? err.message : "Erreur Supabase");
+        setDetail(err instanceof Error ? err.message : "Erreur connexion");
       }
     }
 
@@ -54,7 +54,7 @@ export function SupabaseStatus() {
 
   return (
     <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-4 py-3 text-left">
-      <p className="text-sm font-semibold">Supabase</p>
+      <p className="text-sm font-semibold">Base Okapi</p>
       <p className="mt-1 text-xs text-okapi-ink/45">
         Auth, projets et données Okapi
       </p>

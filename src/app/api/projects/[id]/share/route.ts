@@ -59,7 +59,7 @@ export async function POST(request: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error: missing
-          ? "Partage non configuré. Exécute supabase/migrations/20260309_share_public.sql"
+          ? "Partage temporairement indisponible. Réessaie plus tard."
           : readErr.message,
         setupRequired: missing,
       },

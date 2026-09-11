@@ -26,7 +26,7 @@ export async function GET() {
 
   if (!isSupabaseAdminConfigured()) {
     return missingSetup(
-      "Ajoute SUPABASE_SERVICE_ROLE_KEY (Supabase → Settings → API) dans Vercel / .env.local.",
+      "Base Okapi non configurée (clé service manquante).",
     );
   }
 
@@ -43,7 +43,7 @@ export async function GET() {
       );
       return missingSetup(
         missing
-          ? "Table admin_clients absente. Exécute supabase/migrations/20260309_admin_clients.sql dans le SQL Editor."
+          ? "CRM admin non initialisé. Contacte le support technique Okapi."
           : error.message,
       );
     }
@@ -52,7 +52,7 @@ export async function GET() {
     return NextResponse.json({ ok: true, clients });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erreur Supabase" },
+      { error: err instanceof Error ? err.message : "Erreur enregistrement" },
       { status: 500 },
     );
   }
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
   if (!isSupabaseAdminConfigured()) {
     return missingSetup(
-      "Ajoute SUPABASE_SERVICE_ROLE_KEY dans Vercel / .env.local.",
+      "Base Okapi non configurée (clé service manquante).",
     );
   }
 
@@ -125,7 +125,7 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erreur Supabase" },
+      { error: err instanceof Error ? err.message : "Erreur enregistrement" },
       { status: 500 },
     );
   }

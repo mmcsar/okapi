@@ -65,7 +65,7 @@ const copy: Record<
         title: "Okapi peut se tromper — pas un médecin ni un juriste",
         meta: "Avertissement",
       },
-      { title: "Contacter le support Okapi", meta: "WhatsApp / email" },
+      { title: "Contacter MMC SARL / support Okapi", meta: "WhatsApp / email" },
     ],
     actions: [{ id: "learn", label: "Documentation" }],
   },
@@ -73,9 +73,12 @@ const copy: Record<
     title: "En savoir plus",
     subtitle: "Documentation produit et tutoriels",
     items: [
-      { title: "Qu’est-ce qu’Okapi ?", meta: "Intro" },
-      { title: "Architecture prompt → preview", meta: "Doc" },
-      { title: "Brancher une API LLM", meta: "Doc" },
+      {
+        title: "Okapi, plateforme IA de MMC SARL",
+        meta: "Intro",
+      },
+      { title: "Créer un site ou une app", meta: "Guide" },
+      { title: "Bonnes pratiques RDC", meta: "Doc" },
     ],
   },
   upgrade: {
@@ -94,7 +97,7 @@ const copy: Record<
       { title: "HeyGen", meta: "Vidéo avatar" },
       { title: "Mobile Money", meta: "Paiements" },
       { title: "WhatsApp", meta: "Notifications" },
-      { title: "Supabase", meta: "Auth & data" },
+      { title: "Base Okapi", meta: "Compte & données" },
     ],
   },
   language: {

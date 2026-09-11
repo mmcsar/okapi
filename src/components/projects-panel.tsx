@@ -83,7 +83,7 @@ export function ProjectsPanel({
             Projets
           </h1>
           <p className="mt-1 text-sm text-okapi-ink/50">
-            Sauvegardés dans Supabase · full stack
+            Projets sauvegardés sur ton compte Okapi
           </p>
         </div>
         <div className="flex gap-2">

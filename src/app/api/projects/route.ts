@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: missing
-          ? "Table projects absente. Exécute supabase/migrations/20260309_okapi_fullstack.sql dans le SQL Editor Supabase."
+          ? "Sauvegarde projets indisponible. Contacte le support Okapi."
           : error.message,
         setupRequired: missing,
       },

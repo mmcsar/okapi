@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { friendlyLlmError } from "@/lib/llm-errors";
 
 export type OpenAiChatMessage = ChatCompletionMessageParam;
 
@@ -34,7 +35,7 @@ export async function openAiComplete(opts: {
   });
 
   const text = res.choices[0]?.message?.content?.trim() || "";
-  if (!text) throw new Error("OpenAI a renvoyé une réponse vide.");
+  if (!text) throw new Error("empty_response");
   return text;
 }
 
@@ -72,8 +73,7 @@ export async function streamOpenAiChat(opts: {
         }
         controller.close();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Erreur OpenAI";
-        controller.enqueue(encoder.encode(`\n\n[Erreur Okapi] ${msg}`));
+        controller.enqueue(encoder.encode(`\n\n${friendlyLlmError(err)}`));
         controller.close();
       }
     },
@@ -83,7 +83,7 @@ export async function streamOpenAiChat(opts: {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-cache",
-      "X-Okapi-Provider": "openai",
+      "X-Okapi-Provider": "okapi",
     },
   });
 }

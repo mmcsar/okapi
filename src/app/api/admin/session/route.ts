@@ -5,7 +5,8 @@ const COOKIE = "okapi_admin_session";
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { code?: string } | null;
-  const expected = process.env.OKAPI_ADMIN_CODE;
+  const expected = process.env.OKAPI_ADMIN_CODE?.trim();
+  const provided = body?.code?.trim();
 
   if (!expected) {
     return NextResponse.json(
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!body?.code || body.code !== expected) {
+  if (!provided || provided !== expected) {
     return NextResponse.json({ ok: false, error: "Code incorrect." }, { status: 401 });
   }
 

@@ -1,3 +1,4 @@
+import { friendlyConfigError } from "@/lib/llm-errors";
 import { openAiConfigured } from "@/lib/openai";
 import { openRouterConfigured } from "@/lib/openrouter";
 
@@ -20,26 +21,13 @@ export function pickLlmProvider(): LlmProvider | null {
     return process.env.GEMINI_API_KEY?.trim() ? "gemini" : null;
   }
 
-  // Auto (no LLM_PROVIDER): OpenAI → OpenRouter → Claude. Gemini only if forced.
   if (openAiConfigured()) return "openai";
   if (openRouterConfigured()) return "openrouter";
   if (process.env.ANTHROPIC_API_KEY?.trim()) return "claude";
   return null;
 }
 
+/** User-facing — never expose env var names or providers. */
 export function missingLlmMessage() {
-  const forced = process.env.LLM_PROVIDER?.trim().toLowerCase();
-  if (forced === "openai") {
-    return "LLM_PROVIDER=openai mais OPENAI_API_KEY est vide. Ajoute la clé sur Vercel (ou .env.local) puis redeploy / redémarre.";
-  }
-  if (forced === "openrouter") {
-    return "LLM_PROVIDER=openrouter mais OPENROUTER_API_KEY est vide.";
-  }
-  if (forced === "claude") {
-    return "LLM_PROVIDER=claude mais ANTHROPIC_API_KEY est vide.";
-  }
-  if (forced === "gemini") {
-    return "LLM_PROVIDER=gemini mais GEMINI_API_KEY est vide.";
-  }
-  return "Aucune clé LLM. Sur Vercel / .env.local : OPENAI_API_KEY + LLM_PROVIDER=openai.";
+  return friendlyConfigError();
 }

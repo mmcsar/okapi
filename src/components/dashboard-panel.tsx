@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { UserMenu } from "@/components/user-menu";
-import { SupabaseStatus } from "@/components/supabase-status";
 
 const stats = [
   { label: "Projets", value: "12", hint: "+3 cette semaine" },
@@ -136,7 +135,7 @@ export function DashboardPanel({
                   {greeting}, Christian
                 </h1>
                 <p className="mt-1 text-sm text-okapi-ink/55 sm:text-base">
-                  Voici ton tableau de bord Okapi — projets, agents et activité RDC.
+                  Tableau de bord Okapi — plateforme IA de MMC SARL.
                 </p>
               </div>
             </div>
@@ -250,7 +249,16 @@ export function DashboardPanel({
                 </div>
               </div>
 
-              <SupabaseStatus />
+              <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
+                <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+                  Conseil du jour
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-okapi-ink/65">
+                  Décris ton idée clairement à l’agent — secteur, public et
+                  une action principale. Okapi construit ensuite le premier
+                  prototype.
+                </p>
+              </div>
 
               <div className="rounded-[28px] border border-okapi-amber/20 bg-okapi-amber/5 p-5">
                 <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">

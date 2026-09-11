@@ -17,7 +17,9 @@ import {
   type OkapiLangCode,
 } from "@/lib/i18n";
 import { wantsAppBuild } from "@/lib/intent";
+import { resolveGenerateMode } from "@/lib/fullstack";
 import type { OkapiProject } from "@/lib/supabase";
+import { WorkspacePanel } from "@/components/workspace-panel";
 
 type HomeDashboardProps = {
   section: string;
@@ -49,7 +51,11 @@ export function HomeDashboard({
   >([]);
   const [sending, setSending] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewSql, setPreviewSql] = useState<string | null>(null);
+  const [previewApi, setPreviewApi] = useState<string | null>(null);
+  const [previewReadme, setPreviewReadme] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState("Preview");
+  const [workspaceFocusKey, setWorkspaceFocusKey] = useState(0);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [device, setDevice] = useState<"mobile" | "desktop">("mobile");
   // Stable on SSR + first paint to avoid hydration mismatch (Date differs server/client).
@@ -128,6 +134,9 @@ export function HomeDashboard({
     if (initialProject) {
       setSector(initialProject.sector || "Général");
       setPreviewHtml(initialProject.html || null);
+      setPreviewSql(null);
+      setPreviewApi(null);
+      setPreviewReadme(null);
       setPreviewTitle(initialProject.title || "Preview");
       setProjectId(initialProject.id);
       projectIdRef.current = initialProject.id;
@@ -145,6 +154,9 @@ export function HomeDashboard({
     } else {
       setSector("Général");
       setPreviewHtml(null);
+      setPreviewSql(null);
+      setPreviewApi(null);
+      setPreviewReadme(null);
       setPreviewTitle("Preview");
       setProjectId(null);
       projectIdRef.current = null;
@@ -223,6 +235,44 @@ export function HomeDashboard({
     ]);
   }
 
+  function exportSql() {
+    if (!previewSql) return;
+    downloadTextFile(
+      previewSql,
+      `${slugifyFilename(previewTitle)}-schema.sql`,
+    );
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `Schéma base téléchargé : ${slugifyFilename(previewTitle)}-schema.sql`,
+      },
+    ]);
+  }
+
+  function exportApi() {
+    if (!previewApi) return;
+    downloadTextFile(
+      previewApi,
+      `${slugifyFilename(previewTitle)}-api.ts`,
+    );
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `Routes API téléchargées : ${slugifyFilename(previewTitle)}-api.ts`,
+      },
+    ]);
+  }
+
+  function exportReadme() {
+    if (!previewReadme) return;
+    downloadTextFile(
+      previewReadme,
+      `${slugifyFilename(previewTitle)}-README.md`,
+    );
+  }
+
   async function shareProject() {
     if (!previewHtml) return;
     if (!user) {
@@ -297,6 +347,7 @@ export function HomeDashboard({
     setLanguage(activeLang);
     const build =
       !imagePayload && wantsAppBuild(trimmed, Boolean(previewHtml));
+    const mode = build ? resolveGenerateMode(trimmed) : null;
     const historyForChat = messages
       .filter((m) => m.content?.trim())
       .slice(-12)
@@ -318,9 +369,13 @@ export function HomeDashboard({
       {
         role: "assistant",
         content: build
-          ? previewHtml
-            ? "Mise à jour de la preview…"
-            : "Génération de la preview…"
+          ? mode === "fullstack"
+            ? previewHtml
+              ? "Mise à jour fullstack (UI + base)…"
+              : "Génération fullstack (UI + base)…"
+            : previewHtml
+              ? "Mise à jour de la preview…"
+              : "Génération de la preview…"
           : "Okapi réfléchit…",
       },
     ]);
@@ -380,8 +435,21 @@ export function HomeDashboard({
         if (!answer.trim()) {
           throw new Error("Réponse vide.");
         }
-        const finalAnswer = answer.trim();
+        let finalAnswer = answer.trim();
+        if (
+          /\[Erreur Okapi\]|no credits|platform\.openai|OPENAI_API_KEY|insufficient_quota|429 You/i.test(
+            finalAnswer,
+          )
+        ) {
+          finalAnswer =
+            "Okapi est temporairement indisponible. Recharge la page et réessaie dans quelques minutes.";
+        }
         setAssistant(finalAnswer);
+        setStatus(
+          /indisponible|saturé|recharge/i.test(finalAnswer)
+            ? finalAnswer
+            : "Prêt",
+        );
         if (voiceOutRef.current) speak(finalAnswer);
         return;
       }
@@ -393,7 +461,10 @@ export function HomeDashboard({
           message: trimmed,
           sector,
           language: activeLang,
+          mode: mode ?? "auto",
           currentHtml: previewHtml ?? undefined,
+          currentSql: previewSql ?? undefined,
+          currentApi: previewApi ?? undefined,
           stream: true,
         }),
       });
@@ -424,8 +495,12 @@ export function HomeDashboard({
             message?: string;
             text?: string;
             html?: string;
+            sql?: string | null;
+            api?: string | null;
+            readme?: string | null;
             title?: string;
             summary?: string;
+            mode?: string;
             error?: string;
           };
 
@@ -441,7 +516,11 @@ export function HomeDashboard({
             const sec = Math.round((Date.now() - started) / 1000);
             const title = event.title || "Preview Okapi";
             setPreviewHtml(event.html);
+            if (event.sql) setPreviewSql(event.sql);
+            if (event.api) setPreviewApi(event.api);
+            if (event.readme) setPreviewReadme(event.readme);
             setPreviewTitle(title);
+            setWorkspaceFocusKey((k) => k + 1);
 
             const saveNote = await persistProject({
               title,
@@ -450,9 +529,18 @@ export function HomeDashboard({
               summary: event.summary,
             });
 
+            const backendBits = [
+              event.sql ? "Schéma SQL" : null,
+              event.api ? "API" : null,
+              event.readme ? "README" : null,
+            ].filter(Boolean);
+
             setAssistant(
               [
                 event.summary ?? "Preview prête.",
+                backendBits.length
+                  ? `· Livrables : ${backendBits.join(" + ")}`
+                  : "",
                 `(${sec}s)`,
                 saveNote
                   ? `· ${saveNote}`
@@ -472,9 +560,16 @@ export function HomeDashboard({
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erreur agent";
-      setStatus(msg);
-      setAssistant(`Je n’ai pas pu répondre : ${msg}`);
+      const raw = err instanceof Error ? err.message : "";
+      const soft =
+        /credits|quota|429|billing|OpenAI|API_KEY|LLM_PROVIDER/i.test(raw) ||
+        !raw
+          ? "Okapi est temporairement indisponible. Recharge la page et réessaie dans quelques minutes."
+          : raw.replace(/^\[Erreur Okapi\]\s*/i, "").startsWith("Okapi")
+            ? raw.replace(/^\[Erreur Okapi\]\s*/i, "")
+            : "Okapi n’a pas pu répondre. Recharge la page et réessaie.";
+      setStatus(soft);
+      setAssistant(soft);
     } finally {
       setSending(false);
     }
@@ -586,6 +681,9 @@ export function HomeDashboard({
                 type="button"
                 onClick={() => {
                   setPreviewHtml(null);
+                  setPreviewSql(null);
+                  setPreviewApi(null);
+                  setPreviewReadme(null);
                   setMessages([]);
                   setStatus(null);
                   stopSpeak();
@@ -643,13 +741,14 @@ export function HomeDashboard({
                   {greeting}, {displayName}
                 </h1>
                 <p className="mt-3 max-w-md text-base text-okapi-ink/55">
-                  Dis à Okapi ce dont tu as besoin — dans n’importe quelle langue.
+                  Okapi, plateforme IA de MMC SARL — dis ce dont tu as besoin,
+                  dans n’importe quelle langue.
                 </p>
               </div>
             ) : (
               <div className="mb-3">
                 <span className="text-[11px] font-semibold text-okapi-ink/40">
-                  Agent Okapi
+                  Okapi · MMC SARL
                 </span>
               </div>
             )}
@@ -875,70 +974,24 @@ export function HomeDashboard({
         </section>
 
         {split ? (
-          <section className="flex min-h-[48vh] flex-1 flex-col bg-[linear-gradient(180deg,rgba(223,230,225,0.85),rgba(232,238,233,0.9))] lg:min-h-0">
-            <div className="flex items-center justify-between gap-2 border-b border-[var(--okapi-stroke)] px-4 py-2.5">
-              <p className="text-xs font-semibold text-okapi-ink/55">Preview live</p>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {previewHtml ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={exportHtml}
-                      className="rounded-xl border border-[var(--okapi-stroke)] bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-okapi-ink/70 hover:bg-white"
-                    >
-                      Export HTML
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void shareProject()}
-                      disabled={shareBusy}
-                      className="rounded-xl bg-okapi-forest px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60"
-                    >
-                      {shareBusy ? "…" : shareUrl ? "Lien prêt" : "Partager"}
-                    </button>
-                  </>
-                ) : null}
-                <p className="text-[11px] text-okapi-ink/35">
-                  {sending ? "En cours…" : device}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-1 items-center justify-center overflow-auto p-4 lg:p-6">
-              {sending && !previewHtml ? (
-                <div
-                  className={`preview-shimmer flex flex-col items-center justify-center rounded-[28px] border border-[var(--okapi-stroke)] ${
-                    device === "mobile"
-                      ? "h-[640px] w-full max-w-[360px]"
-                      : "h-[min(720px,100%)] w-full max-w-4xl"
-                  }`}
-                >
-                  <p className="font-[family-name:var(--font-syne)] text-lg font-bold text-okapi-ink/50">
-                    Okapi construit…
-                  </p>
-                  <p className="mt-2 text-sm text-okapi-ink/35">Quelques secondes…</p>
-                </div>
-              ) : previewHtml ? (
-                <div
-                  className={
-                    device === "mobile"
-                      ? "phone-frame h-[min(720px,100%)] w-full max-w-[360px]"
-                      : "h-full w-full max-w-5xl overflow-hidden rounded-[24px] border border-[var(--okapi-stroke)] bg-white"
-                  }
-                >
-                  <iframe
-                    title={previewTitle}
-                    srcDoc={previewHtml}
-                    sandbox="allow-scripts allow-forms allow-same-origin"
-                    className={`w-full bg-white ${
-                      device === "mobile"
-                        ? "h-[640px] pt-6"
-                        : "h-full min-h-[560px]"
-                    }`}
-                  />
-                </div>
-              ) : null}
-            </div>
-          </section>
+          <WorkspacePanel
+            title={previewTitle}
+            html={previewHtml}
+            sql={previewSql}
+            api={previewApi}
+            readme={previewReadme}
+            sending={sending}
+            device={device}
+            onDeviceChange={setDevice}
+            shareBusy={shareBusy}
+            shareUrl={shareUrl}
+            onShare={() => void shareProject()}
+            onExportHtml={exportHtml}
+            onExportSql={exportSql}
+            onExportApi={exportApi}
+            onExportReadme={exportReadme}
+            focusPreviewKey={workspaceFocusKey}
+          />
         ) : null}
       </div>
     </main>

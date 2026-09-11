@@ -22,7 +22,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error:
-          "Ajoute SUPABASE_SERVICE_ROLE_KEY dans Vercel / .env.local.",
+          "Base Okapi non configurée (clé service manquante).",
         setupRequired: true,
       },
       { status: 503 },
@@ -86,7 +86,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erreur Supabase" },
+      { error: err instanceof Error ? err.message : "Erreur enregistrement" },
       { status: 500 },
     );
   }
@@ -100,7 +100,7 @@ export async function DELETE(_request: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error:
-          "Ajoute SUPABASE_SERVICE_ROLE_KEY dans Vercel / .env.local.",
+          "Base Okapi non configurée (clé service manquante).",
         setupRequired: true,
       },
       { status: 503 },
@@ -117,7 +117,7 @@ export async function DELETE(_request: Request, ctx: Ctx) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Erreur Supabase" },
+      { error: err instanceof Error ? err.message : "Erreur enregistrement" },
       { status: 500 },
     );
   }

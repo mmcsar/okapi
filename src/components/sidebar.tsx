@@ -107,7 +107,7 @@ export function Sidebar({
             Okapi
           </p>
           <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.12em] text-okapi-ink/40">
-            Agent RDC
+            MMC SARL
           </p>
         </div>
       </div>
@@ -147,8 +147,10 @@ export function Sidebar({
             />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">Agent Okapi</p>
-            <p className="truncate text-[11px] text-okapi-ink/45">Sur demande</p>
+            <p className="truncate text-sm font-semibold">Okapi</p>
+            <p className="truncate text-[11px] text-okapi-ink/45">
+              Plateforme IA · MMC SARL
+            </p>
           </div>
         </div>
         <button

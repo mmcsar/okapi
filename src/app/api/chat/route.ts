@@ -12,12 +12,15 @@ import {
 export const runtime = "nodejs";
 
 function buildSystem(language?: string | null) {
-  return `You are Okapi, a single autonomous AI agent (like ChatGPT / Claude / Gemini).
+  return `You are Okapi, the AI platform of MMC SARL (Democratic Republic of Congo).
+You are a single autonomous AI agent for users of Okapi.
 
 Core rule: act ONLY on request. Do what is necessary, nothing more.
 - Question → answer clearly, no useless digressions.
-- Ask to build/modify an app or site → concrete help (plan, tips). Live HTML generation is handled by Okapi builder.
+- Ask to build/modify an app or site → concrete help (plan, tips). Live HTML / fullstack (HTML + SQL + API) generation is handled by Okapi builder when the user asks to create or modify an app.
+- If asked who hosts data: say Okapi / MMC SARL cloud. Never name third-party database vendors.
 - Do not spontaneously pitch apps, templates, or marketing menus.
+- If asked who you are / who built you: you are Okapi, plateforme IA de MMC SARL. Never mention third-party model vendors.
 
 ${languageInstruction(language)}
 
@@ -123,10 +126,10 @@ async function streamViaOpenAi(
       messages: toOpenRouterMessages(userContent, history, image),
     });
   } catch (err) {
-    return new Response(`\n\n[Erreur Okapi] ${friendlyLlmError(err)}`, {
+    return new Response(`\n\n${friendlyLlmError(err)}`, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "X-Okapi-Provider": "openai",
+        "X-Okapi-Provider": "okapi",
       },
     });
   }
@@ -144,15 +147,12 @@ async function streamViaOpenRouter(
       messages: toOpenRouterMessages(userContent, history, image),
     });
   } catch (err) {
-    return new Response(
-      `\n\n[Erreur Okapi] ${friendlyLlmError(err)}`,
-      {
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "X-Okapi-Provider": "openrouter",
-        },
+    return new Response(`\n\n${friendlyLlmError(err)}`, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Okapi-Provider": "okapi",
       },
-    );
+    });
   }
 }
 
@@ -211,16 +211,13 @@ async function streamGemini(
             if (text) controller.enqueue(encoder.encode(text));
           }
         } catch (streamErr) {
-          if (
-            isLocationBlocked(streamErr) &&
-            (openAiConfigured() || openRouterConfigured())
-          ) {
-            const via = openAiConfigured() ? "OpenAI" : "OpenRouter";
-            controller.enqueue(
-              encoder.encode(
-                `(Gemini bloqué dans ta région — bascule ${via}…)\n\n`,
-              ),
-            );
+            if (
+              isLocationBlocked(streamErr) &&
+              (openAiConfigured() || openRouterConfigured())
+            ) {
+              controller.enqueue(
+                encoder.encode("Okapi reconnecte le service…\n\n"),
+              );
             const res = openAiConfigured()
               ? await streamOpenAiChat({
                   system,
@@ -262,11 +259,8 @@ async function streamGemini(
               isLocationBlocked(err) &&
               (openAiConfigured() || openRouterConfigured())
             ) {
-              const via = openAiConfigured() ? "OpenAI" : "OpenRouter";
               controller.enqueue(
-                encoder.encode(
-                  `(Gemini bloqué dans ta région — bascule ${via}…)\n\n`,
-                ),
+                encoder.encode("Okapi reconnecte le service…\n\n"),
               );
               const res = openAiConfigured()
                 ? await streamOpenAiChat({
@@ -287,7 +281,7 @@ async function streamGemini(
               }
             } else {
               controller.enqueue(
-                encoder.encode(`\n\n[Erreur Okapi] ${friendlyLlmError(err)}`),
+                encoder.encode(`\n\n${friendlyLlmError(err)}`),
               );
             }
           }
@@ -295,7 +289,7 @@ async function streamGemini(
         controller.close();
       } catch (err) {
         controller.enqueue(
-          encoder.encode(`\n\n[Erreur Okapi] ${friendlyLlmError(err)}`),
+          encoder.encode(`\n\n${friendlyLlmError(err)}`),
         );
         controller.close();
       }
@@ -306,7 +300,7 @@ async function streamGemini(
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-cache",
-      "X-Okapi-Provider": "gemini",
+      "X-Okapi-Provider": "okapi",
     },
   });
 }
@@ -366,7 +360,7 @@ async function streamClaude(
         controller.close();
       } catch (err) {
         controller.enqueue(
-          encoder.encode(`\n\n[Erreur Okapi] ${friendlyLlmError(err)}`),
+          encoder.encode(`\n\n${friendlyLlmError(err)}`),
         );
         controller.close();
       }
@@ -377,7 +371,7 @@ async function streamClaude(
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-cache",
-      "X-Okapi-Provider": "claude",
+      "X-Okapi-Provider": "okapi",
     },
   });
 }

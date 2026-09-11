@@ -19,7 +19,7 @@ const initialAgents: Agent[] = [
     role: "IA autonome",
     sector: "Tout",
     description:
-      "Répond à toutes les questions (études, business, code, culture…) comme un ChatGPT indépendant.",
+      "Plateforme IA de MMC SARL : répond aux questions et aide à construire sites & apps pour la RDC.",
     active: true,
   },
   {
@@ -27,7 +27,7 @@ const initialAgents: Agent[] = [
     name: "Agent Builder",
     role: "Génération d’apps",
     sector: "Tous",
-    description: "Transforme un prompt en site ou mini-app (UI + preview live).",
+    description: "Transforme un prompt en site ou mini-app (UI + preview). Fullstack : schéma SQL + API sur demande.",
     active: true,
   },
   {
@@ -108,7 +108,7 @@ export function AgentsPanel({ onBack, onStartBuild }: AgentsPanelProps) {
               Agents Okapi
             </h1>
             <p className="mt-0.5 text-sm text-okapi-ink/50">
-              Configure tes agents · {activeCount} actifs · Okapi répond à tout
+              Plateforme IA MMC SARL · {activeCount} actifs
             </p>
           </div>
         </div>

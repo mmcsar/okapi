@@ -1,7 +1,7 @@
 {
-  "name": "Okapi — AI Agent RDC",
+  "name": "Okapi — Plateforme IA de MMC SARL",
   "short_name": "Okapi",
-  "description": "Agent IA pour créer des apps et sites — made for RDC.",
+  "description": "Okapi est la plateforme IA de MMC SARL pour créer des apps et sites — made for RDC.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

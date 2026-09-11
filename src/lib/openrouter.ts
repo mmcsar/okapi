@@ -1,3 +1,5 @@
+import { friendlyLlmError } from "@/lib/llm-errors";
+
 type ChatMessage = {
   role: "system" | "user" | "assistant";
   content:
@@ -37,7 +39,7 @@ export async function openRouterComplete(opts: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
       "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "http://localhost:3000",
-      "X-Title": "Okapi",
+      "X-Title": "Okapi by MMC SARL",
     },
     body: JSON.stringify({
       model: openRouterModel(),
@@ -77,7 +79,7 @@ export async function streamOpenRouterChat(opts: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
       "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "http://localhost:3000",
-      "X-Title": "Okapi",
+      "X-Title": "Okapi by MMC SARL",
     },
     body: JSON.stringify({
       model: openRouterModel(),
@@ -130,8 +132,7 @@ export async function streamOpenRouterChat(opts: {
         }
         controller.close();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Erreur OpenRouter";
-        controller.enqueue(encoder.encode(`\n\n[Erreur Okapi] ${msg}`));
+        controller.enqueue(encoder.encode(`\n\n${friendlyLlmError(err)}`));
         controller.close();
       }
     },
@@ -141,7 +142,7 @@ export async function streamOpenRouterChat(opts: {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-cache",
-      "X-Okapi-Provider": "openrouter",
+      "X-Okapi-Provider": "okapi",
     },
   });
 }
