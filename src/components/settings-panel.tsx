@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { GeminiStatus } from "@/components/gemini-status";
 import { HeygenStatus } from "@/components/heygen-status";
+import { PwaInstallButton } from "@/components/pwa-install-button";
 import { SupabaseStatus } from "@/components/supabase-status";
 import {
   getStoredLanguage,
@@ -142,6 +143,18 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                   className="w-full rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/80 px-4 py-2.5 text-sm text-okapi-ink/70 outline-none"
                 />
               </label>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/70 p-5 backdrop-blur-md">
+            <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
+              Application (PWA)
+            </h2>
+            <p className="mt-1 text-sm text-okapi-ink/45">
+              Installe Okapi sur ton téléphone comme une app, sans Play Store.
+            </p>
+            <div className="mt-4">
+              <PwaInstallButton />
             </div>
           </section>
 

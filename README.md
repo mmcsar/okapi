@@ -34,6 +34,13 @@ npm run dev
 
 Exécuter aussi les migrations SQL dans `supabase/migrations/` via l’éditeur SQL Supabase.
 
+## PWA
+
+Okapi est installable comme une app web (PWA) :
+- Manifest + service worker (`public/manifest.webmanifest`, `public/sw.js`)
+- Sur mobile : menu navigateur → **Ajouter à l’écran d’accueil**
+- Ou **Paramètres → Application (PWA)** sur le site déployé (HTTPS)
+
 ## Déploiement (Vercel)
 
 1. Importer ce repo sur [Vercel](https://vercel.com/new)
