@@ -21,7 +21,7 @@ Beaucoup d’outils IA sont pensés pour d’autres marchés. Okapi cible le con
 
 - **Next.js** (App Router) + React + Tailwind
 - **Supabase** : authentification, stockage des projets, partage public
-- **LLM** : OpenAI (recommandé en RDC), avec options Gemini / OpenRouter / Claude
+- **LLM** : OpenAI GPT-5 (recommandé en RDC), avec options Gemini / OpenRouter / Claude
 
 ## Lancer en local
 

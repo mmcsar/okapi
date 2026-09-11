@@ -8,7 +8,7 @@ export function openAiConfigured() {
 }
 
 export function openAiModel() {
-  return process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini";
+  return process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
 }
 
 function client() {
