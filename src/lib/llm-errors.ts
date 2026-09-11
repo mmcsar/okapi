@@ -13,10 +13,10 @@ export function isRetryableLlm(err: unknown) {
 export function friendlyLlmError(err: unknown) {
   if (isLocationBlocked(err)) {
     return (
-      "Gemini bloque ta région (souvent la RDC). " +
-      "Solution : ajoute OPENAI_API_KEY dans .env.local " +
-      "puis mets LLM_PROVIDER=openai et redémarre. " +
-      "Sinon OPENROUTER_API_KEY, VPN, ou ANTHROPIC_API_KEY."
+      "Gemini bloque ta région (RDC). Okapi doit utiliser OpenAI : " +
+      "vérifie OPENAI_API_KEY + LLM_PROVIDER=openai sur Vercel, " +
+      "supprime ou vide GEMINI_API_KEY, puis Redeploy. " +
+      "En local : même chose dans .env.local + redémarrer npm run dev."
     );
   }
   const msg = err instanceof Error ? err.message : String(err);

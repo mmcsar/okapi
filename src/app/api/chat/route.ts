@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import Anthropic from "@anthropic-ai/sdk";
 import { languageInstruction } from "@/lib/i18n";
 import { friendlyLlmError, isLocationBlocked } from "@/lib/llm-errors";
+import { missingLlmMessage, pickLlmProvider } from "@/lib/llm-provider";
 import { openAiConfigured, streamOpenAiChat } from "@/lib/openai";
 import {
   openRouterConfigured,
@@ -34,29 +35,10 @@ type ChatBody = {
 
 type ImagePart = { mimeType: string; base64: string };
 
-function pickProvider(): "openai" | "openrouter" | "gemini" | "claude" | null {
-  const forced = process.env.LLM_PROVIDER?.toLowerCase();
-  if (forced === "openai" && openAiConfigured()) return "openai";
-  if (forced === "openrouter" && openRouterConfigured()) return "openrouter";
-  if (forced === "claude" && process.env.ANTHROPIC_API_KEY?.trim()) return "claude";
-  if (forced === "gemini" && process.env.GEMINI_API_KEY?.trim()) return "gemini";
-  if (openAiConfigured()) return "openai";
-  if (openRouterConfigured()) return "openrouter";
-  if (process.env.GEMINI_API_KEY?.trim()) return "gemini";
-  if (process.env.ANTHROPIC_API_KEY?.trim()) return "claude";
-  return null;
-}
-
 export async function POST(request: Request) {
-  const provider = pickProvider();
+  const provider = pickLlmProvider();
   if (!provider) {
-    return Response.json(
-      {
-        error:
-          "Aucune clé LLM. Ajoute OPENAI_API_KEY (recommandé en RDC) dans .env.local.",
-      },
-      { status: 500 },
-    );
+    return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
   const body = (await request.json().catch(() => null)) as ChatBody | null;

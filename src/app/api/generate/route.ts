@@ -5,6 +5,7 @@ import {
   isLocationBlocked,
   isRetryableLlm,
 } from "@/lib/llm-errors";
+import { missingLlmMessage, pickLlmProvider } from "@/lib/llm-provider";
 import { openAiComplete, openAiConfigured } from "@/lib/openai";
 import { openRouterComplete, openRouterConfigured } from "@/lib/openrouter";
 
@@ -65,14 +66,8 @@ Generate a compact app quickly:
 ${message}`;
 }
 
-function preferProvider(): "openai" | "openrouter" | "gemini" {
-  const forced = process.env.LLM_PROVIDER?.toLowerCase();
-  if (forced === "openai" && openAiConfigured()) return "openai";
-  if (forced === "openrouter" && openRouterConfigured()) return "openrouter";
-  if (forced === "gemini" && process.env.GEMINI_API_KEY?.trim()) return "gemini";
-  if (openAiConfigured()) return "openai";
-  if (openRouterConfigured()) return "openrouter";
-  return "gemini";
+function preferProvider() {
+  return pickLlmProvider();
 }
 
 async function generateOnce(
@@ -127,6 +122,9 @@ async function generateWithFallback(
   onStatus?: (msg: string) => void,
 ) {
   const provider = preferProvider();
+  if (!provider) {
+    throw new Error(missingLlmMessage());
+  }
 
   if (provider === "openai") {
     onStatus?.("OpenAI génère…");
@@ -142,23 +140,15 @@ async function generateWithFallback(
     return text;
   }
 
+  if (provider === "claude") {
+    throw new Error(
+      "Claude n’est pas branché sur /api/generate. Utilise OPENAI_API_KEY + LLM_PROVIDER=openai.",
+    );
+  }
+
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) {
-    if (openAiConfigured()) {
-      onStatus?.("OpenAI génère…");
-      const text = await openAiComplete({ system, user: prompt });
-      onChunk?.(text);
-      return text;
-    }
-    if (openRouterConfigured()) {
-      onStatus?.("OpenRouter génère…");
-      const text = await openRouterComplete({ system, user: prompt });
-      onChunk?.(text);
-      return text;
-    }
-    throw new Error(
-      "Aucune clé LLM (OPENAI_API_KEY, OPENROUTER_API_KEY ou GEMINI_API_KEY).",
-    );
+    throw new Error(missingLlmMessage());
   }
 
   const model =
@@ -195,18 +185,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "Message vide." }, { status: 400 });
   }
 
-  if (
-    !openAiConfigured() &&
-    !openRouterConfigured() &&
-    !process.env.GEMINI_API_KEY?.trim()
-  ) {
-    return Response.json(
-      {
-        error:
-          "Ajoute OPENAI_API_KEY (recommandé en RDC) dans .env.local",
-      },
-      { status: 500 },
-    );
+  if (!pickLlmProvider()) {
+    return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
   const sector = body?.sector?.trim() || "Site web";
