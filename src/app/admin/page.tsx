@@ -3,12 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
+import { AdminClientsDashboard } from "@/components/admin-clients-dashboard";
 import { SupabaseStatus } from "@/components/supabase-status";
 
 const stats = [
-  { label: "Utilisateurs", value: "248", hint: "+18 cette semaine" },
+  { label: "Utilisateurs app", value: "248", hint: "+18 cette semaine" },
   { label: "Projets générés", value: "1 024", hint: "87 aujourd’hui" },
-  { label: "Agents actifs", value: "4", hint: "sur 6 templates" },
+  { label: "Agents actifs", value: "1", hint: "agent unique Okapi" },
   { label: "Erreurs API", value: "3", hint: "24 h" },
 ] as const;
 
@@ -22,15 +23,18 @@ const users = [
 const systemRows = [
   { name: "App publique /", status: "OK" },
   { name: "Supabase", status: "OK" },
-  { name: "LLM", status: "Non branché" },
-  { name: "HeyGen", status: "Optionnel" },
+  { name: "LLM (OpenAI)", status: "Config Vercel" },
+  { name: "PWA", status: "OK" },
 ] as const;
+
+type AdminTab = "clients" | "system";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<AdminTab>("clients");
 
   useEffect(() => {
     void (async () => {
@@ -83,7 +87,7 @@ export default function AdminPage() {
           onSubmit={onLogin}
           className="w-full max-w-md rounded-[28px] border border-[var(--okapi-stroke)] bg-white/80 p-8 backdrop-blur-xl"
         >
-          <div className="mx-auto relative mb-5 h-14 w-14 overflow-hidden rounded-2xl">
+          <div className="relative mx-auto mb-5 h-14 w-14 overflow-hidden rounded-2xl">
             <Image
               src="/okapi-logo.png"
               alt="Okapi"
@@ -97,7 +101,7 @@ export default function AdminPage() {
             Admin Okapi
           </h1>
           <p className="mt-2 text-sm text-okapi-ink/55">
-            Zone privée — les utilisateurs de l’app n’y ont pas accès.
+            Zone privée — gestion clients & système. Pas dans le menu user.
           </p>
           <label className="mt-6 block text-left">
             <span className="mb-1.5 block text-xs font-medium text-okapi-ink/50">
@@ -112,7 +116,9 @@ export default function AdminPage() {
               autoComplete="current-password"
             />
           </label>
-          {error ? <p className="mt-3 text-sm text-okapi-amber-deep">{error}</p> : null}
+          {error ? (
+            <p className="mt-3 text-sm text-okapi-amber-deep">{error}</p>
+          ) : null}
           <button
             type="submit"
             disabled={loading}
@@ -150,7 +156,7 @@ export default function AdminPage() {
                 Privé · Admin
               </p>
               <h1 className="font-[family-name:var(--font-syne)] text-xl font-bold">
-                Tableau de bord Okapi
+                Okapi Admin
               </h1>
             </div>
           </div>
@@ -171,85 +177,113 @@ export default function AdminPage() {
           </div>
         </header>
 
+        <div className="flex gap-1 border-b border-[var(--okapi-stroke)] px-5 pt-3">
+          {(
+            [
+              { id: "clients" as const, label: "Clients" },
+              { id: "system" as const, label: "Système" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`rounded-t-xl px-4 py-2.5 text-sm font-semibold transition ${
+                tab === t.id
+                  ? "bg-white/80 text-okapi-forest"
+                  : "text-okapi-ink/45 hover:text-okapi-ink"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-6">
-          <p className="mb-5 text-sm text-okapi-ink/55">
-            Vue interne équipe Okapi — non visible dans le menu utilisateur.
-          </p>
+          {tab === "clients" ? (
+            <AdminClientsDashboard />
+          ) : (
+            <>
+              <p className="mb-5 text-sm text-okapi-ink/55">
+                Santé produit & utilisateurs de l’app publique.
+              </p>
 
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {stats.map((stat) => (
-              <article
-                key={stat.label}
-                className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5"
-              >
-                <p className="text-xs uppercase tracking-[0.12em] text-okapi-ink/40">
-                  {stat.label}
-                </p>
-                <p className="mt-2 font-[family-name:var(--font-syne)] text-3xl font-bold">
-                  {stat.value}
-                </p>
-                <p className="mt-1 text-xs text-okapi-ink/45">{stat.hint}</p>
-              </article>
-            ))}
-          </section>
-
-          <section className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_1fr]">
-            <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
-              <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
-                Utilisateurs récents
-              </h2>
-              <ul className="mt-4 space-y-2">
-                {users.map((user) => (
-                  <li
-                    key={user.name}
-                    className="flex items-center justify-between rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/50 px-4 py-3"
+              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {stats.map((stat) => (
+                  <article
+                    key={stat.label}
+                    className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5"
                   >
-                    <div>
-                      <p className="text-sm font-semibold">{user.name}</p>
-                      <p className="text-xs text-okapi-ink/45">
-                        {user.city} · {user.projects} projets
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-okapi-forest/10 px-2.5 py-1 text-[10px] font-semibold uppercase text-okapi-forest">
-                      {user.plan}
-                    </span>
-                  </li>
+                    <p className="text-xs uppercase tracking-[0.12em] text-okapi-ink/40">
+                      {stat.label}
+                    </p>
+                    <p className="mt-2 font-[family-name:var(--font-syne)] text-3xl font-bold">
+                      {stat.value}
+                    </p>
+                    <p className="mt-1 text-xs text-okapi-ink/45">{stat.hint}</p>
+                  </article>
                 ))}
-              </ul>
-            </div>
+              </section>
 
-            <div className="flex flex-col gap-5">
-              <SupabaseStatus />
-              <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
-                <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
-                  Système
-                </h2>
-                <ul className="mt-3 space-y-2">
-                  {systemRows.map((row) => (
-                    <li
-                      key={row.name}
-                      className="flex items-center justify-between text-sm"
-                    >
-                      <span className="text-okapi-ink/65">{row.name}</span>
-                      <span
-                        className={
-                          row.status === "OK"
-                            ? "font-medium text-okapi-forest"
-                            : "font-medium text-okapi-amber-deep"
-                        }
+              <section className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_1fr]">
+                <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
+                  <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+                    Utilisateurs app récents
+                  </h2>
+                  <ul className="mt-4 space-y-2">
+                    {users.map((user) => (
+                      <li
+                        key={user.name}
+                        className="flex items-center justify-between rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/50 px-4 py-3"
                       >
-                        {row.status}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </section>
+                        <div>
+                          <p className="text-sm font-semibold">{user.name}</p>
+                          <p className="text-xs text-okapi-ink/45">
+                            {user.city} · {user.projects} projets
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-okapi-forest/10 px-2.5 py-1 text-[10px] font-semibold uppercase text-okapi-forest">
+                          {user.plan}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="flex flex-col gap-5">
+                  <SupabaseStatus />
+                  <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
+                    <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+                      Système
+                    </h2>
+                    <ul className="mt-3 space-y-2">
+                      {systemRows.map((row) => (
+                        <li
+                          key={row.name}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span className="text-okapi-ink/65">{row.name}</span>
+                          <span
+                            className={
+                              row.status === "OK"
+                                ? "font-medium text-okapi-forest"
+                                : "font-medium text-okapi-amber-deep"
+                            }
+                          >
+                            {row.status}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
 
           <p className="mt-6 text-[11px] text-okapi-ink/40">
-            Accès protégé par code serveur (`OKAPI_ADMIN_CODE`). Les users de
-            l’app publique ne voient pas ce menu.
+            Accès protégé par `OKAPI_ADMIN_CODE`. Invisible dans le menu
+            utilisateur.
           </p>
         </div>
       </div>
