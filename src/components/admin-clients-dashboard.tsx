@@ -1,12 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CLIENT_STAGES,
   formatFrDate,
   formatUsd,
   SEED_CLIENTS,
-  TEAM_LOAD,
   type AdminClient,
   type ClientStage,
 } from "@/data/admin-clients";
@@ -18,10 +17,20 @@ const STAGE_LABEL: Record<ClientStage, string> = {
   active: "Actif",
 };
 
+const STAGE_ORDER: ClientStage[] = [
+  "prospect",
+  "qualified",
+  "proposal",
+  "active",
+];
+
 export function AdminClientsDashboard() {
-  const [clients, setClients] = useState<AdminClient[]>(SEED_CLIENTS);
+  const [clients, setClients] = useState<AdminClient[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: "",
     company: "",
@@ -31,6 +40,35 @@ export function AdminClientsDashboard() {
     nextAction: "Premier contact",
     deadline: "",
   });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setSetupError(null);
+    try {
+      const res = await fetch("/api/admin/clients");
+      const data = (await res.json()) as {
+        ok?: boolean;
+        clients?: AdminClient[];
+        error?: string;
+        setupRequired?: boolean;
+      };
+      if (!res.ok || !data.ok) {
+        setSetupError(data.error ?? "Impossible de charger les clients.");
+        setClients(SEED_CLIENTS);
+        return;
+      }
+      setClients(data.clients ?? []);
+    } catch {
+      setSetupError("Erreur réseau — fallback démo local.");
+      setClients(SEED_CLIENTS);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -44,6 +82,23 @@ export function AdminClientsDashboard() {
     );
   }, [clients, query]);
 
+  const teamLoad = useMemo(() => {
+    const map = new Map<string, { total: number; n: number }>();
+    for (const c of clients) {
+      const cur = map.get(c.owner) ?? { total: 0, n: 0 };
+      cur.total += c.workloadPct;
+      cur.n += 1;
+      map.set(c.owner, cur);
+    }
+    return [...map.entries()]
+      .map(([name, v]) => ({
+        name,
+        pct: Math.round(v.total / Math.max(v.n, 1)),
+      }))
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 6);
+  }, [clients]);
+
   const pipelineValue = clients.reduce((s, c) => s + c.valueUsd, 0);
   const activeValue = clients
     .filter((c) => c.stage === "active")
@@ -51,9 +106,7 @@ export function AdminClientsDashboard() {
   const remaining = Math.max(pipelineValue - activeValue, 0);
   const target = Math.round(pipelineValue * 0.75);
   const overTargetPct =
-    target > 0
-      ? Math.max(0, ((activeValue - target) / target) * 100)
-      : 0;
+    target > 0 ? Math.max(0, ((activeValue - target) / target) * 100) : 0;
 
   const stageCounts = CLIENT_STAGES.map((s) => ({
     ...s,
@@ -74,7 +127,7 @@ export function AdminClientsDashboard() {
     .sort((a, b) => a.deadline.localeCompare(b.deadline))
     .slice(0, 6);
 
-  const maxBar = Math.max(...TEAM_LOAD.map((t) => t.pct), 1);
+  const maxBar = Math.max(...teamLoad.map((t) => t.pct), 1);
   const budgetBars = [
     { label: "Pipeline total", value: pipelineValue, h: 100 },
     {
@@ -89,52 +142,81 @@ export function AdminClientsDashboard() {
     },
   ];
 
-  function addClient() {
-    if (!form.name.trim() || !form.company.trim()) return;
-    const id = `c${Date.now()}`;
-    const deadline =
-      form.deadline ||
-      new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    const next: AdminClient = {
-      id,
-      name: form.name.trim(),
-      company: form.company.trim(),
-      city: form.city.trim() || "Kinshasa",
-      stage: "prospect",
-      owner: form.owner.trim() || "Christian",
-      valueUsd: Number(form.valueUsd) || 0,
-      nextAction: form.nextAction.trim() || "Premier contact",
-      deadline,
-      workloadPct: 20,
-      overdueDays: 0,
-    };
-    setClients((prev) => [next, ...prev]);
-    setShowForm(false);
-    setForm({
-      name: "",
-      company: "",
-      city: "Kinshasa",
-      owner: "Christian",
-      valueUsd: "2000",
-      nextAction: "Premier contact",
-      deadline: "",
-    });
+  async function addClient() {
+    if (!form.name.trim() || !form.company.trim() || saving) return;
+    setSaving(true);
+    try {
+      const deadline =
+        form.deadline ||
+        new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+      const res = await fetch("/api/admin/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          company: form.company.trim(),
+          city: form.city.trim() || "Kinshasa",
+          owner: form.owner.trim() || "Christian",
+          valueUsd: Number(form.valueUsd) || 0,
+          nextAction: form.nextAction.trim() || "Premier contact",
+          deadline,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        client?: AdminClient;
+        error?: string;
+      };
+      if (!res.ok || !data.client) {
+        setSetupError(data.error ?? "Échec création client.");
+        return;
+      }
+      setClients((prev) => [data.client!, ...prev]);
+      setShowForm(false);
+      setForm({
+        name: "",
+        company: "",
+        city: "Kinshasa",
+        owner: "Christian",
+        valueUsd: "2000",
+        nextAction: "Premier contact",
+        deadline: "",
+      });
+      setSetupError(null);
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function bumpStage(id: string) {
-    const order: ClientStage[] = [
-      "prospect",
-      "qualified",
-      "proposal",
-      "active",
-    ];
+  async function bumpStage(id: string) {
+    const current = clients.find((c) => c.id === id);
+    if (!current || current.stage === "active") return;
+    const i = STAGE_ORDER.indexOf(current.stage);
+    const next = STAGE_ORDER[Math.min(i + 1, STAGE_ORDER.length - 1)];
+
     setClients((prev) =>
-      prev.map((c) => {
-        if (c.id !== id) return c;
-        const i = order.indexOf(c.stage);
-        const next = order[Math.min(i + 1, order.length - 1)];
-        return { ...c, stage: next, overdueDays: 0 };
-      }),
+      prev.map((c) =>
+        c.id === id ? { ...c, stage: next, overdueDays: 0 } : c,
+      ),
+    );
+
+    const res = await fetch(`/api/admin/clients/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stage: next, overdueDays: 0 }),
+    });
+    const data = (await res.json()) as {
+      ok?: boolean;
+      client?: AdminClient;
+      error?: string;
+    };
+    if (!res.ok || !data.client) {
+      setSetupError(data.error ?? "Échec mise à jour.");
+      void load();
+      return;
+    }
+    setClients((prev) =>
+      prev.map((c) => (c.id === id ? data.client! : c)),
     );
   }
 
@@ -146,10 +228,18 @@ export function AdminClientsDashboard() {
             Tableau de bord clients
           </h2>
           <p className="mt-1 text-sm text-okapi-ink/50">
-            Pipeline, relances et charge équipe — espace admin Okapi
+            Données Supabase · pipeline, relances, charge équipe
+            {loading ? " · chargement…" : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-2xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-sm font-medium"
+          >
+            Rafraîchir
+          </button>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -165,6 +255,16 @@ export function AdminClientsDashboard() {
           </button>
         </div>
       </div>
+
+      {setupError ? (
+        <div className="rounded-2xl border border-okapi-amber/30 bg-okapi-amber/10 px-4 py-3 text-sm text-okapi-ink/80">
+          {setupError}
+          <p className="mt-1 text-xs text-okapi-ink/50">
+            SQL : <code>supabase/migrations/20260309_admin_clients.sql</code> ·
+            Env : <code>SUPABASE_SERVICE_ROLE_KEY</code>
+          </p>
+        </div>
+      ) : null}
 
       {showForm ? (
         <div className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/80 p-4">
@@ -197,15 +297,15 @@ export function AdminClientsDashboard() {
           </div>
           <button
             type="button"
-            onClick={addClient}
-            className="mt-3 rounded-2xl bg-okapi-forest px-4 py-2 text-sm font-semibold text-white"
+            onClick={() => void addClient()}
+            disabled={saving}
+            className="mt-3 rounded-2xl bg-okapi-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
           >
-            Enregistrer le client
+            {saving ? "Enregistrement…" : "Enregistrer dans Supabase"}
           </button>
         </div>
       ) : null}
 
-      {/* Pipeline + objectif */}
       <section className="grid gap-4 lg:grid-cols-[1fr_220px]">
         <div className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -265,9 +365,9 @@ export function AdminClientsDashboard() {
           </p>
           <div>
             <p className="font-[family-name:var(--font-syne)] text-4xl font-bold">
-              107 j
+              {clients.length}
             </p>
-            <p className="mt-1 text-sm text-white/80">jusqu’au 13 déc. 2026</p>
+            <p className="mt-1 text-sm text-white/80">clients en base</p>
             <p className="mt-3 text-xs text-okapi-amber">
               Cible : {formatUsd(target)} CA actifs
             </p>
@@ -275,7 +375,6 @@ export function AdminClientsDashboard() {
         </div>
       </section>
 
-      {/* Budget + overdue */}
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5">
           <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
@@ -284,7 +383,10 @@ export function AdminClientsDashboard() {
           <div className="mt-4 flex items-end gap-6">
             <div className="flex h-36 items-end gap-3">
               {budgetBars.map((b) => (
-                <div key={b.label} className="flex w-12 flex-col items-center gap-2">
+                <div
+                  key={b.label}
+                  className="flex w-12 flex-col items-center gap-2"
+                >
                   <div
                     className="w-full rounded-t-md bg-okapi-leaf/80"
                     style={{ height: `${Math.max(b.h, 8)}%` }}
@@ -313,9 +415,6 @@ export function AdminClientsDashboard() {
               )}
             </div>
           </div>
-          <p className="mt-3 text-[11px] text-okapi-ink/40">
-            Barres : total · actifs · objectif
-          </p>
         </div>
 
         <div className="overflow-hidden rounded-3xl border border-[var(--okapi-stroke)] bg-white/75">
@@ -371,28 +470,34 @@ export function AdminClientsDashboard() {
         </div>
       </section>
 
-      {/* Workload + upcoming */}
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5">
           <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
             Charge équipe
           </h3>
-          <div className="mt-5 flex h-40 items-end justify-between gap-2 px-1">
-            {TEAM_LOAD.map((t) => (
-              <div key={t.name} className="flex flex-1 flex-col items-center gap-2">
-                <span className="text-[10px] font-semibold text-okapi-ink/50">
-                  {t.pct}%
-                </span>
+          {teamLoad.length === 0 ? (
+            <p className="mt-6 text-sm text-okapi-ink/40">Aucun client</p>
+          ) : (
+            <div className="mt-5 flex h-40 items-end justify-between gap-2 px-1">
+              {teamLoad.map((t) => (
                 <div
-                  className="w-full max-w-[40px] rounded-t-md bg-okapi-amber"
-                  style={{ height: `${(t.pct / maxBar) * 100}%` }}
-                />
-                <span className="truncate text-[11px] font-medium text-okapi-ink/70">
-                  {t.name}
-                </span>
-              </div>
-            ))}
-          </div>
+                  key={t.name}
+                  className="flex flex-1 flex-col items-center gap-2"
+                >
+                  <span className="text-[10px] font-semibold text-okapi-ink/50">
+                    {t.pct}%
+                  </span>
+                  <div
+                    className="w-full max-w-[40px] rounded-t-md bg-okapi-amber"
+                    style={{ height: `${(t.pct / maxBar) * 100}%` }}
+                  />
+                  <span className="truncate text-[11px] font-medium text-okapi-ink/70">
+                    {t.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="overflow-hidden rounded-3xl border border-[var(--okapi-stroke)] bg-white/75">
@@ -446,7 +551,6 @@ export function AdminClientsDashboard() {
         </div>
       </section>
 
-      {/* Full client list */}
       <section className="overflow-hidden rounded-3xl border border-[var(--okapi-stroke)] bg-white/75">
         <div className="flex items-center justify-between px-5 py-3">
           <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
@@ -489,7 +593,7 @@ export function AdminClientsDashboard() {
                     {c.stage !== "active" ? (
                       <button
                         type="button"
-                        onClick={() => bumpStage(c.id)}
+                        onClick={() => void bumpStage(c.id)}
                         className="rounded-xl border border-[var(--okapi-stroke)] px-2.5 py-1 text-xs font-semibold text-okapi-forest hover:bg-okapi-mist"
                       >
                         Avancer →
