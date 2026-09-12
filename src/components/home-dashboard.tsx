@@ -16,10 +16,17 @@ import {
   speechLocaleFor,
   type OkapiLangCode,
 } from "@/lib/i18n";
-import { wantsAppBuild } from "@/lib/intent";
-import { resolveGenerateMode } from "@/lib/fullstack";
+import { wantsAppBuild, wantsDebug } from "@/lib/intent";
+import { resolveGenerateMode, wantsLargeProject } from "@/lib/fullstack";
+import {
+  getStoredEngine,
+  OKAPI_ENGINES,
+  setStoredEngine,
+  type OkapiEngine,
+} from "@/lib/okapi-engine";
 import type { OkapiProject } from "@/lib/supabase";
 import { WorkspacePanel } from "@/components/workspace-panel";
+import type { StudioFileId } from "@/components/okapi-studio";
 
 type HomeDashboardProps = {
   section: string;
@@ -56,6 +63,9 @@ export function HomeDashboard({
   const [previewReadme, setPreviewReadme] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState("Preview");
   const [workspaceFocusKey, setWorkspaceFocusKey] = useState(0);
+  const [debugArmed, setDebugArmed] = useState(false);
+  const [engine, setEngine] = useState<OkapiEngine>("flash");
+  const [engineOpen, setEngineOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [device, setDevice] = useState<"mobile" | "desktop">("mobile");
   // Stable on SSR + first paint to avoid hydration mismatch (Date differs server/client).
@@ -111,6 +121,10 @@ export function HomeDashboard({
       window.removeEventListener("focus", sync);
       document.removeEventListener("visibilitychange", sync);
     };
+  }, []);
+
+  useEffect(() => {
+    setEngine(getStoredEngine());
   }, []);
 
   useEffect(() => {
@@ -273,6 +287,13 @@ export function HomeDashboard({
     );
   }
 
+  function onChangeArtifact(id: StudioFileId, value: string) {
+    if (id === "app.html") setPreviewHtml(value || null);
+    else if (id === "schema.sql") setPreviewSql(value || null);
+    else if (id === "api.ts") setPreviewApi(value || null);
+    else if (id === "README.md") setPreviewReadme(value || null);
+  }
+
   async function shareProject() {
     if (!previewHtml) return;
     if (!user) {
@@ -345,9 +366,19 @@ export function HomeDashboard({
     // Avec une image, on passe par l'agent vision (chat), pas le builder HTML.
     const activeLang = getStoredLanguage();
     setLanguage(activeLang);
+    const largeAsk = !imagePayload && wantsLargeProject(trimmed);
+    const debug =
+      debugArmed || (!imagePayload && wantsDebug(trimmed));
     const build =
-      !imagePayload && wantsAppBuild(trimmed, Boolean(previewHtml));
-    const mode = build ? resolveGenerateMode(trimmed) : null;
+      !imagePayload &&
+      (wantsAppBuild(trimmed, Boolean(previewHtml)) ||
+        (debug && Boolean(previewHtml)));
+    const mode = build
+      ? resolveGenerateMode(
+          trimmed,
+          previewSql || previewApi || largeAsk ? "fullstack" : "auto",
+        )
+      : null;
     const historyForChat = messages
       .filter((m) => m.content?.trim())
       .slice(-12)
@@ -369,18 +400,27 @@ export function HomeDashboard({
       {
         role: "assistant",
         content: build
-          ? mode === "fullstack"
-            ? previewHtml
-              ? "Mise à jour fullstack (UI + base)…"
-              : "Génération fullstack (UI + base)…"
-            : previewHtml
-              ? "Mise à jour de la preview…"
-              : "Génération de la preview…"
-          : "Okapi réfléchit…",
+          ? debug
+            ? "Okapi debug… correction en cours…"
+            : largeAsk
+              ? engine === "pro"
+                ? "Okapi Pro — grand projet en cours…"
+                : "Okapi Flash — grand projet en cours…"
+              : mode === "fullstack"
+                ? previewHtml
+                  ? "Mise à jour fullstack (UI + base)…"
+                  : "Génération fullstack (UI + base)…"
+                : previewHtml
+                  ? "Mise à jour de la preview…"
+                  : "Génération de la preview…"
+          : debug
+            ? "Okapi analyse le bug…"
+            : "Okapi réfléchit…",
       },
     ]);
     setPrompt("");
     setAttachedImage(null);
+    setDebugArmed(false);
     setStatus(null);
     setSending(true);
 
@@ -404,6 +444,8 @@ export function HomeDashboard({
             sector,
             language: activeLang,
             history: historyForChat,
+            debug,
+            engine,
             image: imagePayload
               ? {
                   mimeType: imagePayload.mimeType,
@@ -462,6 +504,8 @@ export function HomeDashboard({
           sector,
           language: activeLang,
           mode: mode ?? "auto",
+          debug,
+          engine,
           currentHtml: previewHtml ?? undefined,
           currentSql: previewSql ?? undefined,
           currentApi: previewApi ?? undefined,
@@ -562,9 +606,14 @@ export function HomeDashboard({
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
       const soft =
-        /credits|quota|429|billing|OpenAI|API_KEY|LLM_PROVIDER/i.test(raw) ||
-        !raw
-          ? "Okapi est temporairement indisponible. Recharge la page et réessaie dans quelques minutes."
+        /credits|quota|429|billing|OpenAI|API_KEY|LLM_PROVIDER|limite du jour|okapi_quota/i.test(
+          raw,
+        ) || !raw
+          ? /limite du jour|okapi_quota/i.test(raw)
+            ? "Okapi a atteint la limite du jour pour ta session. Réessaie demain."
+            : /très sollicité|okapi_busy|503/i.test(raw)
+              ? "Okapi est très sollicité. Réessaie dans quelques secondes."
+              : "Okapi est temporairement indisponible. Recharge la page et réessaie dans quelques minutes."
           : raw.replace(/^\[Erreur Okapi\]\s*/i, "").startsWith("Okapi")
             ? raw.replace(/^\[Erreur Okapi\]\s*/i, "")
             : "Okapi n’a pas pu répondre. Recharge la page et réessaie.";
@@ -684,6 +733,7 @@ export function HomeDashboard({
                   setPreviewSql(null);
                   setPreviewApi(null);
                   setPreviewReadme(null);
+                  setDebugArmed(false);
                   setMessages([]);
                   setStatus(null);
                   stopSpeak();
@@ -879,9 +929,13 @@ export function HomeDashboard({
                   placeholder={
                     listening
                       ? "Écoute… parle maintenant"
-                      : attachedImage
-                        ? "Que faire avec cette image ?"
-                        : "Écris, parle ou ajoute une image…"
+                      : debugArmed
+                        ? "Colle l’erreur ou décris le bug…"
+                        : attachedImage
+                          ? "Que faire avec cette image ?"
+                          : previewHtml
+                            ? "Modifie, debug, ou dis ce qu’il faut changer…"
+                            : "Écris, parle ou ajoute une image…"
                   }
                   className="min-h-[64px] w-full resize-none bg-transparent px-2 py-2 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
                 />
@@ -889,7 +943,7 @@ export function HomeDashboard({
                   <p className="px-2 text-xs italic text-okapi-ink/45">{draftVoice}</p>
                 ) : null}
                 <div className="mt-1 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -900,6 +954,80 @@ export function HomeDashboard({
                         e.target.value = "";
                       }}
                     />
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setEngineOpen((o) => !o)}
+                        disabled={sending}
+                        className="inline-flex h-11 items-center gap-1.5 rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist px-3 text-xs font-semibold text-okapi-ink/75 transition hover:bg-white disabled:opacity-60"
+                        aria-expanded={engineOpen}
+                        aria-haspopup="listbox"
+                      >
+                        {engine === "pro" ? "Okapi Pro" : "Okapi Flash"}
+                        <span className="text-[10px] font-medium text-okapi-ink/35">
+                          ▾
+                        </span>
+                      </button>
+                      {engineOpen ? (
+                        <div
+                          className="absolute bottom-[calc(100%+6px)] left-0 z-30 w-64 overflow-hidden rounded-2xl border border-[var(--okapi-stroke)] bg-white/95 shadow-lg backdrop-blur-md"
+                          role="listbox"
+                        >
+                          {OKAPI_ENGINES.map((item) => {
+                            const active = engine === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                onClick={() => {
+                                  setEngine(item.id);
+                                  setStoredEngine(item.id);
+                                  setEngineOpen(false);
+                                }}
+                                className={`flex w-full flex-col gap-0.5 px-3.5 py-2.5 text-left transition ${
+                                  active
+                                    ? "bg-okapi-forest/10"
+                                    : "hover:bg-okapi-mist/80"
+                                }`}
+                              >
+                                <span className="flex items-center gap-2 text-xs font-semibold text-okapi-ink">
+                                  {item.label}
+                                  {item.badge ? (
+                                    <span className="rounded-full bg-okapi-amber/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-okapi-amber-deep">
+                                      {item.badge}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span className="text-[11px] leading-snug text-okapi-ink/45">
+                                  {item.hint}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDebugArmed((v) => !v)}
+                      disabled={sending}
+                      className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
+                        debugArmed
+                          ? "border-okapi-amber/40 bg-okapi-amber text-white"
+                          : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
+                      }`}
+                      title={
+                        previewHtml
+                          ? "Mode Debug — corrige la Preview"
+                          : "Mode Debug — analyse une erreur"
+                      }
+                      aria-label="Mode Debug"
+                      aria-pressed={debugArmed}
+                    >
+                      Debug
+                    </button>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
@@ -966,7 +1094,9 @@ export function HomeDashboard({
                 <p className="mt-2 text-sm text-okapi-amber-deep">{status}</p>
               ) : (
                 <p className="mt-2 text-[11px] text-okapi-ink/35">
-                  Image · micro · voix — l’agent agit sur demande
+                  {debugArmed
+                    ? "Mode Debug actif — colle l’erreur puis Envoyer"
+                    : "Image · micro · Debug — l’agent agit sur demande"}
                 </p>
               )}
             </form>
@@ -990,6 +1120,7 @@ export function HomeDashboard({
             onExportSql={exportSql}
             onExportApi={exportApi}
             onExportReadme={exportReadme}
+            onChangeArtifact={onChangeArtifact}
             focusPreviewKey={workspaceFocusKey}
           />
         ) : null}

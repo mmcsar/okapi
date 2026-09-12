@@ -33,15 +33,19 @@ export function friendlyLlmError(err: unknown) {
   const msg = rawMessage(err);
 
   if (
-    /no credits|insufficient_quota|billing|quota|payment|You have no credits/i.test(
+    /402|payment required|no credits|insufficient_quota|billing|quota|payment|You have no credits|can only afford/i.test(
       msg,
     )
   ) {
-    return "Okapi est temporairement indisponible. Recharge la page et réessaie dans quelques minutes.";
+    return "Le crédit IA Okapi est épuisé. Recharge le compte, puis réessaie.";
   }
 
-  if (/429|rate limit|too many requests/i.test(msg)) {
+  if (/429|rate limit|too many requests|okapi_quota|limite du jour/i.test(msg)) {
     return "Okapi reçoit beaucoup de demandes. Recharge la page et réessaie dans un instant.";
+  }
+
+  if (/okapi_busy|très sollicité/i.test(msg)) {
+    return "Okapi est très sollicité. Réessaie dans quelques secondes.";
   }
 
   if (isLocationBlocked(err)) {

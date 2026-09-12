@@ -6,29 +6,51 @@ import {
   isRetryableLlm,
 } from "@/lib/llm-errors";
 import { missingLlmMessage, pickLlmProvider } from "@/lib/llm-provider";
+import {
+  checkAndConsumeQuota,
+  quotaExceededResponse,
+  quotaKeyFromRequest,
+  releaseGenerateSlot,
+} from "@/lib/llm-quota";
 import { openAiComplete, openAiConfigured } from "@/lib/openai";
 import { openRouterComplete, openRouterConfigured } from "@/lib/openrouter";
 import {
   parseOkapiArtifacts,
   resolveGenerateMode,
   titleFromHtml,
+  wantsLargeProject,
   type GenerateMode,
 } from "@/lib/fullstack";
+import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-function buildSystemHtml(language?: string | null) {
-  return `You are Okapi (MMC SARL AI platform) HTML engine. Generate ONE complete web app as a single HTML file ONLY when asked.
+function buildSystemHtml(
+  language?: string | null,
+  engine: OkapiEngine = "flash",
+  large = false,
+) {
+  const scale =
+    large || engine === "pro"
+      ? `SCALE: Build a substantial product UI (multi-section / multi-view in one HTML file).
+- Include navigation between views (tabs or hash/simple JS router).
+- Cover the main user flows asked (list, detail, forms, empty states).
+- Still ONE HTML file. Prefer depth over decorative fluff.`
+      : `SCALE: Compact but complete single-page app. Only what was asked.`;
+
+  return `You are Okapi (MMC SARL AI platform) HTML engine — engine=${engine}.
+Generate ONE complete web app as a single HTML file ONLY when asked.
 
 Rules:
 1. ONLY the HTML document (start with <!DOCTYPE html>). No markdown.
 2. Do only what was requested — no useless bonus sections.
 3. Mobile-first. RDC context (WhatsApp / Mobile Money) when asked or clearly useful.
 4. Tailwind CDN: https://cdn.tailwindcss.com + inline JS if needed.
-5. Compact. Header with project name. Clean design, not generic purple.
+5. Header with project name. Clean design, not generic purple.
 6. On edit: return the FULL updated HTML.
 7. Never mention third-party AI vendors in the generated UI.
+${scale}
 
 ${languageInstruction(language)}
 For visible UI text in the HTML: use the user's language (or preferred language above).
@@ -36,9 +58,26 @@ For visible UI text in the HTML: use the user's language (or preferred language 
 Reminder: you can be wrong; you are not a doctor or lawyer.`;
 }
 
-function buildSystemFullstack(language?: string | null) {
-  return `You are Okapi (MMC SARL AI platform) fullstack engine.
-When asked, generate a compact web app WITH backend scaffolding for Okapi cloud database (Postgres-compatible).
+function buildSystemFullstack(
+  language?: string | null,
+  engine: OkapiEngine = "flash",
+  large = false,
+) {
+  const scale =
+    large || engine === "pro"
+      ? `SCALE — GRAND PROJET (Okapi ${engine}):
+- Rich HTML with several screens/modules (nav + at least 3–6 views).
+- SQL: multiple related tables, indexes, RLS, seed comments if useful.
+- API: several route stubs covering main CRUD / auth flows.
+- README: clear architecture overview (modules + how to run).
+- Think like a real product for RDC businesses (CRM, boutique, école, clinique, etc.) when relevant.`
+      : `SCALE — projet standard:
+- Solid HTML + essential SQL + a couple of API routes.
+- Keep it complete but lean.`;
+
+  return `You are Okapi (MMC SARL AI platform) fullstack engine — engine=${engine}.
+When asked, generate a web app WITH backend scaffolding for Okapi cloud database (Postgres-compatible).
+Both Okapi Flash and Okapi Pro can create large projects; Pro goes deeper on architecture and edge cases.
 
 OUTPUT FORMAT — use these exact markers (no markdown fences around the whole reply):
 
@@ -49,25 +88,58 @@ OUTPUT FORMAT — use these exact markers (no markdown fences around the whole r
 ===OKAPI_API===
 // Next.js App Router API route stubs (TypeScript)
 // Use env placeholders NEXT_PUBLIC_OKAPI_DB_URL and NEXT_PUBLIC_OKAPI_DB_ANON_KEY
-// (compatible with standard Postgres JS clients)
 // Never invent real API keys or secrets
-// Never mention third-party vendor brand names (database hosts, AI vendors) in README or UI
+// Never mention third-party vendor brand names in README or UI
 ===OKAPI_README===
-Short setup steps in the user's language (create DB project, run SQL, set env, run app). Call the database "base Okapi" — never name external vendors.
+Setup steps in the user's language. Call the database "base Okapi" — never name external vendors.
 ===OKAPI_END===
 
 Rules:
 1. HTML is mobile-first, Tailwind CDN, RDC-friendly (WhatsApp / Mobile Money when useful).
-2. SQL: enable RLS, sensible policies (anon read public data; authenticated write when auth is needed).
-3. API stubs: clear, copy-pasteable, one or two route files in comments if multiple.
-4. Do only what was requested — no useless bonus features.
-5. Never mention third-party AI or database vendor brand names in any user-facing text.
-6. On edit: return ALL sections updated (HTML + SQL + API + README).
+2. SQL: enable RLS, sensible policies.
+3. API stubs: clear, copy-pasteable.
+4. Do only what was requested — no useless marketing filler.
+5. Never mention third-party AI or database vendor brand names in user-facing text.
+6. On edit: return ALL sections updated.
+${scale}
 
 ${languageInstruction(language)}
 UI text in HTML + README: user's language (or preferred language above).
 
 Reminder: you can be wrong; you are not a doctor or lawyer.`;
+}
+
+function buildSystemDebug(language?: string | null, fullstack = false) {
+  const format = fullstack
+    ? `OUTPUT FORMAT — exact markers:
+
+===OKAPI_HTML===
+<!DOCTYPE html>...FULL fixed HTML...
+===OKAPI_SQL===
+-- fixed SQL if needed (else keep/improve current)
+===OKAPI_API===
+// fixed API stubs if needed
+===OKAPI_README===
+2-4 lines: what was broken + what you fixed (user language). No vendor brand names.
+===OKAPI_END===`
+    : `Return ONLY the FULL fixed HTML document (start with <!DOCTYPE html>). No markdown.`;
+
+  return `You are Okapi Debugger (MMC SARL AI platform).
+Your job: find and FIX bugs in the user's project artifacts.
+
+Rules:
+1. Read the error / bug description carefully.
+2. Fix the root cause — do not rewrite unrelated features.
+3. Return complete updated files (not a diff).
+4. Prefer minimal safe fixes.
+5. Never mention third-party AI or database vendor brand names.
+6. If the bug is unclear, still apply the most likely safe fix based on the code + message.
+
+${format}
+
+${languageInstruction(language)}
+
+Reminder: you can be wrong; invite the user to retest the Preview.`;
 }
 
 type Body = {
@@ -80,20 +152,45 @@ type Body = {
   stream?: boolean;
   /** "html" | "fullstack" | "auto" (default) */
   mode?: string;
+  /** Debug / bugfix pass */
+  debug?: boolean;
+  /** "flash" | "pro" */
+  engine?: string;
 };
 
 function buildPrompt(
   sector: string,
   message: string,
   mode: GenerateMode,
+  debug: boolean,
   currentHtml?: string,
   currentSql?: string,
   currentApi?: string,
+  large = false,
+  engine: OkapiEngine = "flash",
 ) {
+  const scaleLabel = large
+    ? `GRAND PROJET · engine=${engine}`
+    : `projet standard · engine=${engine}`;
+
+  if (debug) {
+    return `Sector: ${sector}
+Mode: DEBUG — fix the bug, return full corrected artifacts (${mode}).
+
+Bug / error report from user:
+${message}
+
+Current HTML:
+${(currentHtml || "").slice(0, 22000) || "(empty)"}
+
+${currentSql ? `Current SQL:\n${currentSql.slice(0, 8000)}\n` : ""}
+${currentApi ? `Current API:\n${currentApi.slice(0, 8000)}\n` : ""}`;
+  }
+
   if (mode === "fullstack") {
     if (currentHtml) {
       return `Sector: ${sector}
-Mode: fullstack (HTML + SQL base Okapi + API stubs)
+Mode: fullstack (${scaleLabel})
 Modify all relevant artifacts:
 ${message}
 
@@ -104,21 +201,21 @@ ${currentSql ? `Current SQL:\n${currentSql.slice(0, 8000)}\n` : ""}
 ${currentApi ? `Current API:\n${currentApi.slice(0, 8000)}\n` : ""}`;
     }
     return `Sector: ${sector}
-Mode: fullstack (HTML + SQL base Okapi + API stubs)
-Generate a compact fullstack app:
+Mode: fullstack (${scaleLabel})
+Generate a ${large ? "large multi-module" : "complete"} fullstack app:
 ${message}`;
   }
 
   if (currentHtml) {
     return `Sector: ${sector}
-Modify (fast, full HTML):
+Modify (${scaleLabel}, full HTML):
 ${message}
 
 Current HTML:
 ${currentHtml.slice(0, 28000)}`;
   }
   return `Sector: ${sector}
-Generate a compact app quickly:
+Generate a ${large ? "substantial multi-view" : "compact"} app (${scaleLabel}):
 ${message}`;
 }
 
@@ -178,6 +275,7 @@ async function generateWithFallback(
   onChunk?: (text: string) => void,
   onStatus?: (msg: string) => void,
   maxTokens = 8192,
+  engine: OkapiEngine = "flash",
 ) {
   const provider = preferProvider();
   if (!provider) {
@@ -190,6 +288,7 @@ async function generateWithFallback(
       system,
       user: prompt,
       maxTokens,
+      engine,
     });
     onChunk?.(text);
     return text;
@@ -201,6 +300,7 @@ async function generateWithFallback(
       system,
       user: prompt,
       maxTokens,
+      engine,
     });
     onChunk?.(text);
     return text;
@@ -228,7 +328,12 @@ async function generateWithFallback(
     }
     if (isLocationBlocked(err) && openAiConfigured()) {
       onStatus?.("Okapi reconnecte le service…");
-      const text = await openAiComplete({ system, user: prompt, maxTokens });
+      const text = await openAiComplete({
+        system,
+        user: prompt,
+        maxTokens,
+        engine,
+      });
       onChunk?.(text);
       return text;
     }
@@ -238,6 +343,7 @@ async function generateWithFallback(
         system,
         user: prompt,
         maxTokens,
+        engine,
       });
       onChunk?.(text);
       return text;
@@ -257,26 +363,61 @@ export async function POST(request: Request) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
+  const quota = checkAndConsumeQuota(
+    quotaKeyFromRequest(request),
+    "generate",
+  );
+  if (!quota.ok) return quotaExceededResponse(quota);
+
   const sector = body?.sector?.trim() || "Site web";
   const language = body?.language?.trim() || "auto";
-  const mode = resolveGenerateMode(message, body?.mode);
-  const system =
-    mode === "fullstack"
-      ? buildSystemFullstack(language)
-      : buildSystemHtml(language);
+  const debug = Boolean(body?.debug);
+  const hasBackendArtifacts = Boolean(
+    body?.currentSql?.trim() || body?.currentApi?.trim(),
+  );
+  let mode = resolveGenerateMode(message, body?.mode);
+  if (debug) {
+    mode =
+      body?.mode === "fullstack" || hasBackendArtifacts
+        ? "fullstack"
+        : body?.mode === "html"
+          ? "html"
+          : hasBackendArtifacts
+            ? "fullstack"
+            : "html";
+  }
+
+  const engine = resolveEngine(body?.engine);
+  const large = wantsLargeProject(message);
+  // Grands projets → fullstack même sans mot "supabase"
+  if (!debug && large && mode === "html" && body?.mode !== "html") {
+    mode = "fullstack";
+  }
+
   const currentHtml = body?.currentHtml?.trim();
   const currentSql = body?.currentSql?.trim();
   const currentApi = body?.currentApi?.trim();
   const wantStream = body?.stream !== false;
+
+  const system = debug
+    ? buildSystemDebug(language, mode === "fullstack")
+    : mode === "fullstack"
+      ? buildSystemFullstack(language, engine, large)
+      : buildSystemHtml(language, engine, large);
+
   const prompt = buildPrompt(
     sector,
     message,
     mode,
+    debug,
     currentHtml,
     currentSql,
     currentApi,
+    large,
+    engine,
   );
-  const maxTokens = mode === "fullstack" ? 12000 : 8192;
+  const maxTokens =
+    large || mode === "fullstack" || debug || engine === "pro" ? 9000 : 5000;
 
   const finish = (raw: string) => {
     if (!raw) {
@@ -295,17 +436,27 @@ export async function POST(request: Request) {
     }
     const title = titleFromHtml(artifacts.html, `Projet ${sector}`);
     const fullstackReady = Boolean(artifacts.sql || artifacts.api);
-    const summary = currentHtml
-      ? fullstackReady
-        ? `Preview + backend mis à jour : ${title}`
-        : `Preview mise à jour : ${title}`
-      : fullstackReady
-        ? `Preview fullstack prête : ${title}. Exporte le schéma SQL et les routes API.`
-        : `Preview prête : ${title}. Dis-moi quoi changer.`;
+    const summary = debug
+      ? artifacts.readme?.trim() ||
+        `Bug corrigé : ${title}. Reteste la Preview.`
+      : large
+        ? fullstackReady
+          ? `Grand projet prêt : ${title} (UI + base + API). Explore Preview / Code / SQL.`
+          : `Grand projet UI prêt : ${title}. Dis-moi quoi enrichir.`
+        : currentHtml
+          ? fullstackReady
+            ? `Preview + backend mis à jour : ${title}`
+            : `Preview mise à jour : ${title}`
+          : fullstackReady
+            ? `Preview fullstack prête : ${title}. Exporte le schéma SQL et les routes API.`
+            : `Preview prête : ${title}. Dis-moi quoi changer.`;
 
     return {
       ok: true as const,
       mode,
+      debug,
+      large,
+      engine,
       html: artifacts.html,
       sql: artifacts.sql,
       api: artifacts.api,
@@ -324,6 +475,7 @@ export async function POST(request: Request) {
         undefined,
         undefined,
         maxTokens,
+        engine,
       );
       const out = finish(raw);
       if (!("ok" in out) || !out.ok) {
@@ -335,6 +487,8 @@ export async function POST(request: Request) {
         { error: friendlyLlmError(err) },
         { status: 500 },
       );
+    } finally {
+      releaseGenerateSlot();
     }
   }
 
@@ -348,11 +502,19 @@ export async function POST(request: Request) {
       try {
         send({
           type: "status",
-          message:
-            mode === "fullstack"
-              ? "Okapi génère le fullstack (UI + base)…"
-              : "Okapi génère…",
+          message: debug
+            ? "Okapi debug… analyse et correction…"
+            : large
+              ? engine === "pro"
+                ? "Okapi Pro construit un grand projet…"
+                : "Okapi Flash construit un grand projet…"
+              : mode === "fullstack"
+                ? "Okapi génère le fullstack (UI + base)…"
+                : "Okapi génère…",
           mode,
+          debug,
+          large,
+          engine,
         });
         const raw = await generateWithFallback(
           prompt,
@@ -360,6 +522,7 @@ export async function POST(request: Request) {
           (text) => send({ type: "delta", text }),
           (msg) => send({ type: "status", message: msg, mode }),
           maxTokens,
+          engine,
         );
 
         const out = finish(raw);
@@ -373,6 +536,7 @@ export async function POST(request: Request) {
           send({
             type: "done",
             mode: out.mode,
+            debug: out.debug,
             html: out.html,
             sql: out.sql,
             api: out.api,
@@ -387,6 +551,7 @@ export async function POST(request: Request) {
           error: friendlyLlmError(err),
         });
       } finally {
+        releaseGenerateSlot();
         controller.close();
       }
     },

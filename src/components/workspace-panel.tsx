@@ -1,8 +1,29 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
+import type { StudioFileId } from "@/components/okapi-studio";
 
-export type WorkspaceTab = "preview" | "code" | "sql" | "api" | "docs";
+const OkapiStudio = dynamic(
+  () =>
+    import("@/components/okapi-studio").then((m) => m.OkapiStudio),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full min-h-[320px] items-center justify-center bg-[#0b1410] text-sm text-[#8aa396]">
+        Ouverture Okapi Studio…
+      </div>
+    ),
+  },
+);
+
+export type WorkspaceTab =
+  | "preview"
+  | "studio"
+  | "code"
+  | "sql"
+  | "api"
+  | "docs";
 
 type WorkspacePanelProps = {
   title: string;
@@ -20,12 +41,14 @@ type WorkspacePanelProps = {
   onExportSql: () => void;
   onExportApi: () => void;
   onExportReadme: () => void;
+  onChangeArtifact: (id: StudioFileId, value: string) => void;
   /** Bump when a new generation finishes to focus Preview */
   focusPreviewKey?: number;
 };
 
 const TABS: { id: WorkspaceTab; label: string }[] = [
   { id: "preview", label: "Preview" },
+  { id: "studio", label: "Studio" },
   { id: "code", label: "Code" },
   { id: "sql", label: "SQL" },
   { id: "api", label: "API" },
@@ -85,6 +108,7 @@ export function WorkspacePanel({
   onExportSql,
   onExportApi,
   onExportReadme,
+  onChangeArtifact,
   focusPreviewKey = 0,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<WorkspaceTab>("preview");
@@ -94,14 +118,14 @@ export function WorkspacePanel({
   }, [focusPreviewKey]);
 
   const exportForTab = () => {
-    if (tab === "preview" || tab === "code") onExportHtml();
+    if (tab === "preview" || tab === "code" || tab === "studio") onExportHtml();
     else if (tab === "sql") onExportSql();
     else if (tab === "api") onExportApi();
     else onExportReadme();
   };
 
   const canExport =
-    (tab === "preview" || tab === "code"
+    (tab === "preview" || tab === "code" || tab === "studio"
       ? Boolean(html)
       : tab === "sql"
         ? Boolean(sql)
@@ -131,7 +155,7 @@ export function WorkspacePanel({
                   ? api
                   : item.id === "docs"
                     ? readme
-                    : item.id === "code"
+                    : item.id === "code" || item.id === "studio"
                       ? html
                       : true;
             return (
@@ -141,7 +165,9 @@ export function WorkspacePanel({
                 onClick={() => setTab(item.id)}
                 className={`relative shrink-0 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
                   active
-                    ? "bg-okapi-forest text-white"
+                    ? item.id === "studio"
+                      ? "bg-[#0f1a14] text-white"
+                      : "bg-okapi-forest text-white"
                     : "text-okapi-ink/50 hover:bg-white/70 hover:text-okapi-ink"
                 }`}
               >
@@ -208,12 +234,28 @@ export function WorkspacePanel({
           ) : null}
 
           <p className="hidden text-[11px] text-okapi-ink/35 sm:block">
-            {sending ? "En cours…" : title.slice(0, 28)}
+            {sending
+              ? "En cours…"
+              : tab === "studio"
+                ? "Studio Dev"
+                : title.slice(0, 28)}
           </p>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {tab === "studio" ? (
+          <OkapiStudio
+            title={title}
+            html={html}
+            sql={sql}
+            api={api}
+            readme={readme}
+            showPreview
+            onChangeFile={onChangeArtifact}
+          />
+        ) : null}
+
         {tab === "preview" ? (
           <div className="flex flex-1 items-center justify-center overflow-auto p-4 lg:p-6">
             {sending && !html ? (
@@ -228,7 +270,7 @@ export function WorkspacePanel({
                   Okapi construit…
                 </p>
                 <p className="mt-2 text-sm text-okapi-ink/35">
-                  Preview · Code · SQL · API
+                  Preview · Studio · Code · SQL
                 </p>
               </div>
             ) : html ? (

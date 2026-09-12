@@ -12,10 +12,19 @@ export type OkapiArtifacts = {
 const FULLSTACK_RE =
   /\b(fullstack|full[\s-]?stack|backend|back[\s-]?end|supabase|postgres|postgresql|base de donn[eé]es|bdd|schema sql|rls|crud|api rest|auth|authentification|login|inscription|serveur|endpoint|table sql|migration)\b/i;
 
-/** User clearly asks for backend / DB / Supabase. */
+const LARGE_PROJECT_RE =
+  /\b(grand projet|gros projet|projet complet|plateforme|saas|crm|erp|dashboard|tableau de bord|marketplace|ecommerce|e-commerce|multi[- ]?page|plusieurs pages|module|modules|admin panel|back[- ]?office|gestion (des |de |d')?(clients|stocks|ventes|rh|employes|ecole|hopital|clinique|flotte)|systeme de|syst[eè]me de)\b/i;
+
+/** User clearly asks for backend / DB. */
 export function wantsFullstack(message: string): boolean {
   const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-  return FULLSTACK_RE.test(m);
+  return FULLSTACK_RE.test(m) || wantsLargeProject(message);
+}
+
+/** Ambitious / multi-module product — both Flash and Pro can build. */
+export function wantsLargeProject(message: string): boolean {
+  const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  return LARGE_PROJECT_RE.test(m);
 }
 
 export function resolveGenerateMode(

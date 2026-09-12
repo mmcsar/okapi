@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { friendlyLlmError } from "@/lib/llm-errors";
+import type { OkapiEngine } from "@/lib/okapi-engine";
 
 export type OpenAiChatMessage = ChatCompletionMessageParam;
 
@@ -8,8 +9,20 @@ export function openAiConfigured() {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
-export function openAiModel() {
-  return process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
+/** Map produit Flash/Pro → modèles (config serveur uniquement). */
+export function openAiModel(engine: OkapiEngine = "flash") {
+  if (engine === "pro") {
+    return (
+      process.env.OPENAI_MODEL_PRO?.trim() ||
+      process.env.OPENAI_MODEL?.trim() ||
+      "gpt-5"
+    );
+  }
+  return (
+    process.env.OPENAI_MODEL_FLASH?.trim() ||
+    process.env.OPENAI_MODEL?.trim() ||
+    "gpt-5-mini"
+  );
 }
 
 function client() {
@@ -23,10 +36,11 @@ export async function openAiComplete(opts: {
   system: string;
   user: string;
   maxTokens?: number;
+  engine?: OkapiEngine;
 }) {
   const openai = client();
   const res = await openai.chat.completions.create({
-    model: openAiModel(),
+    model: openAiModel(opts.engine ?? "flash"),
     messages: [
       { role: "system", content: opts.system },
       { role: "user", content: opts.user },
@@ -42,6 +56,7 @@ export async function openAiComplete(opts: {
 /** Streaming text response for chat. */
 export async function streamOpenAiChat(opts: {
   system: string;
+  engine?: OkapiEngine;
   messages: Array<{
     role: "user" | "assistant";
     content:
@@ -54,7 +69,7 @@ export async function streamOpenAiChat(opts: {
 }): Promise<Response> {
   const openai = client();
   const stream = await openai.chat.completions.create({
-    model: openAiModel(),
+    model: openAiModel(opts.engine ?? "flash"),
     stream: true,
     messages: [
       { role: "system", content: opts.system },
@@ -84,6 +99,7 @@ export async function streamOpenAiChat(opts: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-cache",
       "X-Okapi-Provider": "okapi",
+      "X-Okapi-Engine": opts.engine ?? "flash",
     },
   });
 }

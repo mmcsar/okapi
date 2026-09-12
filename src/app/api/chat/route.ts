@@ -3,15 +3,31 @@ import Anthropic from "@anthropic-ai/sdk";
 import { languageInstruction } from "@/lib/i18n";
 import { friendlyLlmError, isLocationBlocked } from "@/lib/llm-errors";
 import { missingLlmMessage, pickLlmProvider } from "@/lib/llm-provider";
+import {
+  checkAndConsumeQuota,
+  quotaExceededResponse,
+  quotaKeyFromRequest,
+} from "@/lib/llm-quota";
 import { openAiConfigured, streamOpenAiChat } from "@/lib/openai";
 import {
   openRouterConfigured,
   streamOpenRouterChat,
 } from "@/lib/openrouter";
+import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
 
 export const runtime = "nodejs";
 
-function buildSystem(language?: string | null) {
+function buildSystem(language?: string | null, debug = false) {
+  const debugBlock = debug
+    ? `
+DEBUG MODE:
+- The user reports a bug or pasted an error without a live Preview open.
+- Diagnose clearly: likely cause → steps to fix → what to try next.
+- If they should open/build a project first, say so briefly.
+- Never name third-party AI or database vendors.
+`
+    : "";
+
   return `You are Okapi, the AI platform of MMC SARL (Democratic Republic of Congo).
 You are a single autonomous AI agent for users of Okapi.
 
@@ -21,7 +37,7 @@ Core rule: act ONLY on request. Do what is necessary, nothing more.
 - If asked who hosts data: say Okapi / MMC SARL cloud. Never name third-party database vendors.
 - Do not spontaneously pitch apps, templates, or marketing menus.
 - If asked who you are / who built you: you are Okapi, plateforme IA de MMC SARL. Never mention third-party model vendors.
-
+${debugBlock}
 ${languageInstruction(language)}
 
 Style: clear, concise, useful. You can be wrong — invite verification.
@@ -34,6 +50,8 @@ type ChatBody = {
   language?: string;
   history?: { role: "user" | "assistant"; content: string }[];
   image?: { mimeType?: string; base64?: string; name?: string };
+  debug?: boolean;
+  engine?: string;
 };
 
 type ImagePart = { mimeType: string; base64: string };
@@ -43,6 +61,9 @@ export async function POST(request: Request) {
   if (!provider) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
+
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat");
+  if (!quota.ok) return quotaExceededResponse(quota);
 
   const body = (await request.json().catch(() => null)) as ChatBody | null;
   const imageBase64 = body?.image?.base64?.trim();
@@ -57,7 +78,8 @@ export async function POST(request: Request) {
 
   const sector = body?.sector?.trim();
   const language = body?.language?.trim() || "auto";
-  const system = buildSystem(language);
+  const engine = resolveEngine(body?.engine);
+  const system = buildSystem(language, Boolean(body?.debug));
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const userContent = sector
     ? `[Builder context (optional): ${sector}]\n\n${message}`
@@ -67,10 +89,10 @@ export async function POST(request: Request) {
     : null;
 
   if (provider === "openai") {
-    return streamViaOpenAi(userContent, history, image, system);
+    return streamViaOpenAi(userContent, history, image, system, engine);
   }
   if (provider === "openrouter") {
-    return streamViaOpenRouter(userContent, history, image, system);
+    return streamViaOpenRouter(userContent, history, image, system, engine);
   }
   if (provider === "gemini") {
     return streamGemini(userContent, history, image, system);
@@ -119,10 +141,12 @@ async function streamViaOpenAi(
   history: { role: "user" | "assistant"; content: string }[],
   image: ImagePart | null,
   system: string,
+  engine: OkapiEngine = "flash",
 ) {
   try {
     return await streamOpenAiChat({
       system,
+      engine,
       messages: toOpenRouterMessages(userContent, history, image),
     });
   } catch (err) {
@@ -140,10 +164,12 @@ async function streamViaOpenRouter(
   history: { role: "user" | "assistant"; content: string }[],
   image: ImagePart | null,
   system: string,
+  engine: OkapiEngine = "flash",
 ) {
   try {
     return await streamOpenRouterChat({
       system,
+      engine,
       messages: toOpenRouterMessages(userContent, history, image),
     });
   } catch (err) {

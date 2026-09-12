@@ -19,7 +19,7 @@ const initialAgents: Agent[] = [
     role: "IA autonome",
     sector: "Tout",
     description:
-      "Plateforme IA de MMC SARL : répond aux questions et aide à construire sites & apps pour la RDC.",
+      "Plateforme IA de MMC SARL : répond, construit sites & apps, et corrige les bugs (mode Debug).",
     active: true,
   },
   {
@@ -27,7 +27,8 @@ const initialAgents: Agent[] = [
     name: "Agent Builder",
     role: "Génération d’apps",
     sector: "Tous",
-    description: "Transforme un prompt en site ou mini-app (UI + preview). Fullstack : schéma SQL + API sur demande.",
+    description:
+      "Transforme un prompt en site ou mini-app (UI + preview). Fullstack + Studio Dev (édition type VS Code).",
     active: true,
   },
   {

@@ -39,11 +39,21 @@ export function ProjectsPanel({
     setError(null);
     try {
       const res = await authFetch("/api/projects");
-      const data = (await res.json()) as {
+      const raw = await res.text();
+      let data: {
         projects?: OkapiProject[];
         error?: string;
         setupRequired?: boolean;
-      };
+      } = {};
+      try {
+        data = JSON.parse(raw) as typeof data;
+      } catch {
+        throw new Error(
+          res.status === 404
+            ? "API projets indisponible. Redémarre le serveur Okapi (npm run dev)."
+            : "Réponse invalide du serveur. Recharge la page.",
+        );
+      }
       if (!res.ok) {
         throw new Error(data.error ?? `Erreur ${res.status}`);
       }

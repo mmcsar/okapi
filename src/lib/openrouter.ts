@@ -1,4 +1,5 @@
 import { friendlyLlmError } from "@/lib/llm-errors";
+import type { OkapiEngine } from "@/lib/okapi-engine";
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -17,8 +18,16 @@ export function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
 }
 
-export function openRouterModel() {
+export function openRouterModel(engine: OkapiEngine = "flash") {
+  if (engine === "pro") {
+    return (
+      process.env.OPENROUTER_MODEL_PRO?.trim() ||
+      process.env.OPENROUTER_MODEL?.trim() ||
+      "openai/gpt-5"
+    );
+  }
   return (
+    process.env.OPENROUTER_MODEL_FLASH?.trim() ||
     process.env.OPENROUTER_MODEL?.trim() ||
     "google/gemini-2.5-flash-lite-preview"
   );
@@ -29,6 +38,7 @@ export async function openRouterComplete(opts: {
   system: string;
   user: string;
   maxTokens?: number;
+  engine?: OkapiEngine;
 }) {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OPENROUTER_API_KEY manquante");
@@ -42,7 +52,7 @@ export async function openRouterComplete(opts: {
       "X-Title": "Okapi by MMC SARL",
     },
     body: JSON.stringify({
-      model: openRouterModel(),
+      model: openRouterModel(opts.engine ?? "flash"),
       messages: [
         { role: "system", content: opts.system },
         { role: "user", content: opts.user },
@@ -57,7 +67,12 @@ export async function openRouterComplete(opts: {
   } | null;
 
   if (!res.ok) {
-    throw new Error(data?.error?.message || `OpenRouter ${res.status}`);
+    throw new Error(
+      data?.error?.message ||
+        (res.status === 402
+          ? "OpenRouter 402 payment required"
+          : `OpenRouter ${res.status}`),
+    );
   }
 
   const text = data?.choices?.[0]?.message?.content?.trim() || "";
@@ -68,6 +83,7 @@ export async function openRouterComplete(opts: {
 /** Streaming text response for chat. */
 export async function streamOpenRouterChat(opts: {
   system: string;
+  engine?: OkapiEngine;
   messages: ChatMessage[];
 }): Promise<Response> {
   const key = process.env.OPENROUTER_API_KEY?.trim();
@@ -82,7 +98,7 @@ export async function streamOpenRouterChat(opts: {
       "X-Title": "Okapi by MMC SARL",
     },
     body: JSON.stringify({
-      model: openRouterModel(),
+      model: openRouterModel(opts.engine ?? "flash"),
       stream: true,
       messages: [
         { role: "system", content: opts.system },
@@ -96,7 +112,12 @@ export async function streamOpenRouterChat(opts: {
     const fail = (await upstream.json().catch(() => null)) as {
       error?: { message?: string };
     } | null;
-    throw new Error(fail?.error?.message || `OpenRouter ${upstream.status}`);
+    throw new Error(
+      fail?.error?.message ||
+        (upstream.status === 402
+          ? "OpenRouter 402 payment required"
+          : `OpenRouter ${upstream.status}`),
+    );
   }
 
   const encoder = new TextEncoder();

@@ -55,10 +55,11 @@ function HomeApp() {
     setResetKey((k) => k + 1);
   }
 
+  // Plus de splash bloquant — la session se charge en arrière-plan
   if (!ready) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-okapi-ink/50">
-        Chargement Okapi…
+      <div className="flex min-h-screen flex-col items-center justify-center gap-2 px-6 text-center">
+        <p className="text-sm font-medium text-okapi-ink/55">Chargement Okapi…</p>
       </div>
     );
   }
