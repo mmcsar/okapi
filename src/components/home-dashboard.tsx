@@ -775,6 +775,104 @@ export function HomeDashboard({
       const decoder = new TextDecoder();
       let buffer = "";
       let chars = 0;
+      let gotDone = false;
+
+      const handleGenerateEvent = async (line: string) => {
+        if (!line.trim()) return;
+        let event: {
+          type: string;
+          message?: string;
+          text?: string;
+          html?: string;
+          sql?: string | null;
+          api?: string | null;
+          readme?: string | null;
+          title?: string;
+          summary?: string;
+          mode?: string;
+          error?: string;
+        };
+        try {
+          event = JSON.parse(line) as typeof event;
+        } catch {
+          throw new Error(
+            "Réponse Okapi interrompue. Réessaie dans quelques secondes.",
+          );
+        }
+
+        if (event.type === "status" && event.message) {
+          setAssistant(event.message);
+        } else if (event.type === "delta" && event.text) {
+          chars += event.text.length;
+          const sec = Math.round((Date.now() - started) / 1000);
+          setAssistant(
+            `Écriture… ${chars.toLocaleString("fr-FR")} car. · ${sec}s`,
+          );
+        } else if (event.type === "done" && event.html) {
+          gotDone = true;
+          const sec = Math.round((Date.now() - started) / 1000);
+          const title = event.title || "Preview Okapi";
+          setPreviewHtml(event.html);
+          if (event.sql) setPreviewSql(event.sql);
+          if (event.api) setPreviewApi(event.api);
+          if (event.readme) setPreviewReadme(event.readme);
+          setPreviewTitle(title);
+          if (devModeRef.current) setStudioFocusKey((k) => k + 1);
+          else setWorkspaceFocusKey((k) => k + 1);
+
+          snapRef.current = {
+            ...snapRef.current,
+            html: event.html,
+            sql: event.sql ?? snapRef.current.sql,
+            api: event.api ?? snapRef.current.api,
+            readme: event.readme ?? snapRef.current.readme,
+            title,
+            sector,
+          };
+
+          const saveNote = await persistProject({
+            title,
+            sector,
+            html: event.html,
+            summary: event.summary,
+            artifacts: {
+              sql: event.sql ?? null,
+              api: event.api ?? null,
+              readme: event.readme ?? null,
+            },
+          });
+          if (!saveNote && user) setCloudStatus("Cloud · à jour");
+          else if (saveNote) setCloudStatus("Cloud · à connecter");
+
+          const backendBits = [
+            event.sql ? "Schéma SQL" : null,
+            event.api ? "API" : null,
+            event.readme ? "README" : null,
+          ].filter(Boolean);
+
+          setAssistant(
+            [
+              event.summary ?? "Preview prête.",
+              backendBits.length
+                ? `· Livrables : ${backendBits.join(" + ")}`
+                : "",
+              `(${sec}s)`,
+              saveNote
+                ? `· ${saveNote}`
+                : user
+                  ? "· Sauvegardé cloud"
+                  : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
+          );
+          if (voiceOutRef.current) {
+            speak(event.summary ?? "Preview prête.");
+          }
+        } else if (event.type === "error") {
+          throw new Error(event.error ?? "Erreur génération");
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -782,110 +880,32 @@ export function HomeDashboard({
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
-
         for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = JSON.parse(line) as {
-            type: string;
-            message?: string;
-            text?: string;
-            html?: string;
-            sql?: string | null;
-            api?: string | null;
-            readme?: string | null;
-            title?: string;
-            summary?: string;
-            mode?: string;
-            error?: string;
-          };
-
-          if (event.type === "status" && event.message) {
-            setAssistant(event.message);
-          } else if (event.type === "delta" && event.text) {
-            chars += event.text.length;
-            const sec = Math.round((Date.now() - started) / 1000);
-            setAssistant(
-              `Écriture… ${chars.toLocaleString("fr-FR")} car. · ${sec}s`,
-            );
-          } else if (event.type === "done" && event.html) {
-            const sec = Math.round((Date.now() - started) / 1000);
-            const title = event.title || "Preview Okapi";
-            setPreviewHtml(event.html);
-            if (event.sql) setPreviewSql(event.sql);
-            if (event.api) setPreviewApi(event.api);
-            if (event.readme) setPreviewReadme(event.readme);
-            setPreviewTitle(title);
-            if (devModeRef.current) setStudioFocusKey((k) => k + 1);
-            else setWorkspaceFocusKey((k) => k + 1);
-
-            snapRef.current = {
-              ...snapRef.current,
-              html: event.html,
-              sql: event.sql ?? snapRef.current.sql,
-              api: event.api ?? snapRef.current.api,
-              readme: event.readme ?? snapRef.current.readme,
-              title,
-              sector,
-            };
-
-            const saveNote = await persistProject({
-              title,
-              sector,
-              html: event.html,
-              summary: event.summary,
-              artifacts: {
-                sql: event.sql ?? null,
-                api: event.api ?? null,
-                readme: event.readme ?? null,
-              },
-            });
-            if (!saveNote && user) setCloudStatus("Cloud · à jour");
-            else if (saveNote) setCloudStatus("Cloud · à connecter");
-
-            const backendBits = [
-              event.sql ? "Schéma SQL" : null,
-              event.api ? "API" : null,
-              event.readme ? "README" : null,
-            ].filter(Boolean);
-
-            setAssistant(
-              [
-                event.summary ?? "Preview prête.",
-                backendBits.length
-                  ? `· Livrables : ${backendBits.join(" + ")}`
-                  : "",
-                `(${sec}s)`,
-                saveNote
-                  ? `· ${saveNote}`
-                  : user
-                    ? "· Sauvegardé cloud"
-                    : "",
-              ]
-                .filter(Boolean)
-                .join(" "),
-            );
-            if (voiceOutRef.current) {
-              speak(event.summary ?? "Preview prête.");
-            }
-          } else if (event.type === "error") {
-            throw new Error(event.error ?? "Erreur génération");
-          }
+          await handleGenerateEvent(line);
         }
       }
+      buffer += decoder.decode();
+      if (buffer.trim()) await handleGenerateEvent(buffer);
+      if (!gotDone) {
+        throw new Error(
+          "Okapi n’a pas terminé la génération. Réessaie dans quelques secondes.",
+        );
+      }
     } catch (err) {
-      const raw = err instanceof Error ? err.message : "";
-      const soft =
-        /credits|quota|429|billing|OpenAI|API_KEY|LLM_PROVIDER|limite du jour|okapi_quota/i.test(
-          raw,
-        ) || !raw
-          ? /limite du jour|okapi_quota/i.test(raw)
+      const raw = (err instanceof Error ? err.message : "").trim();
+      const soft = !raw
+        ? "Okapi n’a pas pu répondre. Réessaie dans quelques secondes."
+        : /trop de requ[eê]tes|rate.?limit|okapi_rate_limit/i.test(raw)
+          ? "Trop de requêtes. Attends 20 secondes puis réessaie."
+          : /limite du jour|okapi_quota/i.test(raw)
             ? "Okapi a atteint la limite du jour pour ta session. Réessaie demain."
-            : /très sollicité|okapi_busy|503/i.test(raw)
+            : /très sollicité|okapi_busy|saturé/i.test(raw)
               ? "Okapi est très sollicité. Réessaie dans quelques secondes."
-              : "Okapi est temporairement indisponible. Recharge la page et réessaie dans quelques minutes."
-          : raw.replace(/^\[Erreur Okapi\]\s*/i, "").startsWith("Okapi")
-            ? raw.replace(/^\[Erreur Okapi\]\s*/i, "")
-            : "Okapi n’a pas pu répondre. Recharge la page et réessaie.";
+              : /crédit|credits|billing|402/i.test(raw)
+                ? "Le crédit IA Okapi est épuisé. Réessaie plus tard."
+                : /^Okapi\b|^Le crédit\b|^Trop de\b|^Réponse Okapi\b/i.test(raw)
+                  ? raw
+                  : "Okapi n’a pas pu répondre. Réessaie dans quelques secondes.";
       setStatus(soft);
       setAssistant(soft);
     } finally {

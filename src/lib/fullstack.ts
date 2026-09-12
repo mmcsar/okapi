@@ -58,11 +58,22 @@ function fence(raw: string, lang: string) {
   return m?.[1]?.trim() || null;
 }
 
+/** Close truncated HTML so the Preview iframe still renders. */
+export function ensureHtmlDocument(html: string) {
+  let out = html.trim();
+  if (!out) return out;
+  const lower = out.toLowerCase();
+  if (!lower.includes("<html")) return out;
+  if (!lower.includes("</body>")) out += "\n</body>";
+  if (!out.toLowerCase().includes("</html>")) out += "\n</html>";
+  return out;
+}
+
 export function extractHtmlDocument(text: string) {
   const trimmed = text.trim();
   const fenceHtml = trimmed.match(/```(?:html)?\s*([\s\S]*?)```/i);
   if (fenceHtml?.[1]?.toLowerCase().includes("<html")) {
-    return fenceHtml[1].trim();
+    return ensureHtmlDocument(fenceHtml[1]);
   }
   const doc = trimmed.match(/<!DOCTYPE html[\s\S]*<\/html>/i);
   if (doc?.[0]) return doc[0].trim();
@@ -73,7 +84,7 @@ export function extractHtmlDocument(text: string) {
     if (from >= 0) {
       const end = trimmed.toLowerCase().lastIndexOf("</html>");
       if (end > from) return trimmed.slice(from, end + 7).trim();
-      return trimmed.slice(from).trim();
+      return ensureHtmlDocument(trimmed.slice(from));
     }
   }
   return trimmed;

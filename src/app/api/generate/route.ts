@@ -15,6 +15,7 @@ import {
 import { openAiComplete, openAiConfigured } from "@/lib/openai";
 import { openRouterComplete, openRouterConfigured } from "@/lib/openrouter";
 import {
+  ensureHtmlDocument,
   parseOkapiArtifacts,
   resolveGenerateMode,
   titleFromHtml,
@@ -44,16 +45,17 @@ function buildSystemHtml(
 Generate ONE complete web app as a single HTML file ONLY when asked.
 
 Rules:
-1. ONLY the HTML document (start with <!DOCTYPE html>). No markdown.
-2. Do only what was requested — no useless bonus sections.
+1. ONLY the HTML document (start with <!DOCTYPE html> and ALWAYS end with </html>). No markdown.
+2. Do only what was requested — no useless bonus sections. Prefer a complete short page over a truncated long one.
 3. Mobile-first. RDC context (WhatsApp / Mobile Money) when asked or clearly useful.
 4. Tailwind CDN: https://cdn.tailwindcss.com + inline JS if needed.
 5. Header with project name. Clean design, not generic purple.
-6. For photos/hero/product images use REAL URLs:
+6. For photos/hero/product images use REAL URLs (max 4 images total):
    https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
    Never use empty src or fake local image paths.
-7. On edit: return the FULL updated HTML.
+7. On edit: return the FULL updated HTML, always closed with </html>.
 8. Never mention third-party AI vendors in the generated UI.
+9. Keep Flash pages compact enough to finish: hero + 1–2 sections + footer is enough unless asked for more.
 ${scale}
 
 ${languageInstruction(language)}
@@ -439,6 +441,7 @@ export async function POST(request: Request) {
       };
     }
     const artifacts = parseOkapiArtifacts(raw);
+    artifacts.html = ensureHtmlDocument(artifacts.html);
     if (!artifacts.html.toLowerCase().includes("<html")) {
       return {
         error: "Réponse invalide (pas un document HTML).",

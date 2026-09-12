@@ -121,13 +121,15 @@ export async function openRouterComplete(opts: {
     throw new Error(
       data?.error?.message ||
         (res.status === 402
-          ? "OpenRouter 402 payment required"
-          : `OpenRouter ${res.status}`),
+          ? "Le crédit IA Okapi est épuisé."
+          : res.status === 429
+            ? "Okapi reçoit beaucoup de demandes. Réessaie dans un instant."
+            : `Erreur IA Okapi (${res.status})`),
     );
   }
 
   const text = data?.choices?.[0]?.message?.content?.trim() || "";
-  if (!text) throw new Error("OpenRouter a renvoyé une réponse vide.");
+  if (!text) throw new Error("Okapi a renvoyé une réponse vide.");
   return text;
 }
 
@@ -175,8 +177,10 @@ export async function streamOpenRouterChat(opts: {
     throw new Error(
       fail?.error?.message ||
         (upstream.status === 402
-          ? "OpenRouter 402 payment required"
-          : `OpenRouter ${upstream.status}`),
+          ? "Le crédit IA Okapi est épuisé."
+          : upstream.status === 429
+            ? "Okapi reçoit beaucoup de demandes. Réessaie dans un instant."
+            : `Erreur IA Okapi (${upstream.status})`),
     );
   }
 
