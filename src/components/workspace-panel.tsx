@@ -48,6 +48,9 @@ type WorkspacePanelProps = {
   onExportReadme: () => void;
   onExportZip?: () => void;
   onChangeArtifact: (id: StudioFileId, value: string) => void;
+  onSaveCloud?: () => void;
+  onStudioCommitted?: (fileId: StudioFileId, content: string) => void;
+  cloudStatus?: string | null;
   engine?: string;
   /** Bump when a new generation finishes to focus Preview */
   focusPreviewKey?: number;
@@ -122,6 +125,9 @@ export function WorkspacePanel({
   onExportReadme,
   onExportZip,
   onChangeArtifact,
+  onSaveCloud,
+  onStudioCommitted,
+  cloudStatus = null,
   engine = "flash",
   focusPreviewKey = 0,
 }: WorkspacePanelProps) {
@@ -202,6 +208,21 @@ export function WorkspacePanel({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {onSaveCloud ? (
+            <button
+              type="button"
+              onClick={onSaveCloud}
+              className="rounded-xl bg-okapi-forest px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-okapi-leaf"
+              title="Sauvegarder tous les fichiers sur ton compte"
+            >
+              Sauvegarder
+            </button>
+          ) : null}
+          {cloudStatus ? (
+            <span className="max-w-[140px] truncate text-[10px] font-medium text-okapi-ink/45">
+              {cloudStatus}
+            </span>
+          ) : null}
           {canExport && onExportZip ? (
             <button
               type="button"
@@ -285,6 +306,7 @@ export function WorkspacePanel({
             showPreview
             engine={engine}
             onChangeFile={onChangeArtifact}
+            onCommitted={onStudioCommitted}
           />
         ) : null}
 

@@ -25,6 +25,7 @@ import {
   type OkapiEngine,
 } from "@/lib/okapi-engine";
 import type { OkapiProject } from "@/lib/supabase";
+import type { OkapiArtifacts } from "@/lib/project-artifacts";
 import { WorkspacePanel } from "@/components/workspace-panel";
 import type { StudioFileId } from "@/components/okapi-studio";
 
@@ -82,10 +83,53 @@ export function HomeDashboard({
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<string | null>(null);
+  const [saveBusy, setSaveBusy] = useState(false);
   const [language, setLanguage] = useState<OkapiLangCode>("auto");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const projectIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const snapRef = useRef({
+    html: null as string | null,
+    react: null as string | null,
+    reactNative: null as string | null,
+    nextjs: null as string | null,
+    sql: null as string | null,
+    api: null as string | null,
+    python: null as string | null,
+    flutter: null as string | null,
+    readme: null as string | null,
+    title: "Preview",
+    sector: "Général",
+  });
+
+  useEffect(() => {
+    snapRef.current = {
+      html: previewHtml,
+      react: previewReact,
+      reactNative: previewReactNative,
+      nextjs: previewNext,
+      sql: previewSql,
+      api: previewApi,
+      python: previewPython,
+      flutter: previewFlutter,
+      readme: previewReadme,
+      title: previewTitle,
+      sector,
+    };
+  }, [
+    previewHtml,
+    previewReact,
+    previewReactNative,
+    previewNext,
+    previewSql,
+    previewApi,
+    previewPython,
+    previewFlutter,
+    previewReadme,
+    previewTitle,
+    sector,
+  ]);
 
   const onTranscript = useCallback((text: string, isFinal: boolean) => {
     const clean = text.trim();
@@ -155,15 +199,28 @@ export function HomeDashboard({
     if (initialProject) {
       setSector(initialProject.sector || "Général");
       setPreviewHtml(initialProject.html || null);
-      setPreviewReact(null);
-      setPreviewReactNative(null);
-      setPreviewNext(null);
-      setPreviewSql(null);
-      setPreviewApi(null);
-      setPreviewPython(null);
-      setPreviewFlutter(null);
-      setPreviewReadme(null);
+      setPreviewReact(initialProject.artifacts?.react ?? null);
+      setPreviewReactNative(initialProject.artifacts?.reactNative ?? null);
+      setPreviewNext(initialProject.artifacts?.nextjs ?? null);
+      setPreviewSql(
+        initialProject.artifacts?.sql ??
+          initialProject.backend_sql ??
+          null,
+      );
+      setPreviewApi(
+        initialProject.artifacts?.api ??
+          initialProject.backend_api ??
+          null,
+      );
+      setPreviewPython(initialProject.artifacts?.python ?? null);
+      setPreviewFlutter(initialProject.artifacts?.flutter ?? null);
+      setPreviewReadme(
+        initialProject.artifacts?.readme ??
+          initialProject.backend_readme ??
+          null,
+      );
       setPreviewTitle(initialProject.title || "Preview");
+      setCloudStatus("Cloud · projet ouvert");
       setProjectId(initialProject.id);
       projectIdRef.current = initialProject.id;
       setShareUrl(
@@ -217,17 +274,42 @@ export function HomeDashboard({
     sector: string;
     html: string;
     summary?: string;
+    artifacts?: OkapiArtifacts;
   }) {
     if (!user) {
       return "Connecte-toi pour sauvegarder en cloud (menu Connexion).";
     }
 
     try {
+      const snap = snapRef.current;
+      const artifacts: OkapiArtifacts = {
+        react: snap.react,
+        reactNative: snap.reactNative,
+        nextjs: snap.nextjs,
+        sql: snap.sql,
+        api: snap.api,
+        python: snap.python,
+        flutter: snap.flutter,
+        readme: snap.readme,
+        ...payload.artifacts,
+      };
+
+      const body = {
+        title: payload.title,
+        sector: payload.sector,
+        html: payload.html,
+        summary: payload.summary,
+        artifacts,
+        sql: artifacts.sql ?? undefined,
+        api: artifacts.api ?? undefined,
+        readme: artifacts.readme ?? undefined,
+      };
+
       const currentId = projectIdRef.current;
       if (currentId) {
         const res = await authFetch(`/api/projects/${currentId}`, {
           method: "PATCH",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
         });
         const data = (await res.json()) as { error?: string; project?: OkapiProject };
         if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
@@ -236,7 +318,7 @@ export function HomeDashboard({
 
       const res = await authFetch("/api/projects", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       });
       const data = (await res.json()) as { error?: string; project?: OkapiProject };
       if (!res.ok || !data.project) {
@@ -247,6 +329,91 @@ export function HomeDashboard({
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : "Sauvegarde impossible";
+    }
+  }
+
+  function applyStudioCommit(fileId: StudioFileId, content: string) {
+    const key =
+      fileId === "app.html"
+        ? "html"
+        : fileId === "App.tsx"
+          ? "react"
+          : fileId === "App.native.tsx"
+            ? "reactNative"
+            : fileId === "app/page.tsx"
+              ? "nextjs"
+              : fileId === "schema.sql"
+                ? "sql"
+                : fileId === "api.ts"
+                  ? "api"
+                  : fileId === "main.py"
+                    ? "python"
+                    : fileId === "main.dart"
+                      ? "flutter"
+                      : "readme";
+    snapRef.current = { ...snapRef.current, [key]: content || null };
+    void saveCloudNow({ silent: true });
+  }
+
+  async function saveCloudNow(opts?: { silent?: boolean }) {
+    const snap = snapRef.current;
+    if (
+      !snap.html &&
+      !snap.react &&
+      !snap.nextjs &&
+      !snap.sql &&
+      !snap.api &&
+      !snap.python &&
+      !snap.flutter &&
+      !snap.readme
+    ) {
+      if (!opts?.silent) {
+        setStatus("Rien à sauvegarder — génère ou édite d’abord.");
+      }
+      return;
+    }
+    if (!user) {
+      setCloudStatus("Connexion requise");
+      if (!opts?.silent) {
+        setStatus("Connecte-toi pour sauvegarder en cloud.");
+        onNavigate?.("login");
+      }
+      return;
+    }
+    setSaveBusy(true);
+    setCloudStatus("Sauvegarde…");
+    const err = await persistProject({
+      title: snap.title || "Projet Okapi",
+      sector: snap.sector,
+      html: snap.html || "",
+      summary: "Sauvegarde Studio Okapi",
+      artifacts: {
+        react: snap.react,
+        reactNative: snap.reactNative,
+        nextjs: snap.nextjs,
+        sql: snap.sql,
+        api: snap.api,
+        python: snap.python,
+        flutter: snap.flutter,
+        readme: snap.readme,
+      },
+    });
+    setSaveBusy(false);
+    if (err) {
+      setCloudStatus("Échec cloud");
+      if (!opts?.silent) setStatus(err);
+      return;
+    }
+    setCloudStatus("Cloud · à jour");
+    if (!opts?.silent) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content:
+            "Projet sauvegardé sur ton compte Okapi (tous les fichiers Studio).",
+        },
+      ]);
     }
   }
 
@@ -643,12 +810,29 @@ export function HomeDashboard({
             setPreviewTitle(title);
             setWorkspaceFocusKey((k) => k + 1);
 
+            snapRef.current = {
+              ...snapRef.current,
+              html: event.html,
+              sql: event.sql ?? snapRef.current.sql,
+              api: event.api ?? snapRef.current.api,
+              readme: event.readme ?? snapRef.current.readme,
+              title,
+              sector,
+            };
+
             const saveNote = await persistProject({
               title,
               sector,
               html: event.html,
               summary: event.summary,
+              artifacts: {
+                sql: event.sql ?? null,
+                api: event.api ?? null,
+                readme: event.readme ?? null,
+              },
             });
+            if (!saveNote && user) setCloudStatus("Cloud · à jour");
+            else if (saveNote) setCloudStatus("Cloud · à connecter");
 
             const backendBits = [
               event.sql ? "Schéma SQL" : null,
@@ -1224,6 +1408,9 @@ export function HomeDashboard({
             onExportReadme={exportReadme}
             onExportZip={exportZip}
             onChangeArtifact={onChangeArtifact}
+            onSaveCloud={() => void saveCloudNow()}
+            onStudioCommitted={applyStudioCommit}
+            cloudStatus={saveBusy ? "Sauvegarde…" : cloudStatus}
             engine={engine}
             focusPreviewKey={workspaceFocusKey}
           />

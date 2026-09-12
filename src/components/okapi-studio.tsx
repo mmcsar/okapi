@@ -45,6 +45,8 @@ type OkapiStudioProps = {
   showPreview: boolean;
   engine?: string;
   onChangeFile: (id: StudioFileId, value: string) => void;
+  /** Called after user Accepts an IA diff (for cloud auto-save). */
+  onCommitted?: (fileId: StudioFileId, content: string) => void;
 };
 
 type AiMsg = { role: "user" | "assistant"; content: string };
@@ -75,6 +77,7 @@ export function OkapiStudio({
   showPreview,
   engine = "flash",
   onChangeFile,
+  onCommitted,
 }: OkapiStudioProps) {
   const files = useMemo<StudioFile[]>(
     () => [
@@ -255,7 +258,9 @@ export function OkapiStudio({
       ...prev,
       { role: "assistant", content: `✓ ${pending.fileId} accepté.` },
     ]);
+    const { fileId, after } = pending;
     setPending(null);
+    onCommitted?.(fileId, after);
   }
 
   function rejectPending() {

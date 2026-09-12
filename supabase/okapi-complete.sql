@@ -47,6 +47,9 @@ alter table public.projects
 alter table public.projects
   add column if not exists backend_readme text;
 
+alter table public.projects
+  add column if not exists artifacts jsonb not null default '{}'::jsonb;
+
 create index if not exists projects_user_updated_idx
   on public.projects (user_id, updated_at desc);
 

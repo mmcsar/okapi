@@ -49,8 +49,11 @@ Rules:
 3. Mobile-first. RDC context (WhatsApp / Mobile Money) when asked or clearly useful.
 4. Tailwind CDN: https://cdn.tailwindcss.com + inline JS if needed.
 5. Header with project name. Clean design, not generic purple.
-6. On edit: return the FULL updated HTML.
-7. Never mention third-party AI vendors in the generated UI.
+6. For photos/hero/product images use REAL URLs:
+   https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
+   Never use empty src or fake local image paths.
+7. On edit: return the FULL updated HTML.
+8. Never mention third-party AI vendors in the generated UI.
 ${scale}
 
 ${languageInstruction(language)}
@@ -97,11 +100,13 @@ Setup steps in the user's language. Call the database "base Okapi" — never nam
 
 Rules:
 1. HTML is mobile-first, Tailwind CDN, RDC-friendly (WhatsApp / Mobile Money when useful).
-2. SQL: enable RLS, sensible policies.
-3. API stubs: clear, copy-pasteable.
-4. Do only what was requested — no useless marketing filler.
-5. Never mention third-party AI or database vendor brand names in user-facing text.
-6. On edit: return ALL sections updated.
+2. For photos in HTML use:
+   https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
+3. SQL: enable RLS, sensible policies.
+4. API stubs: clear, copy-pasteable.
+5. Do only what was requested — no useless marketing filler.
+6. Never mention third-party AI or database vendor brand names in user-facing text.
+7. On edit: return ALL sections updated.
 ${scale}
 
 ${languageInstruction(language)}

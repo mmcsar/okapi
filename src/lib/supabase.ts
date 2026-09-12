@@ -5,6 +5,8 @@ const key =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+import type { OkapiArtifacts } from "@/lib/project-artifacts";
+
 export type OkapiProject = {
   id: string;
   user_id: string;
@@ -16,6 +18,10 @@ export type OkapiProject = {
   updated_at: string;
   is_public?: boolean;
   share_slug?: string | null;
+  artifacts?: OkapiArtifacts | null;
+  backend_sql?: string | null;
+  backend_api?: string | null;
+  backend_readme?: string | null;
 };
 
 export function isSupabaseConfigured() {
