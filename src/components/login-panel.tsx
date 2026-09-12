@@ -35,9 +35,19 @@ export function LoginPanel({ onBack, onSuccess }: LoginPanelProps) {
     const err = await signInWithGoogle();
     setBusy(false);
     if (err) {
-      const soft = /provider is not enabled|validation_failed/i.test(err)
-        ? "Google n’est pas encore activé. Dans Supabase → Sign In / Providers → Google, active le provider et ajoute Client ID + Secret."
-        : err;
+      let text = err;
+      try {
+        const parsed = JSON.parse(err) as { msg?: string; message?: string };
+        text = parsed.msg || parsed.message || err;
+      } catch {
+        /* plain string */
+      }
+      const soft =
+        /provider is not enabled|unsupported provider|validation_failed/i.test(
+          text,
+        ) || /provider is not enabled|unsupported provider/i.test(err)
+          ? "Google n’est pas activé sur Okapi. Dans Supabase → Sign In / Providers → Google : Enable + Client ID + Secret. En attendant, connecte-toi par email."
+          : text;
       setStatus(soft);
     }
   }

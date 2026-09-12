@@ -28,8 +28,13 @@ export type WorkspaceTab =
 type WorkspacePanelProps = {
   title: string;
   html: string | null;
+  react: string | null;
+  reactNative: string | null;
+  nextjs: string | null;
   sql: string | null;
   api: string | null;
+  python: string | null;
+  flutter: string | null;
   readme: string | null;
   sending: boolean;
   device: "mobile" | "desktop";
@@ -41,7 +46,9 @@ type WorkspacePanelProps = {
   onExportSql: () => void;
   onExportApi: () => void;
   onExportReadme: () => void;
+  onExportZip?: () => void;
   onChangeArtifact: (id: StudioFileId, value: string) => void;
+  engine?: string;
   /** Bump when a new generation finishes to focus Preview */
   focusPreviewKey?: number;
 };
@@ -95,8 +102,13 @@ function CodeView({
 export function WorkspacePanel({
   title,
   html,
+  react,
+  reactNative,
+  nextjs,
   sql,
   api,
+  python,
+  flutter,
   readme,
   sending,
   device,
@@ -108,7 +120,9 @@ export function WorkspacePanel({
   onExportSql,
   onExportApi,
   onExportReadme,
+  onExportZip,
   onChangeArtifact,
+  engine = "flash",
   focusPreviewKey = 0,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<WorkspaceTab>("preview");
@@ -124,14 +138,17 @@ export function WorkspacePanel({
     else onExportReadme();
   };
 
-  const canExport =
-    (tab === "preview" || tab === "code" || tab === "studio"
-      ? Boolean(html)
-      : tab === "sql"
-        ? Boolean(sql)
-        : tab === "api"
-          ? Boolean(api)
-          : Boolean(readme)) && Boolean(html || sql || api || readme);
+  const canExport = Boolean(
+    html ||
+      react ||
+      reactNative ||
+      nextjs ||
+      sql ||
+      api ||
+      python ||
+      flutter ||
+      readme,
+  );
 
   const exportLabel =
     tab === "sql"
@@ -156,7 +173,7 @@ export function WorkspacePanel({
                   : item.id === "docs"
                     ? readme
                     : item.id === "code" || item.id === "studio"
-                      ? html
+                      ? html || react || reactNative || nextjs
                       : true;
             return (
               <button
@@ -185,6 +202,15 @@ export function WorkspacePanel({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {canExport && onExportZip ? (
+            <button
+              type="button"
+              onClick={onExportZip}
+              className="rounded-xl border border-okapi-forest/30 bg-okapi-forest/10 px-3 py-1.5 text-[11px] font-semibold text-okapi-forest hover:bg-okapi-forest/15"
+            >
+              ZIP projet
+            </button>
+          ) : null}
           {canExport ? (
             <button
               type="button"
@@ -248,10 +274,16 @@ export function WorkspacePanel({
           <OkapiStudio
             title={title}
             html={html}
+            react={react}
+            reactNative={reactNative}
+            nextjs={nextjs}
             sql={sql}
             api={api}
+            python={python}
+            flutter={flutter}
             readme={readme}
             showPreview
+            engine={engine}
             onChangeFile={onChangeArtifact}
           />
         ) : null}

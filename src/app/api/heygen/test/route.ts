@@ -1,3 +1,5 @@
+import { testRoutesAllowed } from "@/lib/security";
+
 export const runtime = "nodejs";
 
 type HeygenSummary = {
@@ -11,10 +13,14 @@ type HeygenSummary = {
 };
 
 export async function GET() {
+  if (!testRoutesAllowed()) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
   const key = process.env.HEYGEN_API_KEY;
   if (!key) {
     return Response.json(
-      { ok: false, error: "HEYGEN_API_KEY manquante dans .env.local" },
+      { ok: false, error: "Configuration indisponible." },
       { status: 500 },
     );
   }

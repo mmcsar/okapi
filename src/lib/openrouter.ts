@@ -187,6 +187,7 @@ export async function streamOpenRouterChat(opts: {
   const readable = new ReadableStream({
     async start(controller) {
       let buffer = "";
+      let assembled = "";
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -202,10 +203,28 @@ export async function streamOpenRouterChat(opts: {
             if (payload === "[DONE]") continue;
             try {
               const json = JSON.parse(payload) as {
-                choices?: { delta?: { content?: string } }[];
+                choices?: {
+                  delta?: { content?: string };
+                  message?: { content?: string };
+                }[];
               };
-              const piece = json.choices?.[0]?.delta?.content;
-              if (piece) controller.enqueue(encoder.encode(piece));
+              const piece =
+                json.choices?.[0]?.delta?.content ??
+                json.choices?.[0]?.message?.content;
+              if (!piece) continue;
+
+              // Certains modèles envoient le texte cumulatif à chaque chunk
+              // (pas un delta) → on n’émet que la partie nouvelle.
+              let neu = piece;
+              if (assembled && piece.startsWith(assembled)) {
+                neu = piece.slice(assembled.length);
+                assembled = piece;
+              } else if (assembled && assembled.endsWith(piece)) {
+                neu = "";
+              } else {
+                assembled += piece;
+              }
+              if (neu) controller.enqueue(encoder.encode(neu));
             } catch {
               /* skip bad chunk */
             }

@@ -14,6 +14,7 @@ import {
   streamOpenRouterChat,
 } from "@/lib/openrouter";
 import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
+import { assertBodySize } from "@/lib/security";
 
 export const runtime = "nodejs";
 
@@ -57,6 +58,9 @@ type ChatBody = {
 type ImagePart = { mimeType: string; base64: string };
 
 export async function POST(request: Request) {
+  const tooBig = assertBodySize(request, 2_000_000);
+  if (tooBig) return tooBig;
+
   const provider = pickLlmProvider();
   if (!provider) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });

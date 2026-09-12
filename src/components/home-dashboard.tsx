@@ -10,7 +10,7 @@ import {
   fileToAttachedImage,
   type AttachedImage,
 } from "@/lib/image";
-import { downloadTextFile, slugifyFilename } from "@/lib/export";
+import { downloadTextFile, downloadProjectZip, slugifyFilename } from "@/lib/export";
 import {
   getStoredLanguage,
   speechLocaleFor,
@@ -58,8 +58,15 @@ export function HomeDashboard({
   >([]);
   const [sending, setSending] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewReact, setPreviewReact] = useState<string | null>(null);
+  const [previewReactNative, setPreviewReactNative] = useState<string | null>(
+    null,
+  );
+  const [previewNext, setPreviewNext] = useState<string | null>(null);
   const [previewSql, setPreviewSql] = useState<string | null>(null);
   const [previewApi, setPreviewApi] = useState<string | null>(null);
+  const [previewPython, setPreviewPython] = useState<string | null>(null);
+  const [previewFlutter, setPreviewFlutter] = useState<string | null>(null);
   const [previewReadme, setPreviewReadme] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState("Preview");
   const [workspaceFocusKey, setWorkspaceFocusKey] = useState(0);
@@ -148,8 +155,13 @@ export function HomeDashboard({
     if (initialProject) {
       setSector(initialProject.sector || "Général");
       setPreviewHtml(initialProject.html || null);
+      setPreviewReact(null);
+      setPreviewReactNative(null);
+      setPreviewNext(null);
       setPreviewSql(null);
       setPreviewApi(null);
+      setPreviewPython(null);
+      setPreviewFlutter(null);
       setPreviewReadme(null);
       setPreviewTitle(initialProject.title || "Preview");
       setProjectId(initialProject.id);
@@ -168,8 +180,13 @@ export function HomeDashboard({
     } else {
       setSector("Général");
       setPreviewHtml(null);
+      setPreviewReact(null);
+      setPreviewReactNative(null);
+      setPreviewNext(null);
       setPreviewSql(null);
       setPreviewApi(null);
+      setPreviewPython(null);
+      setPreviewFlutter(null);
       setPreviewReadme(null);
       setPreviewTitle("Preview");
       setProjectId(null);
@@ -182,7 +199,18 @@ export function HomeDashboard({
   }, [messages, sending]);
 
   const isHome = section === "dashboard";
-  const split = Boolean(previewHtml) || sending;
+  const split =
+    Boolean(
+      previewHtml ||
+        previewReact ||
+        previewReactNative ||
+        previewNext ||
+        previewSql ||
+        previewApi ||
+        previewPython ||
+        previewFlutter ||
+        previewReadme,
+    ) || sending;
 
   async function persistProject(payload: {
     title: string;
@@ -287,10 +315,44 @@ export function HomeDashboard({
     );
   }
 
+  function exportZip() {
+    const slug = slugifyFilename(previewTitle);
+    const ok = downloadProjectZip(
+      [
+        { path: "app.html", content: previewHtml || "" },
+        { path: "App.tsx", content: previewReact || "" },
+        { path: "App.native.tsx", content: previewReactNative || "" },
+        { path: "app/page.tsx", content: previewNext || "" },
+        { path: "schema.sql", content: previewSql || "" },
+        { path: "api.ts", content: previewApi || "" },
+        { path: "main.py", content: previewPython || "" },
+        { path: "main.dart", content: previewFlutter || "" },
+        { path: "README.md", content: previewReadme || "" },
+      ],
+      `${slug}-okapi`,
+    );
+    if (!ok) {
+      setStatus("Rien à exporter — génère ou édite d’abord des fichiers.");
+      return;
+    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `ZIP téléchargé : ${slug}-okapi.zip`,
+      },
+    ]);
+  }
+
   function onChangeArtifact(id: StudioFileId, value: string) {
     if (id === "app.html") setPreviewHtml(value || null);
+    else if (id === "App.tsx") setPreviewReact(value || null);
+    else if (id === "App.native.tsx") setPreviewReactNative(value || null);
+    else if (id === "app/page.tsx") setPreviewNext(value || null);
     else if (id === "schema.sql") setPreviewSql(value || null);
     else if (id === "api.ts") setPreviewApi(value || null);
+    else if (id === "main.py") setPreviewPython(value || null);
+    else if (id === "main.dart") setPreviewFlutter(value || null);
     else if (id === "README.md") setPreviewReadme(value || null);
   }
 
@@ -470,7 +532,14 @@ export function HomeDashboard({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          answer += decoder.decode(value, { stream: true });
+          const chunk = decoder.decode(value, { stream: true });
+          if (!chunk) continue;
+          // Garde-fou : snapshot cumulatif reçu tel quel
+          if (answer && chunk.startsWith(answer)) {
+            answer = chunk;
+          } else if (!(answer && answer.endsWith(chunk))) {
+            answer += chunk;
+          }
           setAssistant(answer || "…");
         }
 
@@ -478,6 +547,14 @@ export function HomeDashboard({
           throw new Error("Réponse vide.");
         }
         let finalAnswer = answer.trim();
+        // Coupe une éventuelle double copie collée bout à bout
+        const half = Math.floor(finalAnswer.length / 2);
+        if (
+          half > 80 &&
+          finalAnswer.slice(0, half).trim() === finalAnswer.slice(half).trim()
+        ) {
+          finalAnswer = finalAnswer.slice(0, half).trim();
+        }
         if (
           /\[Erreur Okapi\]|no credits|platform\.openai|OPENAI_API_KEY|insufficient_quota|429 You/i.test(
             finalAnswer,
@@ -730,8 +807,13 @@ export function HomeDashboard({
                 type="button"
                 onClick={() => {
                   setPreviewHtml(null);
+                  setPreviewReact(null);
+                  setPreviewReactNative(null);
+                  setPreviewNext(null);
                   setPreviewSql(null);
                   setPreviewApi(null);
+                  setPreviewPython(null);
+                  setPreviewFlutter(null);
                   setPreviewReadme(null);
                   setDebugArmed(false);
                   setMessages([]);
@@ -806,15 +888,18 @@ export function HomeDashboard({
             {messages.length > 0 ? (
               <div className={`mt-5 w-full space-y-3 text-left ${split ? "" : "max-w-3xl"}`}>
                 {messages.map((msg, i) => {
-                  const isLastAssistant =
+                  const isStreamingAssistant =
                     sending &&
                     msg.role === "assistant" &&
                     i === messages.length - 1;
                   const canSpeak =
                     supportedSpeak &&
                     msg.role === "assistant" &&
-                    !isLastAssistant &&
-                    msg.content.trim().length > 0;
+                    !isStreamingAssistant &&
+                    msg.content.trim().length > 0 &&
+                    !/^Okapi (réfléchit|analyse|debug|Flash|Pro|travaille)/i.test(
+                      msg.content,
+                    );
                   return (
                     <div
                       key={`${msg.role}-${i}`}
@@ -850,7 +935,10 @@ export function HomeDashboard({
                           </button>
                         </div>
                       ) : null}
-                      {isLastAssistant ? (
+                      {isStreamingAssistant &&
+                      /réfléchit|analyse|debug|en cours|travaille|Écriture/i.test(
+                        msg.content,
+                      ) ? (
                         <span className="typing-dots inline-flex items-center gap-0.5 text-okapi-ink/50">
                           Okapi travaille
                           <span />
@@ -860,6 +948,15 @@ export function HomeDashboard({
                       ) : (
                         msg.content
                       )}
+                      {isStreamingAssistant &&
+                      msg.content.trim() &&
+                      !/réfléchit|analyse|debug|en cours|Écriture/i.test(
+                        msg.content,
+                      ) ? (
+                        <span className="mt-2 block text-[10px] text-okapi-ink/35">
+                          …
+                        </span>
+                      ) : null}
                       {canSpeak ? (
                         <button
                           type="button"
@@ -1107,8 +1204,13 @@ export function HomeDashboard({
           <WorkspacePanel
             title={previewTitle}
             html={previewHtml}
+            react={previewReact}
+            reactNative={previewReactNative}
+            nextjs={previewNext}
             sql={previewSql}
             api={previewApi}
+            python={previewPython}
+            flutter={previewFlutter}
             readme={previewReadme}
             sending={sending}
             device={device}
@@ -1120,7 +1222,9 @@ export function HomeDashboard({
             onExportSql={exportSql}
             onExportApi={exportApi}
             onExportReadme={exportReadme}
+            onExportZip={exportZip}
             onChangeArtifact={onChangeArtifact}
+            engine={engine}
             focusPreviewKey={workspaceFocusKey}
           />
         ) : null}

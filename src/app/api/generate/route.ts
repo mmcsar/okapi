@@ -22,6 +22,7 @@ import {
   type GenerateMode,
 } from "@/lib/fullstack";
 import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
+import { assertBodySize } from "@/lib/security";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -353,10 +354,16 @@ async function generateWithFallback(
 }
 
 export async function POST(request: Request) {
+  const tooBig = assertBodySize(request, 2_500_000);
+  if (tooBig) return tooBig;
+
   const body = (await request.json().catch(() => null)) as Body | null;
   const message = body?.message?.trim();
   if (!message) {
     return Response.json({ error: "Message vide." }, { status: 400 });
+  }
+  if (message.length > 20_000) {
+    return Response.json({ error: "Message trop long." }, { status: 400 });
   }
 
   if (!pickLlmProvider()) {
