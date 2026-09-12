@@ -71,7 +71,9 @@ export function HomeDashboard({
   const [previewReadme, setPreviewReadme] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState("Preview");
   const [workspaceFocusKey, setWorkspaceFocusKey] = useState(0);
+  const [studioFocusKey, setStudioFocusKey] = useState(0);
   const [debugArmed, setDebugArmed] = useState(false);
+  const [devMode, setDevMode] = useState(false);
   const [engine, setEngine] = useState<OkapiEngine>("flash");
   const [engineOpen, setEngineOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -89,6 +91,7 @@ export function HomeDashboard({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const projectIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const devModeRef = useRef(false);
   const snapRef = useRef({
     html: null as string | null,
     react: null as string | null,
@@ -181,6 +184,10 @@ export function HomeDashboard({
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  useEffect(() => {
+    devModeRef.current = devMode;
+  }, [devMode]);
 
   useEffect(() => {
     setGreeting(greetingFromHour(new Date().getHours()));
@@ -808,7 +815,8 @@ export function HomeDashboard({
             if (event.api) setPreviewApi(event.api);
             if (event.readme) setPreviewReadme(event.readme);
             setPreviewTitle(title);
-            setWorkspaceFocusKey((k) => k + 1);
+            if (devModeRef.current) setStudioFocusKey((k) => k + 1);
+            else setWorkspaceFocusKey((k) => k + 1);
 
             snapRef.current = {
               ...snapRef.current,
@@ -1000,6 +1008,7 @@ export function HomeDashboard({
                   setPreviewFlutter(null);
                   setPreviewReadme(null);
                   setDebugArmed(false);
+                  setDevMode(false);
                   setMessages([]);
                   setStatus(null);
                   stopSpeak();
@@ -1212,11 +1221,13 @@ export function HomeDashboard({
                       ? "Écoute… parle maintenant"
                       : debugArmed
                         ? "Colle l’erreur ou décris le bug…"
-                        : attachedImage
-                          ? "Que faire avec cette image ?"
-                          : previewHtml
-                            ? "Modifie, debug, ou dis ce qu’il faut changer…"
-                            : "Écris, parle ou ajoute une image…"
+                        : devMode
+                          ? "Demande un conseil — le code s’édite dans Studio…"
+                          : attachedImage
+                            ? "Que faire avec cette image ?"
+                            : previewHtml
+                              ? "Modifie, debug, ou dis ce qu’il faut changer…"
+                              : "Écris, parle ou ajoute une image…"
                   }
                   className="min-h-[64px] w-full resize-none bg-transparent px-2 py-2 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
                 />
@@ -1292,7 +1303,13 @@ export function HomeDashboard({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setDebugArmed((v) => !v)}
+                      onClick={() => {
+                        setDebugArmed((v) => {
+                          const next = !v;
+                          if (next) setDevMode(false);
+                          return next;
+                        });
+                      }}
                       disabled={sending}
                       className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
                         debugArmed
@@ -1308,6 +1325,30 @@ export function HomeDashboard({
                       aria-pressed={debugArmed}
                     >
                       Debug
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDevMode((v) => {
+                          const next = !v;
+                          if (next) {
+                            setDebugArmed(false);
+                            setStudioFocusKey((k) => k + 1);
+                          }
+                          return next;
+                        });
+                      }}
+                      disabled={sending}
+                      className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
+                        devMode
+                          ? "border-[#0f1a14]/50 bg-[#0f1a14] text-white"
+                          : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
+                      }`}
+                      title="Mode Dev — ouvre Studio pour coder ; le chat reste pour les conseils"
+                      aria-label="Mode Dev"
+                      aria-pressed={devMode}
+                    >
+                      Dev
                     </button>
                     <button
                       type="button"
@@ -1377,7 +1418,9 @@ export function HomeDashboard({
                 <p className="mt-2 text-[11px] text-okapi-ink/35">
                   {debugArmed
                     ? "Mode Debug actif — colle l’erreur puis Envoyer"
-                    : "Image · micro · Debug — l’agent agit sur demande"}
+                    : devMode
+                      ? "Mode Dev — Studio pour le code · chat pour conseils"
+                      : "Image · micro · Debug · Dev — l’agent agit sur demande"}
                 </p>
               )}
             </form>
@@ -1413,6 +1456,7 @@ export function HomeDashboard({
             cloudStatus={saveBusy ? "Sauvegarde…" : cloudStatus}
             engine={engine}
             focusPreviewKey={workspaceFocusKey}
+            focusStudioKey={studioFocusKey}
           />
         ) : null}
       </div>

@@ -54,6 +54,8 @@ type WorkspacePanelProps = {
   engine?: string;
   /** Bump when a new generation finishes to focus Preview */
   focusPreviewKey?: number;
+  /** Bump to open Studio (mode Dev) */
+  focusStudioKey?: number;
 };
 
 const TABS: { id: WorkspaceTab; label: string }[] = [
@@ -130,12 +132,17 @@ export function WorkspacePanel({
   cloudStatus = null,
   engine = "flash",
   focusPreviewKey = 0,
+  focusStudioKey = 0,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<WorkspaceTab>("preview");
 
   useEffect(() => {
     if (focusPreviewKey > 0) setTab("preview");
   }, [focusPreviewKey]);
+
+  useEffect(() => {
+    if (focusStudioKey > 0) setTab("studio");
+  }, [focusStudioKey]);
 
   const exportForTab = () => {
     if (tab === "preview" || tab === "code" || tab === "studio") onExportHtml();
