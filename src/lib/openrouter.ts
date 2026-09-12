@@ -14,6 +14,9 @@ type ChatMessage = {
       >;
 };
 
+/** Gratuit OpenRouter — utilisé si pas de crédit / modèle payant refusé. */
+const FREE_FALLBACK_MODEL = "nex-agi/nex-n2.5-mini:free";
+
 export function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
 }
@@ -23,14 +26,52 @@ export function openRouterModel(engine: OkapiEngine = "flash") {
     return (
       process.env.OPENROUTER_MODEL_PRO?.trim() ||
       process.env.OPENROUTER_MODEL?.trim() ||
-      "openai/gpt-5"
+      FREE_FALLBACK_MODEL
     );
   }
   return (
     process.env.OPENROUTER_MODEL_FLASH?.trim() ||
     process.env.OPENROUTER_MODEL?.trim() ||
-    "google/gemini-2.5-flash-lite-preview"
+    FREE_FALLBACK_MODEL
   );
+}
+
+function isPaymentBlocked(status: number, message?: string) {
+  return (
+    status === 402 ||
+    /payment required|no credits|insufficient|can only afford|billing/i.test(
+      message || "",
+    )
+  );
+}
+
+function openRouterHeaders(key: string) {
+  return {
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+    "HTTP-Referer":
+      process.env.OPENROUTER_SITE_URL || "https://okapi-elf9.vercel.app",
+    "X-Title": "Okapi by MMC SARL",
+  };
+}
+
+async function openRouterFetch(opts: {
+  key: string;
+  model: string;
+  messages: ChatMessage[];
+  maxTokens: number;
+  stream?: boolean;
+}) {
+  return fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: openRouterHeaders(opts.key),
+    body: JSON.stringify({
+      model: opts.model,
+      messages: opts.messages,
+      max_tokens: opts.maxTokens,
+      stream: opts.stream === true,
+    }),
+  });
 }
 
 /** Non-streaming completion (good for HTML generate). */
@@ -43,28 +84,38 @@ export async function openRouterComplete(opts: {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OPENROUTER_API_KEY manquante");
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "http://localhost:3000",
-      "X-Title": "Okapi by MMC SARL",
-    },
-    body: JSON.stringify({
-      model: openRouterModel(opts.engine ?? "flash"),
-      messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user },
-      ] satisfies ChatMessage[],
-      max_tokens: opts.maxTokens ?? 8192,
-    }),
+  const primary = openRouterModel(opts.engine ?? "flash");
+  const messages: ChatMessage[] = [
+    { role: "system", content: opts.system },
+    { role: "user", content: opts.user },
+  ];
+  const maxTokens = opts.maxTokens ?? 8192;
+
+  let res = await openRouterFetch({
+    key,
+    model: primary,
+    messages,
+    maxTokens,
   });
 
-  const data = (await res.json().catch(() => null)) as {
+  let data = (await res.json().catch(() => null)) as {
     error?: { message?: string };
     choices?: { message?: { content?: string } }[];
   } | null;
+
+  if (
+    !res.ok &&
+    isPaymentBlocked(res.status, data?.error?.message) &&
+    primary !== FREE_FALLBACK_MODEL
+  ) {
+    res = await openRouterFetch({
+      key,
+      model: FREE_FALLBACK_MODEL,
+      messages,
+      maxTokens,
+    });
+    data = (await res.json().catch(() => null)) as typeof data;
+  }
 
   if (!res.ok) {
     throw new Error(
@@ -89,24 +140,33 @@ export async function streamOpenRouterChat(opts: {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OPENROUTER_API_KEY manquante");
 
-  const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "http://localhost:3000",
-      "X-Title": "Okapi by MMC SARL",
-    },
-    body: JSON.stringify({
-      model: openRouterModel(opts.engine ?? "flash"),
-      stream: true,
-      messages: [
-        { role: "system", content: opts.system },
-        ...opts.messages,
-      ],
-      max_tokens: 8192,
-    }),
+  const primary = openRouterModel(opts.engine ?? "flash");
+  const messages: ChatMessage[] = [
+    { role: "system", content: opts.system },
+    ...opts.messages,
+  ];
+
+  let upstream = await openRouterFetch({
+    key,
+    model: primary,
+    messages,
+    maxTokens: 8192,
+    stream: true,
   });
+
+  if (
+    !upstream.ok &&
+    isPaymentBlocked(upstream.status) &&
+    primary !== FREE_FALLBACK_MODEL
+  ) {
+    upstream = await openRouterFetch({
+      key,
+      model: FREE_FALLBACK_MODEL,
+      messages,
+      maxTokens: 8192,
+      stream: true,
+    });
+  }
 
   if (!upstream.ok || !upstream.body) {
     const fail = (await upstream.json().catch(() => null)) as {

@@ -9,7 +9,9 @@ export function pickLlmProvider(): LlmProvider | null {
   const forced = process.env.LLM_PROVIDER?.trim().toLowerCase();
 
   if (forced === "openai") {
-    return openAiConfigured() ? "openai" : null;
+    if (openAiConfigured()) return "openai";
+    // Pas de clé OpenAI → OpenRouter si dispo (souvent le cas en RDC)
+    return openRouterConfigured() ? "openrouter" : null;
   }
   if (forced === "openrouter") {
     return openRouterConfigured() ? "openrouter" : null;
