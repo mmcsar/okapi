@@ -33,7 +33,11 @@ import {
   listFilledArtifactLabels,
 } from "@/lib/project-artifacts";
 import { WorkspacePanel } from "@/components/workspace-panel";
-import type { StudioFileId } from "@/components/okapi-studio";
+import {
+  studioFileIdToArtifactKey,
+  studioZipEntries,
+  type StudioFileId,
+} from "@/lib/studio-files";
 
 type HomeDashboardProps = {
   section: string;
@@ -428,24 +432,7 @@ export function HomeDashboard({
   }
 
   function applyStudioCommit(fileId: StudioFileId, content: string) {
-    const key =
-      fileId === "app.html"
-        ? "html"
-        : fileId === "App.tsx"
-          ? "react"
-          : fileId === "App.native.tsx"
-            ? "reactNative"
-            : fileId === "app/page.tsx"
-              ? "nextjs"
-              : fileId === "schema.sql"
-                ? "sql"
-                : fileId === "api.ts"
-                  ? "api"
-                  : fileId === "main.py"
-                    ? "python"
-                    : fileId === "main.dart"
-                      ? "flutter"
-                      : "readme";
+    const key = studioFileIdToArtifactKey(fileId);
     const next = content || null;
     snapRef.current = { ...snapRef.current, [key]: next };
     onChangeArtifact(fileId, content);
@@ -601,17 +588,17 @@ export function HomeDashboard({
   function exportZip() {
     const slug = slugifyFilename(previewTitle);
     const ok = downloadProjectZip(
-      [
-        { path: "app.html", content: previewHtml || "" },
-        { path: "App.tsx", content: previewReact || "" },
-        { path: "App.native.tsx", content: previewReactNative || "" },
-        { path: "app/page.tsx", content: previewNext || "" },
-        { path: "schema.sql", content: previewSql || "" },
-        { path: "api.ts", content: previewApi || "" },
-        { path: "main.py", content: previewPython || "" },
-        { path: "main.dart", content: previewFlutter || "" },
-        { path: "README.md", content: previewReadme || "" },
-      ],
+      studioZipEntries({
+        html: previewHtml,
+        react: previewReact,
+        reactNative: previewReactNative,
+        nextjs: previewNext,
+        sql: previewSql,
+        api: previewApi,
+        python: previewPython,
+        flutter: previewFlutter,
+        readme: previewReadme,
+      }),
       `${slug}-okapi`,
     );
     if (!ok) {
@@ -628,15 +615,17 @@ export function HomeDashboard({
   }
 
   function onChangeArtifact(id: StudioFileId, value: string) {
-    if (id === "app.html") setPreviewHtml(value || null);
-    else if (id === "App.tsx") setPreviewReact(value || null);
-    else if (id === "App.native.tsx") setPreviewReactNative(value || null);
-    else if (id === "app/page.tsx") setPreviewNext(value || null);
-    else if (id === "schema.sql") setPreviewSql(value || null);
-    else if (id === "api.ts") setPreviewApi(value || null);
-    else if (id === "main.py") setPreviewPython(value || null);
-    else if (id === "main.dart") setPreviewFlutter(value || null);
-    else if (id === "README.md") setPreviewReadme(value || null);
+    const key = studioFileIdToArtifactKey(id);
+    const next = value || null;
+    if (key === "html") setPreviewHtml(next);
+    else if (key === "react") setPreviewReact(next);
+    else if (key === "reactNative") setPreviewReactNative(next);
+    else if (key === "nextjs") setPreviewNext(next);
+    else if (key === "sql") setPreviewSql(next);
+    else if (key === "api") setPreviewApi(next);
+    else if (key === "python") setPreviewPython(next);
+    else if (key === "flutter") setPreviewFlutter(next);
+    else if (key === "readme") setPreviewReadme(next);
   }
 
   async function shareProject() {

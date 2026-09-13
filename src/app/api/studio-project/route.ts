@@ -9,32 +9,15 @@ import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
 import { resolveEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
+import {
+  STUDIO_FILE_IDS,
+  type StudioFileId,
+} from "@/lib/studio-files";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-type StudioFileId =
-  | "app.html"
-  | "App.tsx"
-  | "App.native.tsx"
-  | "app/page.tsx"
-  | "schema.sql"
-  | "api.ts"
-  | "main.py"
-  | "main.dart"
-  | "README.md";
-
-const ALLOWED: StudioFileId[] = [
-  "app.html",
-  "App.tsx",
-  "App.native.tsx",
-  "app/page.tsx",
-  "schema.sql",
-  "api.ts",
-  "main.py",
-  "main.dart",
-  "README.md",
-];
+const ALLOWED = STUDIO_FILE_IDS;
 
 type Body = {
   instruction?: string;

@@ -2,6 +2,15 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  DEFAULT_STUDIO_FILE_ID,
+  STUDIO_GROUP_LABEL,
+  buildStudioFileRows,
+  type StudioFileGroup,
+  type StudioFileId,
+} from "@/lib/studio-files";
+
+export type { StudioFileId } from "@/lib/studio-files";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -13,23 +22,12 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ),
 });
 
-export type StudioFileId =
-  | "app.html"
-  | "App.tsx"
-  | "App.native.tsx"
-  | "app/page.tsx"
-  | "schema.sql"
-  | "api.ts"
-  | "main.py"
-  | "main.dart"
-  | "README.md";
-
 type StudioFile = {
   id: StudioFileId;
   label: string;
   language: string;
   badge: string;
-  group: "web" | "mobile" | "data" | "docs";
+  group: StudioFileGroup;
   value: string;
   emptyHint: string;
 };
@@ -67,13 +65,6 @@ type TermLine = {
 };
 
 type TermTab = "problems" | "output" | "terminal";
-
-const GROUP_LABEL: Record<StudioFile["group"], string> = {
-  web: "Web",
-  mobile: "Mobile",
-  data: "Backend",
-  docs: "Docs",
-};
 
 const SUGGESTIONS = [
   "Crée un projet complet : CRM clients + stock pour une boutique à Kinshasa",
@@ -208,95 +199,24 @@ export function OkapiStudio({
   onSaveCloud,
 }: OkapiStudioProps) {
   const files = useMemo<StudioFile[]>(
-    () => [
-      {
-        id: "app.html",
-        label: "app.html",
-        language: "html",
-        badge: "HTML",
-        group: "web",
-        value: html ?? "",
-        emptyHint: "Génère une app ou demande à l’IA.",
-      },
-      {
-        id: "App.tsx",
-        label: "App.tsx",
-        language: "typescript",
-        badge: "React",
-        group: "web",
-        value: react ?? "",
-        emptyHint: "React web — « crée un composant login ».",
-      },
-      {
-        id: "app/page.tsx",
-        label: "app/page.tsx",
-        language: "typescript",
-        badge: "Next",
-        group: "web",
-        value: nextjs ?? "",
-        emptyHint: "Next.js — page App Router.",
-      },
-      {
-        id: "App.native.tsx",
-        label: "App.native.tsx",
-        language: "typescript",
-        badge: "RN",
-        group: "mobile",
-        value: reactNative ?? "",
-        emptyHint: "React Native — écran mobile.",
-      },
-      {
-        id: "main.dart",
-        label: "main.dart",
-        language: "dart",
-        badge: "Flutter",
-        group: "mobile",
-        value: flutter ?? "",
-        emptyHint: "Flutter — widget principal.",
-      },
-      {
-        id: "schema.sql",
-        label: "schema.sql",
-        language: "sql",
-        badge: "SQL",
-        group: "data",
-        value: sql ?? "",
-        emptyHint: "Tables, index, RLS.",
-      },
-      {
-        id: "api.ts",
-        label: "api.ts",
-        language: "typescript",
-        badge: "API",
-        group: "data",
-        value: api ?? "",
-        emptyHint: "Routes backend TypeScript.",
-      },
-      {
-        id: "main.py",
-        label: "main.py",
-        language: "python",
-        badge: "Py",
-        group: "data",
-        value: python ?? "",
-        emptyHint: "Backend Python / FastAPI.",
-      },
-      {
-        id: "README.md",
-        label: "README.md",
-        language: "markdown",
-        badge: "MD",
-        group: "docs",
-        value: readme ?? "",
-        emptyHint: "Documentation du projet.",
-      },
-    ],
+    () =>
+      buildStudioFileRows({
+        html,
+        react,
+        reactNative,
+        nextjs,
+        sql,
+        api,
+        python,
+        flutter,
+        readme,
+      }),
     [html, react, reactNative, nextjs, sql, api, python, flutter, readme],
   );
 
-  const [activeId, setActiveId] = useState<StudioFileId>("app.html");
+  const [activeId, setActiveId] = useState<StudioFileId>(DEFAULT_STUDIO_FILE_ID);
   const active = files.find((f) => f.id === activeId) ?? files[0];
-  const [openTabs, setOpenTabs] = useState<StudioFileId[]>(["app.html"]);
+  const [openTabs, setOpenTabs] = useState<StudioFileId[]>([DEFAULT_STUDIO_FILE_ID]);
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
   const [quickIndex, setQuickIndex] = useState(0);
@@ -353,7 +273,7 @@ export function OkapiStudio({
     return order
       .map((g) => ({
         id: g,
-        label: GROUP_LABEL[g],
+        label: STUDIO_GROUP_LABEL[g],
         items: files.filter((f) => f.group === g),
       }))
       .filter((g) => g.items.length > 0);
@@ -367,7 +287,7 @@ export function OkapiStudio({
         f.label.toLowerCase().includes(q) ||
         f.id.toLowerCase().includes(q) ||
         f.badge.toLowerCase().includes(q) ||
-        GROUP_LABEL[f.group].toLowerCase().includes(q),
+        STUDIO_GROUP_LABEL[f.group].toLowerCase().includes(q),
     );
   }, [files, quickQuery]);
 
@@ -519,7 +439,7 @@ export function OkapiStudio({
 
   useEffect(() => {
     const preferred =
-      files.find((f) => f.value.trim())?.id ?? ("app.html" as StudioFileId);
+      files.find((f) => f.value.trim())?.id ?? DEFAULT_STUDIO_FILE_ID;
     setActiveId((prev) => {
       const still = files.find((f) => f.id === prev);
       if (still?.value.trim()) return prev;
@@ -700,10 +620,10 @@ export function OkapiStudio({
   function closeTab(id: StudioFileId) {
     setOpenTabs((prev) => {
       const next = prev.filter((x) => x !== id);
-      const fallback = (next[0] ?? "app.html") as StudioFileId;
+      const fallback = (next[0] ?? DEFAULT_STUDIO_FILE_ID) as StudioFileId;
       if (next.length === 0) {
-        setActiveId("app.html");
-        return ["app.html"];
+        setActiveId(DEFAULT_STUDIO_FILE_ID);
+        return [DEFAULT_STUDIO_FILE_ID];
       }
       if (activeId === id) {
         const idx = prev.indexOf(id);
@@ -2031,7 +1951,7 @@ export function OkapiStudio({
                         {file.label}
                       </span>
                       <span className="shrink-0 text-[10px] text-[#5f766a]">
-                        {GROUP_LABEL[file.group]}
+                        {STUDIO_GROUP_LABEL[file.group]}
                       </span>
                     </button>
                   );
