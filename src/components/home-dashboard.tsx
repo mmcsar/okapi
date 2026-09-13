@@ -26,6 +26,12 @@ import {
 } from "@/lib/okapi-engine";
 import type { OkapiProject } from "@/lib/supabase";
 import type { OkapiArtifacts } from "@/lib/project-artifacts";
+import {
+  artifactsFromSnap,
+  ensureReadmeArtifact,
+  keepOrReplace,
+  listFilledArtifactLabels,
+} from "@/lib/project-artifacts";
 import { WorkspacePanel } from "@/components/workspace-panel";
 import type { StudioFileId } from "@/components/okapi-studio";
 
@@ -345,27 +351,50 @@ export function HomeDashboard({
 
     try {
       const snap = snapRef.current;
-      const artifacts: OkapiArtifacts = {
-        react: snap.react,
-        reactNative: snap.reactNative,
-        nextjs: snap.nextjs,
-        sql: snap.sql,
-        api: snap.api,
-        python: snap.python,
-        flutter: snap.flutter,
-        readme: snap.readme,
-        ...payload.artifacts,
-      };
+      let artifacts = ensureReadmeArtifact(
+        artifactsFromSnap({
+          react: keepOrReplace(payload.artifacts?.react, snap.react),
+          reactNative: keepOrReplace(
+            payload.artifacts?.reactNative,
+            snap.reactNative,
+          ),
+          nextjs: keepOrReplace(payload.artifacts?.nextjs, snap.nextjs),
+          sql: keepOrReplace(payload.artifacts?.sql, snap.sql),
+          api: keepOrReplace(payload.artifacts?.api, snap.api),
+          python: keepOrReplace(payload.artifacts?.python, snap.python),
+          flutter: keepOrReplace(payload.artifacts?.flutter, snap.flutter),
+          readme: keepOrReplace(payload.artifacts?.readme, snap.readme),
+          images: payload.artifacts?.images,
+        }),
+        { title: payload.title, hasHtml: Boolean(payload.html?.trim()) },
+      );
+
+      // Keep UI in sync if we synthesized a README
+      if (artifacts.readme && artifacts.readme !== snap.readme) {
+        snapRef.current = { ...snapRef.current, readme: artifacts.readme };
+        setPreviewReadme(artifacts.readme);
+      }
 
       const body = {
         title: payload.title,
         sector: payload.sector,
         html: payload.html,
         summary: payload.summary,
-        artifacts,
-        sql: artifacts.sql ?? undefined,
-        api: artifacts.api ?? undefined,
-        readme: artifacts.readme ?? undefined,
+        // Full explicit bundle — server merges only present keys; we send all.
+        artifacts: {
+          react: artifacts.react ?? null,
+          reactNative: artifacts.reactNative ?? null,
+          nextjs: artifacts.nextjs ?? null,
+          sql: artifacts.sql ?? null,
+          api: artifacts.api ?? null,
+          python: artifacts.python ?? null,
+          flutter: artifacts.flutter ?? null,
+          readme: artifacts.readme ?? null,
+          ...(artifacts.images?.length ? { images: artifacts.images } : {}),
+        },
+        sql: artifacts.sql ?? null,
+        api: artifacts.api ?? null,
+        readme: artifacts.readme ?? null,
       };
 
       const currentId = projectIdRef.current;
@@ -414,7 +443,9 @@ export function HomeDashboard({
                     : fileId === "main.dart"
                       ? "flutter"
                       : "readme";
-    snapRef.current = { ...snapRef.current, [key]: content || null };
+    const next = content || null;
+    snapRef.current = { ...snapRef.current, [key]: next };
+    onChangeArtifact(fileId, content);
     void saveCloudNow({ silent: true });
   }
 
@@ -450,16 +481,7 @@ export function HomeDashboard({
       sector: snap.sector,
       html: snap.html || "",
       summary: "Sauvegarde Studio Okapi",
-      artifacts: {
-        react: snap.react,
-        reactNative: snap.reactNative,
-        nextjs: snap.nextjs,
-        sql: snap.sql,
-        api: snap.api,
-        python: snap.python,
-        flutter: snap.flutter,
-        readme: snap.readme,
-      },
+      artifacts: artifactsFromSnap(snap),
     });
     setSaveBusy(false);
     if (err) {
@@ -467,14 +489,18 @@ export function HomeDashboard({
       if (!opts?.silent) setStatus(err);
       return;
     }
-    setCloudStatus("Cloud · à jour");
+    const labels = listFilledArtifactLabels(artifactsFromSnap(snap), snap.html);
+    setCloudStatus(
+      labels.length ? `Cloud · ${labels.length} fichier${labels.length > 1 ? "s" : ""}` : "Cloud · à jour",
+    );
     if (!opts?.silent) {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content:
-            "Projet sauvegardé sur ton compte Okapi (tous les fichiers Studio).",
+          content: labels.length
+            ? `Projet sauvegardé (${labels.join(", ")}).`
+            : "Projet sauvegardé sur ton compte Okapi.",
         },
       ]);
     }
@@ -842,6 +868,9 @@ export function HomeDashboard({
           message?: string;
           text?: string;
           html?: string;
+          react?: string | null;
+          reactNative?: string | null;
+          nextjs?: string | null;
           sql?: string | null;
           api?: string | null;
           readme?: string | null;
@@ -870,10 +899,26 @@ export function HomeDashboard({
           gotDone = true;
           const sec = Math.round((Date.now() - started) / 1000);
           const title = event.title || "Preview Okapi";
+          const nextReact = keepOrReplace(event.react, snapRef.current.react);
+          const nextRn = keepOrReplace(
+            event.reactNative,
+            snapRef.current.reactNative,
+          );
+          const nextNext = keepOrReplace(event.nextjs, snapRef.current.nextjs);
+          const nextSql = keepOrReplace(event.sql, snapRef.current.sql);
+          const nextApi = keepOrReplace(event.api, snapRef.current.api);
+          const nextReadme = keepOrReplace(
+            event.readme,
+            snapRef.current.readme,
+          );
+
           setPreviewHtml(event.html);
-          if (event.sql) setPreviewSql(event.sql);
-          if (event.api) setPreviewApi(event.api);
-          if (event.readme) setPreviewReadme(event.readme);
+          setPreviewReact(nextReact);
+          setPreviewReactNative(nextRn);
+          setPreviewNext(nextNext);
+          setPreviewSql(nextSql);
+          setPreviewApi(nextApi);
+          setPreviewReadme(nextReadme);
           setPreviewTitle(title);
           if (devModeRef.current) setStudioFocusKey((k) => k + 1);
           else setWorkspaceFocusKey((k) => k + 1);
@@ -881,39 +926,45 @@ export function HomeDashboard({
           snapRef.current = {
             ...snapRef.current,
             html: event.html,
-            sql: event.sql ?? snapRef.current.sql,
-            api: event.api ?? snapRef.current.api,
-            readme: event.readme ?? snapRef.current.readme,
+            react: nextReact,
+            reactNative: nextRn,
+            nextjs: nextNext,
+            sql: nextSql,
+            api: nextApi,
+            readme: nextReadme,
             title,
             sector,
           };
+
+          const bundle = ensureReadmeArtifact(
+            artifactsFromSnap(snapRef.current),
+            { title, hasHtml: true },
+          );
+          if (bundle.readme && bundle.readme !== nextReadme) {
+            setPreviewReadme(bundle.readme);
+            snapRef.current = { ...snapRef.current, readme: bundle.readme };
+          }
 
           const saveNote = await persistProject({
             title,
             sector,
             html: event.html,
             summary: event.summary,
-            artifacts: {
-              sql: event.sql ?? null,
-              api: event.api ?? null,
-              readme: event.readme ?? null,
-            },
+            artifacts: bundle,
           });
-          if (!saveNote && user) setCloudStatus("Cloud · à jour");
-          else if (saveNote) setCloudStatus("Cloud · à connecter");
-
-          const backendBits = [
-            event.sql ? "Schéma SQL" : null,
-            event.api ? "API" : null,
-            event.readme ? "README" : null,
-          ].filter(Boolean);
+          const labels = listFilledArtifactLabels(bundle, event.html);
+          if (!saveNote && user) {
+            setCloudStatus(
+              labels.length
+                ? `Cloud · ${labels.length} fichier${labels.length > 1 ? "s" : ""}`
+                : "Cloud · à jour",
+            );
+          } else if (saveNote) setCloudStatus("Cloud · à connecter");
 
           setAssistant(
             [
               event.summary ?? "Preview prête.",
-              backendBits.length
-                ? `· Livrables : ${backendBits.join(" + ")}`
-                : "",
+              labels.length ? `· Livrables : ${labels.join(" + ")}` : "",
               `(${sec}s)`,
               saveNote
                 ? `· ${saveNote}`

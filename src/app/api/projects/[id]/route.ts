@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   mergeArtifacts,
   normalizeArtifacts,
+  pickArtifactPatch,
   PROJECT_SELECT,
   type OkapiArtifacts,
 } from "@/lib/project-artifacts";
@@ -89,10 +90,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
     );
 
     const next = mergeArtifacts(current, {
-      ...normalizeArtifacts(body.artifacts),
-      sql: body.sql ?? undefined,
-      api: body.api ?? undefined,
-      readme: body.readme ?? undefined,
+      ...pickArtifactPatch(body.artifacts),
+      ...(body?.sql !== undefined ? { sql: body.sql } : {}),
+      ...(body?.api !== undefined ? { api: body.api } : {}),
+      ...(body?.readme !== undefined ? { readme: body.readme } : {}),
     });
 
     patch.artifacts = next;

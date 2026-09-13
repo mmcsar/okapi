@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   mergeArtifacts,
-  normalizeArtifacts,
+  pickArtifactPatch,
   PROJECT_SELECT,
   type OkapiArtifacts,
 } from "@/lib/project-artifacts";
@@ -90,12 +90,13 @@ export async function POST(request: Request) {
   const html = body?.html ?? "";
   const summary = body?.summary?.trim() || null;
   const artifacts = mergeArtifacts(
+    {},
     {
-      sql: body?.sql ?? null,
-      api: body?.api ?? null,
-      readme: body?.readme ?? null,
+      ...pickArtifactPatch(body?.artifacts),
+      ...(body?.sql !== undefined ? { sql: body.sql } : {}),
+      ...(body?.api !== undefined ? { api: body.api } : {}),
+      ...(body?.readme !== undefined ? { readme: body.readme } : {}),
     },
-    normalizeArtifacts(body?.artifacts),
   );
 
   const insertRow: Record<string, unknown> = {

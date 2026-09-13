@@ -89,6 +89,10 @@ OUTPUT FORMAT — use these exact markers (no markdown fences around the whole r
 
 ===OKAPI_HTML===
 <!DOCTYPE html>...complete single-file app...
+===OKAPI_REACT===
+// App.tsx — React + Tailwind port of the same UI (export default function App)
+===OKAPI_NEXT===
+// app/page.tsx — Next.js App Router page mirroring the product
 ===OKAPI_SQL===
 -- Okapi cloud DB / Postgres schema: tables, indexes, row-level security policies
 ===OKAPI_API===
@@ -104,11 +108,13 @@ Rules:
 1. HTML is mobile-first, Tailwind CDN, RDC-friendly (WhatsApp / Mobile Money when useful).
 2. For photos in HTML use:
    https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
-3. SQL: enable RLS, sensible policies.
-4. API stubs: clear, copy-pasteable.
-5. Do only what was requested — no useless marketing filler.
-6. Never mention third-party AI or database vendor brand names in user-facing text.
-7. On edit: return ALL sections updated.
+3. Always include HTML + REACT + NEXT + SQL + API + README (all sections, even on edits).
+4. React/Next must be real runnable stubs aligned with the HTML product — not empty placeholders.
+5. SQL: enable RLS, sensible policies.
+6. API stubs: clear, copy-pasteable.
+7. Do only what was requested — no useless marketing filler.
+8. Never mention third-party AI or database vendor brand names in user-facing text.
+9. On edit: return ALL sections updated (never omit a section that existed).
 ${scale}
 
 ${languageInstruction(language)}
@@ -123,6 +129,10 @@ function buildSystemDebug(language?: string | null, fullstack = false) {
 
 ===OKAPI_HTML===
 <!DOCTYPE html>...FULL fixed HTML...
+===OKAPI_REACT===
+// fixed App.tsx if needed (else improve current)
+===OKAPI_NEXT===
+// fixed app/page.tsx if needed
 ===OKAPI_SQL===
 -- fixed SQL if needed (else keep/improve current)
 ===OKAPI_API===
@@ -450,6 +460,17 @@ export async function POST(request: Request) {
       };
     }
     const title = titleFromHtml(artifacts.html, `Projet ${sector}`);
+    if (!artifacts.readme?.trim()) {
+      artifacts.readme = [
+        `# ${title}`,
+        "",
+        "Projet généré avec Okapi (MMC SARL).",
+        "",
+        "- Preview : `app.html`",
+        "- Studio : React / Next / SQL / API selon les fichiers livrés",
+        "",
+      ].join("\n");
+    }
     const fullstackReady = Boolean(artifacts.sql || artifacts.api);
     const summary = debug
       ? artifacts.readme?.trim() ||
@@ -473,6 +494,9 @@ export async function POST(request: Request) {
       large,
       engine,
       html: artifacts.html,
+      react: artifacts.react,
+      reactNative: artifacts.reactNative,
+      nextjs: artifacts.nextjs,
       sql: artifacts.sql,
       api: artifacts.api,
       readme: artifacts.readme,
@@ -553,6 +577,9 @@ export async function POST(request: Request) {
             mode: out.mode,
             debug: out.debug,
             html: out.html,
+            react: out.react,
+            reactNative: out.reactNative,
+            nextjs: out.nextjs,
             sql: out.sql,
             api: out.api,
             readme: out.readme,

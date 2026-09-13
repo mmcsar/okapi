@@ -1,13 +1,19 @@
-/** Fullstack generation helpers — HTML + Supabase SQL + API stubs. */
+/** Fullstack generation helpers — HTML + SQL + API + optional React/Next. */
 
 export type GenerateMode = "html" | "fullstack";
 
-export type OkapiArtifacts = {
+export type OkapiGenerateArtifacts = {
   html: string;
+  react: string | null;
+  reactNative: string | null;
+  nextjs: string | null;
   sql: string | null;
   api: string | null;
   readme: string | null;
 };
+
+/** @deprecated Use OkapiGenerateArtifacts — kept as alias for generate route. */
+export type OkapiArtifacts = OkapiGenerateArtifacts;
 
 const FULLSTACK_RE =
   /\b(fullstack|full[\s-]?stack|backend|back[\s-]?end|supabase|postgres|postgresql|base de donn[eé]es|bdd|schema sql|rls|crud|api rest|auth|authentification|login|inscription|serveur|endpoint|table sql|migration)\b/i;
@@ -37,25 +43,47 @@ export function resolveGenerateMode(
   return wantsFullstack(message) ? "fullstack" : "html";
 }
 
+const MARKER_ORDER = [
+  "HTML",
+  "REACT",
+  "RN",
+  "NEXT",
+  "SQL",
+  "API",
+  "README",
+  "END",
+] as const;
+
+function marker(name: string) {
+  return `===OKAPI_${name}===`;
+}
+
 function sliceBetween(raw: string, start: string, endMarkers: string[]) {
   const from = raw.indexOf(start);
   if (from < 0) return null;
   const bodyStart = from + start.length;
   let end = raw.length;
-  for (const marker of endMarkers) {
-    const i = raw.indexOf(marker, bodyStart);
+  for (const em of endMarkers) {
+    const i = raw.indexOf(em, bodyStart);
     if (i >= 0 && i < end) end = i;
   }
   return raw.slice(bodyStart, end).trim();
 }
 
+function endsAfter(name: (typeof MARKER_ORDER)[number]) {
+  const i = MARKER_ORDER.indexOf(name);
+  return MARKER_ORDER.slice(i + 1).map((n) => marker(n));
+}
+
 function fence(raw: string, lang: string) {
-  const re = new RegExp(
-    "```(?:" + lang + ")?\\s*([\\s\\S]*?)```",
-    "i",
-  );
+  const re = new RegExp("```(?:" + lang + ")?\\s*([\\s\\S]*?)```", "i");
   const m = raw.match(re);
   return m?.[1]?.trim() || null;
+}
+
+function nonEmpty(s: string | null, min = 20): string | null {
+  if (!s || s.length < min) return null;
+  return s;
 }
 
 /** Close truncated HTML so the Preview iframe still renders. */
@@ -91,38 +119,31 @@ export function extractHtmlDocument(text: string) {
 }
 
 /**
- * Parse Okapi delimiter blocks, or fall back to HTML-only extraction.
+ * Parse Okapi delimiter blocks (HTML + optional React/Next/SQL/API/README).
  */
-export function parseOkapiArtifacts(raw: string): OkapiArtifacts {
+export function parseOkapiArtifacts(raw: string): OkapiGenerateArtifacts {
   const text = raw.trim();
-  const hasMarkers = /===OKAPI_(HTML|SQL|API|README)===/i.test(text);
+  const hasMarkers =
+    /===OKAPI_(HTML|REACT|RN|NEXT|SQL|API|README)===/i.test(text);
 
   if (hasMarkers) {
     const htmlRaw =
-      sliceBetween(text, "===OKAPI_HTML===", [
-        "===OKAPI_SQL===",
-        "===OKAPI_API===",
-        "===OKAPI_README===",
-        "===OKAPI_END===",
-      ]) || "";
-    const sql = sliceBetween(text, "===OKAPI_SQL===", [
-      "===OKAPI_API===",
-      "===OKAPI_README===",
-      "===OKAPI_END===",
-    ]);
-    const api = sliceBetween(text, "===OKAPI_API===", [
-      "===OKAPI_README===",
-      "===OKAPI_END===",
-    ]);
-    const readme = sliceBetween(text, "===OKAPI_README===", [
-      "===OKAPI_END===",
-    ]);
+      sliceBetween(text, marker("HTML"), endsAfter("HTML")) || "";
+    const react = sliceBetween(text, marker("REACT"), endsAfter("REACT"));
+    const reactNative = sliceBetween(text, marker("RN"), endsAfter("RN"));
+    const nextjs = sliceBetween(text, marker("NEXT"), endsAfter("NEXT"));
+    const sql = sliceBetween(text, marker("SQL"), endsAfter("SQL"));
+    const api = sliceBetween(text, marker("API"), endsAfter("API"));
+    const readme = sliceBetween(text, marker("README"), endsAfter("README"));
 
     return {
       html: extractHtmlDocument(htmlRaw),
-      sql: sql && sql.length > 20 ? sql : null,
-      api: api && api.length > 20 ? api : null,
-      readme: readme && readme.length > 10 ? readme : null,
+      react: nonEmpty(react, 40),
+      reactNative: nonEmpty(reactNative, 40),
+      nextjs: nonEmpty(nextjs, 40),
+      sql: nonEmpty(sql, 20),
+      api: nonEmpty(api, 20),
+      readme: nonEmpty(readme, 10),
     };
   }
 
@@ -136,9 +157,13 @@ export function parseOkapiArtifacts(raw: string): OkapiArtifacts {
     fence(text, "ts") ||
     fence(text, "javascript") ||
     fence(text, "js");
+  const tsx = fence(text, "tsx") || fence(text, "jsx");
 
   return {
     html,
+    react: tsx && !tsx.includes("<html") ? nonEmpty(tsx, 40) : null,
+    reactNative: null,
+    nextjs: null,
     sql: sql && !sql.includes("<html") ? sql : null,
     api: api && !api.includes("<html") ? api : null,
     readme: null,
