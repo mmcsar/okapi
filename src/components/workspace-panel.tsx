@@ -10,7 +10,7 @@ const OkapiStudio = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-full min-h-[320px] items-center justify-center bg-[#0b1410] text-sm text-[#8aa396]">
+      <div className="flex h-full min-h-[320px] items-center justify-center okapi-studio-shell text-sm text-[var(--okapi-studio-muted)]">
         Ouverture Okapi Studio…
       </div>
     ),
@@ -48,7 +48,7 @@ type WorkspacePanelProps = {
   onExportReadme: () => void;
   onExportZip?: () => void;
   onChangeArtifact: (id: StudioFileId, value: string) => void;
-  onSaveCloud?: () => void;
+  onSaveCloud?: () => void | Promise<boolean>;
   onStudioCommitted?: (fileId: StudioFileId, content: string) => void;
   cloudStatus?: string | null;
   engine?: string;
@@ -73,33 +73,53 @@ function CodeView({
   value,
   empty,
   languageLabel,
+  dark = false,
 }: {
   value: string | null;
   empty: string;
   languageLabel: string;
+  dark?: boolean;
 }) {
   if (!value) {
     return (
       <div className="flex h-full min-h-[280px] flex-col items-center justify-center px-6 text-center">
-        <p className="font-[family-name:var(--font-syne)] text-base font-bold text-okapi-ink/45">
+        <p
+          className={`font-[family-name:var(--font-syne)] text-base font-bold ${
+            dark ? "text-[#c8ddd2]/70" : "text-okapi-ink/45"
+          }`}
+        >
           Pas encore de {languageLabel}
         </p>
-        <p className="mt-2 max-w-sm text-sm text-okapi-ink/40">{empty}</p>
+        <p
+          className={`mt-2 max-w-sm text-sm ${
+            dark ? "text-[#8aa89a]" : "text-okapi-ink/40"
+          }`}
+        >
+          {empty}
+        </p>
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-[var(--okapi-stroke)] px-3 py-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-okapi-ink/35">
+      <div
+        className={`flex items-center justify-between border-b px-3 py-1.5 ${
+          dark ? "border-white/10" : "border-[var(--okapi-stroke)]"
+        }`}
+      >
+        <span
+          className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${
+            dark ? "text-[#8aa89a]" : "text-okapi-ink/35"
+          }`}
+        >
           {languageLabel}
         </span>
-        <span className="text-[10px] text-okapi-ink/30">
+        <span className={`text-[10px] ${dark ? "text-[#5f766a]" : "text-okapi-ink/30"}`}>
           {value.length.toLocaleString("fr-FR")} car.
         </span>
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto bg-[#0f1a14] p-4 text-[12px] leading-relaxed text-[#d7e6dc]">
+      <pre className="okapi-studio-code min-h-0 flex-1 overflow-auto p-4 text-[12px] leading-relaxed">
         <code className="whitespace-pre-wrap break-words font-mono">{value}</code>
       </pre>
     </div>
@@ -179,18 +199,18 @@ export function WorkspacePanel({
           ? "Exporter Docs"
           : "Exporter HTML";
 
-  const studioBleed = immersive && tab === "studio";
+  const studioBleed = immersive;
 
   return (
     <section
       className={`flex min-h-0 flex-1 flex-col lg:min-h-0 ${
         studioBleed
-          ? "min-h-[48vh] bg-[#0a100e]"
+          ? "okapi-studio-shell min-h-[48vh]"
           : "min-h-[48vh] bg-[linear-gradient(180deg,rgba(223,230,225,0.85),rgba(232,238,233,0.9))]"
       }`}
     >
       {studioBleed ? (
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 bg-[#0f1814] px-3 py-1.5">
+        <div className="okapi-studio-chrome flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5">
           <div className="flex items-center gap-1">
             {(
               [
@@ -415,7 +435,11 @@ export function WorkspacePanel({
                 />
               </div>
             ) : (
-              <p className="text-sm text-okapi-ink/40">
+              <p
+                className={`text-sm ${
+                  immersive ? "text-[#8aa89a]" : "text-okapi-ink/40"
+                }`}
+              >
                 La preview apparaîtra ici.
               </p>
             )}
@@ -427,6 +451,7 @@ export function WorkspacePanel({
             value={html}
             languageLabel="HTML"
             empty="Génère une app pour voir le code source ici."
+            dark={immersive}
           />
         ) : null}
 
@@ -435,6 +460,7 @@ export function WorkspacePanel({
             value={sql}
             languageLabel="Schéma SQL"
             empty="Demande un projet fullstack (auth, base, CRUD…) pour générer le schéma."
+            dark={immersive}
           />
         ) : null}
 
@@ -443,6 +469,7 @@ export function WorkspacePanel({
             value={api}
             languageLabel="API TypeScript"
             empty="Les routes API apparaissent en mode fullstack."
+            dark={immersive}
           />
         ) : null}
 
@@ -451,6 +478,7 @@ export function WorkspacePanel({
             value={readme}
             languageLabel="README"
             empty="Le guide d’installation apparaît avec un projet fullstack."
+            dark={immersive}
           />
         ) : null}
       </div>

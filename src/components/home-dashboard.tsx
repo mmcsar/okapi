@@ -118,6 +118,9 @@ export function HomeDashboard({
     title: "Preview",
     sector: "Général",
   });
+  const saveBusyRef = useRef(false);
+  const saveQueuedRef = useRef(false);
+  const saveDebounceRef = useRef<number | null>(null);
 
   useEffect(() => {
     snapRef.current = {
@@ -446,14 +449,25 @@ export function HomeDashboard({
     const next = content || null;
     snapRef.current = { ...snapRef.current, [key]: next };
     onChangeArtifact(fileId, content);
-    void saveCloudNow({ silent: true });
+    scheduleCloudSave();
   }
 
-  async function saveCloudNow(opts?: { silent?: boolean }) {
+  function scheduleCloudSave() {
+    if (saveDebounceRef.current) {
+      window.clearTimeout(saveDebounceRef.current);
+    }
+    saveDebounceRef.current = window.setTimeout(() => {
+      saveDebounceRef.current = null;
+      void saveCloudNow({ silent: true });
+    }, 280);
+  }
+
+  async function saveCloudNow(opts?: { silent?: boolean }): Promise<boolean> {
     const snap = snapRef.current;
     if (
       !snap.html &&
       !snap.react &&
+      !snap.reactNative &&
       !snap.nextjs &&
       !snap.sql &&
       !snap.api &&
@@ -464,7 +478,7 @@ export function HomeDashboard({
       if (!opts?.silent) {
         setStatus("Rien à sauvegarder — génère ou édite d’abord.");
       }
-      return;
+      return false;
     }
     if (!user) {
       setCloudStatus("Connexion requise");
@@ -472,8 +486,13 @@ export function HomeDashboard({
         setStatus("Connecte-toi pour sauvegarder en cloud.");
         onNavigate?.("login");
       }
-      return;
+      return false;
     }
+    if (saveBusyRef.current) {
+      saveQueuedRef.current = true;
+      return false;
+    }
+    saveBusyRef.current = true;
     setSaveBusy(true);
     setCloudStatus("Sauvegarde…");
     const err = await persistProject({
@@ -483,11 +502,16 @@ export function HomeDashboard({
       summary: "Sauvegarde Studio Okapi",
       artifacts: artifactsFromSnap(snap),
     });
+    saveBusyRef.current = false;
     setSaveBusy(false);
+    if (saveQueuedRef.current) {
+      saveQueuedRef.current = false;
+      return saveCloudNow({ silent: true });
+    }
     if (err) {
       setCloudStatus("Échec cloud");
       if (!opts?.silent) setStatus(err);
-      return;
+      return false;
     }
     const labels = listFilledArtifactLabels(artifactsFromSnap(snap), snap.html);
     setCloudStatus(
@@ -504,6 +528,7 @@ export function HomeDashboard({
         },
       ]);
     }
+    return true;
   }
 
   async function onPickImage(file: File | null) {
@@ -1064,7 +1089,7 @@ export function HomeDashboard({
     onExportReadme: exportReadme,
     onExportZip: exportZip,
     onChangeArtifact,
-    onSaveCloud: () => void saveCloudNow(),
+    onSaveCloud: () => saveCloudNow(),
     onStudioCommitted: applyStudioCommit,
     cloudStatus: saveBusy ? "Sauvegarde…" : cloudStatus,
     engine,
@@ -1344,7 +1369,7 @@ export function HomeDashboard({
                 disabled={sending}
                 className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
                   devMode
-                    ? "border-[#0f1a14]/50 bg-[#0f1a14] text-white"
+                    ? "border-okapi-forest/60 bg-okapi-forest text-white"
                     : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
                 }`}
                 title="Mode Dev — ouvre Studio pour coder ; le chat reste pour les conseils"
@@ -1435,7 +1460,7 @@ export function HomeDashboard({
       <header
         className={`flex items-center justify-between gap-3 border-b px-4 py-3.5 lg:px-6 ${
           immersiveStudio
-            ? "border-white/10 bg-[#0f1814]"
+            ? "okapi-studio-chrome border-b"
             : "border-[var(--okapi-stroke)]"
         }`}
       >
@@ -1600,7 +1625,7 @@ export function HomeDashboard({
             />
           </div>
           <div
-            className={`shrink-0 border-t border-white/10 bg-[#0f1814] transition-[height] ${
+            className={`okapi-studio-chrome shrink-0 border-t transition-[height] ${
               studioChatOpen ? "h-[min(40vh,280px)]" : "h-14"
             }`}
           >

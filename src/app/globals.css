@@ -11,6 +11,14 @@
   --okapi-glass: rgba(255, 255, 255, 0.78);
   --okapi-stroke: rgba(20, 38, 28, 0.09);
   --okapi-glow: rgba(232, 137, 42, 0.28);
+  /* Studio / back sombre — canopée, pas noir générique */
+  --okapi-studio-ink: #06100c;
+  --okapi-studio-base: #0a1410;
+  --okapi-studio-chrome: #101c17;
+  --okapi-studio-panel: #0d1814;
+  --okapi-studio-code: #0c1612;
+  --okapi-studio-text: #d8e8df;
+  --okapi-studio-muted: #8aa89a;
   --background: #e7ece8;
   --foreground: #14261c;
 }
@@ -445,4 +453,73 @@ body::before {
 
 .typing-dots span:nth-child(3) {
   animation-delay: 0.3s;
+}
+
+/* Fond Studio / back — forêt profonde + lueur ambre */
+.okapi-studio-shell {
+  color: var(--okapi-studio-text);
+  background-color: var(--okapi-studio-ink);
+  background-image:
+    radial-gradient(
+      ellipse 75% 55% at 100% -5%,
+      rgba(232, 137, 42, 0.11),
+      transparent 52%
+    ),
+    radial-gradient(
+      ellipse 65% 50% at -5% 105%,
+      rgba(47, 107, 79, 0.28),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 45% 35% at 55% 40%,
+      rgba(27, 79, 58, 0.14),
+      transparent 70%
+    ),
+    linear-gradient(
+      168deg,
+      #0e1a15 0%,
+      #0a1410 42%,
+      #07110d 100%
+    );
+}
+
+.okapi-studio-chrome {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(27, 79, 58, 0.22) 0%,
+      rgba(16, 28, 23, 0.96) 100%
+    ),
+    var(--okapi-studio-chrome);
+  border-color: rgba(232, 137, 42, 0.18);
+}
+
+.okapi-studio-panel {
+  background:
+    linear-gradient(
+      165deg,
+      rgba(27, 79, 58, 0.12) 0%,
+      rgba(13, 24, 20, 0.98) 55%
+    ),
+    var(--okapi-studio-panel);
+}
+
+.okapi-studio-code {
+  color: var(--okapi-studio-text);
+  background:
+    radial-gradient(
+      ellipse 80% 60% at 0% 0%,
+      rgba(47, 107, 79, 0.12),
+      transparent 55%
+    ),
+    linear-gradient(180deg, #0e1a15 0%, #0b1511 100%);
+}
+
+.okapi-studio-activity {
+  background:
+    linear-gradient(
+      180deg,
+      #0a1511 0%,
+      #06100c 100%
+    );
 }

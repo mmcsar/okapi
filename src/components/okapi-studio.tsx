@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full flex-col items-center justify-center gap-2 bg-[#0c1210] text-sm text-[#7d9588]">
+    <div className="okapi-studio-shell flex h-full flex-col items-center justify-center gap-2 text-sm text-[var(--okapi-studio-muted)]">
       <span className="h-8 w-8 animate-pulse rounded-lg bg-[#1b4f3a]/40" />
       Chargement Okapi Studio…
     </div>
@@ -49,7 +49,7 @@ type OkapiStudioProps = {
   engine?: string;
   onChangeFile: (id: StudioFileId, value: string) => void;
   onCommitted?: (fileId: StudioFileId, content: string) => void;
-  onSaveCloud?: () => void;
+  onSaveCloud?: () => void | Promise<boolean>;
 };
 
 type AiMsg = { role: "user" | "assistant"; content: string };
@@ -489,9 +489,15 @@ export function OkapiStudio({
         label: "Sauvegarder cloud",
         hint: "Ctrl+S",
         run: () => {
-          onSaveCloud();
-          logTerm("Sauvegarde cloud demandée", "ok");
-          setDirtyIds(new Set());
+          void (async () => {
+            const ok = await onSaveCloud?.();
+            if (ok) {
+              setDirtyIds(new Set());
+              logTerm("Sauvegarde cloud OK", "ok");
+            } else {
+              logTerm("Sauvegarde cloud échouée ou en cours", "err");
+            }
+          })();
         },
       });
     }
@@ -521,7 +527,7 @@ export function OkapiStudio({
     });
     setOpenTabs((prev) => {
       if (prev.includes(preferred)) return prev;
-      return prev.length ? prev : [preferred];
+      return prev.length ? [...prev, preferred] : [preferred];
     });
   }, [files]);
 
@@ -897,13 +903,14 @@ export function OkapiStudio({
   function acceptAllPending() {
     if (pendingList.length === 0) return;
     let hadHtml = false;
-    for (const item of pendingList) {
+    const batch = [...pendingList];
+    for (const item of batch) {
       onChangeFile(item.fileId, item.after);
       onCommitted?.(item.fileId, item.after);
       clearDirty(item.fileId);
       if (item.fileId === "app.html") hadHtml = true;
     }
-    const n = pendingList.length;
+    const n = batch.length;
     setPendingList([]);
     setAiMessages((prev) => [
       ...prev,
@@ -995,9 +1002,15 @@ export function OkapiStudio({
       if (meta && e.key.toLowerCase() === "s") {
         e.preventDefault();
         if (onSaveCloud) {
-          onSaveCloud();
-          logTerm("Sauvegarde cloud (Ctrl+S)", "ok");
-          setDirtyIds(new Set());
+          void (async () => {
+            const ok = await onSaveCloud();
+            if (ok) {
+              setDirtyIds(new Set());
+              logTerm("Sauvegarde cloud (Ctrl+S) OK", "ok");
+            } else {
+              logTerm("Sauvegarde cloud échouée ou en cours", "err");
+            }
+          })();
         } else {
           logTerm("Sauvegarde cloud indisponible", "info");
           openTerminal("terminal");
@@ -1065,10 +1078,10 @@ export function OkapiStudio({
   };
 
   return (
-    <div className="relative flex h-full min-h-[480px] flex-1 flex-col overflow-hidden bg-[#0a100e] text-[#d5e4db]">
+    <div className="okapi-studio-shell relative flex h-full min-h-[480px] flex-1 flex-col overflow-hidden">
       {/* Safety banner */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-[#e8892a]/25 bg-[#0f1814] px-3 py-1.5">
-        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[#e8892a]" />
+      <div className="okapi-studio-chrome flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
+        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[#e8892a] shadow-[0_0_8px_rgba(232,137,42,0.65)]" />
         <p className="text-[11px] leading-snug text-[#b7c9bf]">
           Agent à droite · Terminal bas comme Cursor (
           <span className="font-mono text-[#ffd7a8]">Ctrl+`</span>
@@ -1079,14 +1092,14 @@ export function OkapiStudio({
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         {/* Activity bar */}
-        <div className="flex w-full shrink-0 flex-row items-center gap-1 border-b border-white/10 bg-[#07110d] px-2 py-1 lg:w-12 lg:flex-col lg:border-b-0 lg:border-r lg:px-0 lg:py-2">
+        <div className="okapi-studio-activity flex w-full shrink-0 flex-row items-center gap-1 border-b border-white/10 px-2 py-1 lg:w-12 lg:flex-col lg:border-b-0 lg:border-r lg:px-0 lg:py-2">
           <button
             type="button"
             title="Fichiers (Ctrl+B)"
             onClick={() => setExplorerOpen((v) => !v)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
               explorerOpen
-                ? "border-l-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec]"
+                ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -1098,7 +1111,7 @@ export function OkapiStudio({
             onClick={() => setAiOpen((v) => !v)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
               aiOpen
-                ? "border-l-2 border-[#ffd7a8] bg-[#e8892a]/25 text-[#ffd7a8]"
+                ? "border-b-2 border-[#ffd7a8] bg-[#e8892a]/25 text-[#ffd7a8] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -1110,7 +1123,7 @@ export function OkapiStudio({
             onClick={() => setPreviewOpen((v) => !v)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
               previewOpen
-                ? "border-l-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec]"
+                ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -1128,7 +1141,7 @@ export function OkapiStudio({
             }
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
               terminalOpen
-                ? "border-l-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec]"
+                ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -1141,7 +1154,7 @@ export function OkapiStudio({
 
         {/* Explorer — hidden on small screens when preview open to save space */}
         {explorerOpen ? (
-          <aside className="flex w-[min(72vw,220px)] shrink-0 flex-col border-r border-white/10 bg-[#0d1512] lg:w-[220px]">
+          <aside className="okapi-studio-panel flex w-[min(72vw,220px)] shrink-0 flex-col border-r border-white/10 lg:w-[220px]">
             <div className="border-b border-white/10 px-3 py-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#7d9588]">
@@ -1217,7 +1230,7 @@ export function OkapiStudio({
             {/* Editor */}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* Tabs bar — multi-fichiers comme Cursor */}
-              <div className="flex items-stretch border-b border-white/10 bg-[#0f1814]">
+              <div className="okapi-studio-chrome flex items-stretch border-b">
                 <div className="flex min-w-0 flex-1 items-center gap-0 overflow-x-auto">
                   {tabFiles.map((file) => {
                     const selected = file.id === activeId;
@@ -1439,7 +1452,7 @@ export function OkapiStudio({
                     theme="vs-dark"
                     value={editorValue}
                     onChange={(v) => {
-                      if (pending) return;
+                      if (pending?.fileId === active.id) return;
                       onChangeFile(active.id, v ?? "");
                       markDirty(active.id);
                     }}
@@ -1464,7 +1477,7 @@ export function OkapiStudio({
               </div>
 
               {/* Status bar — clic Terminal comme Cursor */}
-              <div className="flex h-[22px] shrink-0 items-center justify-between gap-3 border-t border-white/10 bg-[#1b4f3a] px-3 text-[10px] text-[#c8ddd2]">
+              <div className="flex h-[22px] shrink-0 items-center justify-between gap-3 border-t border-[#e8892a]/20 bg-gradient-to-r from-[#1b4f3a] via-[#245a44] to-[#1b4f3a] px-3 text-[10px] text-[#c8ddd2]">
                 <div className="flex items-center gap-3">
                   <span className="font-semibold">Okapi Studio</span>
                   <span>Ln {lineCount}</span>
@@ -1518,10 +1531,10 @@ export function OkapiStudio({
           {/* Terminal panel — style Cursor bas */}
           {terminalOpen ? (
             <div
-              className="flex shrink-0 flex-col border-t border-white/10 bg-[#0c1210]"
+              className="okapi-studio-panel flex shrink-0 flex-col border-t border-white/10"
               style={{ height: termHeight }}
             >
-              <div className="flex h-1.5 cursor-ns-resize items-center justify-center bg-[#0f1814] hover:bg-[#e8892a]/40"
+              <div className="flex h-1.5 cursor-ns-resize items-center justify-center bg-[#101c17] hover:bg-[#e8892a]/40"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   const startY = e.clientY;
@@ -1539,7 +1552,7 @@ export function OkapiStudio({
                 }}
                 title="Redimensionner"
               />
-              <div className="flex items-center gap-0 border-b border-white/10 bg-[#0f1814]">
+              <div className="okapi-studio-chrome flex items-center gap-0 border-b">
                 {(
                   [
                     ["problems", "Problems"],
@@ -1612,7 +1625,7 @@ export function OkapiStudio({
 
               {termTab === "terminal" ? (
                 <form
-                  className="flex shrink-0 items-center gap-2 border-t border-white/10 bg-[#0a100e] px-3 py-1.5"
+                  className="okapi-studio-code flex shrink-0 items-center gap-2 border-t border-white/10 px-3 py-1.5"
                   onSubmit={(e) => {
                     e.preventDefault();
                     runTermCommand(termCmd);
@@ -1638,13 +1651,13 @@ export function OkapiStudio({
 
         {/* Preview — right on lg, below editor on small */}
         {previewOpen ? (
-          <div className="flex max-h-[40vh] w-full shrink-0 flex-col border-t border-white/10 bg-[#0d1512] lg:max-h-none lg:w-[min(36%,420px)] lg:border-l lg:border-t-0">
+          <div className="okapi-studio-panel flex max-h-[40vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(36%,420px)] lg:border-l lg:border-t-0">
             {/* Browser chrome */}
-            <div className="flex shrink-0 items-center gap-1.5 border-b border-white/10 bg-[#0f1814] px-2 py-1.5">
+            <div className="okapi-studio-chrome flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
               <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7d9588]">
                 Preview
               </span>
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-white/10 bg-[#0a100e] px-2 py-1">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-[#e8892a]/15 bg-[#06100c]/60 px-2 py-1">
                 <span className="shrink-0 text-[10px] text-[#3d8f68]">●</span>
                 <span className="min-w-0 truncate font-mono text-[11px] text-[#9bb0a4]">
                   {previewUrl}
@@ -1691,7 +1704,7 @@ export function OkapiStudio({
 
         {/* Agent Cursor-style — toujours à droite du code */}
         {aiOpen ? (
-          <aside className="flex max-h-[46vh] w-full shrink-0 flex-col border-t border-white/10 bg-[#0d1512] lg:max-h-none lg:w-[min(40%,420px)] lg:border-l lg:border-t-0">
+          <aside className="okapi-studio-panel flex max-h-[46vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(40%,420px)] lg:border-l lg:border-t-0">
             <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#e8892a]">
@@ -1784,7 +1797,7 @@ export function OkapiStudio({
                     {pending.note}
                   </p>
                   {pendingDiffLines.length > 0 ? (
-                    <pre className="mt-2 max-h-36 overflow-auto rounded-lg border border-white/10 bg-[#0a100e] p-2 font-mono text-[10px] leading-relaxed">
+                    <pre className="okapi-studio-code mt-2 max-h-36 overflow-auto rounded-lg border border-white/10 p-2 font-mono text-[10px] leading-relaxed">
                       {pendingDiffLines.map((line, idx) => (
                         <div
                           key={`${line.type}-${idx}`}
@@ -1913,7 +1926,7 @@ export function OkapiStudio({
                     ? "Accepte ou refuse le projet d’abord…"
                     : `Projet complet ou edit de ${active.label}…`
                 }
-                className="w-full resize-none rounded-xl border border-white/10 bg-[#0a100e] px-3 py-2.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
+                className="w-full resize-none rounded-xl border border-[#e8892a]/20 bg-[#06100c]/55 px-3 py-2.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
               />
               <div className="mt-2 flex items-center gap-2">
                 <button
@@ -1957,7 +1970,7 @@ export function OkapiStudio({
             aria-label="Fermer Quick Open"
             onClick={() => setQuickOpen(false)}
           />
-          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/15 bg-[#0f1814] shadow-2xl shadow-black/50">
+          <div className="okapi-studio-chrome relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border shadow-2xl shadow-black/50">
             <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
               <span className="text-[11px] font-bold uppercase tracking-wide text-[#e8892a]">
                 Quick Open
@@ -2038,7 +2051,7 @@ export function OkapiStudio({
             aria-label="Fermer la palette"
             onClick={() => setCmdOpen(false)}
           />
-          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/15 bg-[#0f1814] shadow-2xl shadow-black/50">
+          <div className="okapi-studio-chrome relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border shadow-2xl shadow-black/50">
             <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
               <span className="text-[11px] font-bold uppercase tracking-wide text-[#e8892a]">
                 Commandes
@@ -2118,7 +2131,7 @@ export function OkapiStudio({
             aria-label="Fermer l’aide"
             onClick={() => setHelpOpen(false)}
           />
-          <div className="relative z-10 w-full max-w-md overflow-hidden rounded-2xl border border-white/15 bg-[#0f1814] shadow-2xl">
+          <div className="okapi-studio-chrome relative z-10 w-full max-w-md overflow-hidden rounded-2xl border shadow-2xl">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <p className="text-[11px] font-bold uppercase tracking-wide text-[#e8892a]">
                 Raccourcis Okapi Studio
