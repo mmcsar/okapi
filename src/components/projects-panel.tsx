@@ -93,7 +93,7 @@ export function ProjectsPanel({
             Projets
           </h1>
           <p className="mt-1 text-sm text-okapi-ink/50">
-            Projets sauvegardés sur ton compte Okapi
+            Clique un projet → ouverture directe dans Okapi Studio (code)
           </p>
         </div>
         <div className="flex gap-2">
@@ -159,12 +159,13 @@ export function ProjectsPanel({
           {projects.map((project) => (
             <article
               key={project.id}
-              className="flex items-center justify-between gap-4 rounded-3xl border border-[var(--okapi-stroke)] bg-white/70 px-5 py-4"
+              className="flex items-center justify-between gap-4 rounded-3xl border border-[var(--okapi-stroke)] bg-white/70 px-5 py-4 transition hover:border-okapi-forest/25 hover:bg-white"
             >
               <button
                 type="button"
                 onClick={() => onOpenProject(project)}
                 className="min-w-0 flex-1 text-left"
+                title="Ouvrir dans Okapi Studio"
               >
                 <h2 className="truncate text-sm font-semibold text-okapi-ink">
                   {project.title}
@@ -172,14 +173,18 @@ export function ProjectsPanel({
                 <p className="mt-1 text-xs text-okapi-ink/45">
                   {project.sector} · {formatWhen(project.updated_at)}
                 </p>
+                <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-okapi-forest/70">
+                  Studio Dev · code
+                </p>
               </button>
               <div className="flex shrink-0 gap-2">
                 <button
                   type="button"
                   onClick={() => onOpenProject(project)}
-                  className="rounded-full bg-okapi-forest/10 px-3 py-1 text-[11px] font-semibold text-okapi-forest"
+                  className="rounded-full bg-[#0f1a14] px-3 py-1.5 text-[11px] font-semibold text-white"
+                  title="Ouvrir dans Okapi Studio"
                 >
-                  Ouvrir
+                  Studio
                 </button>
                 <button
                   type="button"

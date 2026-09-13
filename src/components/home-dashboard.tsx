@@ -33,6 +33,8 @@ type HomeDashboardProps = {
   section: string;
   resetKey?: number;
   initialProject?: OkapiProject | null;
+  /** Ouvre directement Okapi Studio (mode Dev / VS Code). */
+  openInStudio?: boolean;
   onGoHome?: () => void;
   onNavigate?: (id: string) => void;
 };
@@ -47,6 +49,7 @@ export function HomeDashboard({
   section,
   resetKey = 0,
   initialProject = null,
+  openInStudio = false,
   onGoHome,
   onNavigate,
 }: HomeDashboardProps) {
@@ -235,12 +238,26 @@ export function HomeDashboard({
           ? `/p/${initialProject.share_slug}`
           : null,
       );
-      setMessages([
-        {
-          role: "assistant",
-          content: `Projet ouvert : ${initialProject.title}. Dis-moi ce dont tu as besoin.`,
-        },
-      ]);
+      const goStudio = openInStudio;
+      setDevMode(goStudio);
+      setDebugArmed(false);
+      if (goStudio) {
+        setStudioFocusKey((k) => k + 1);
+        setMessages([
+          {
+            role: "assistant",
+            content: `Studio ouvert : ${initialProject.title}. Chat = conseils · Studio = code (comme VS Code).`,
+          },
+        ]);
+      } else {
+        setWorkspaceFocusKey((k) => k + 1);
+        setMessages([
+          {
+            role: "assistant",
+            content: `Projet ouvert : ${initialProject.title}. Dis-moi ce dont tu as besoin.`,
+          },
+        ]);
+      }
     } else {
       setSector("Général");
       setPreviewHtml(null);
@@ -255,8 +272,9 @@ export function HomeDashboard({
       setPreviewTitle("Preview");
       setProjectId(null);
       projectIdRef.current = null;
+      setDevMode(false);
     }
-  }, [resetKey, initialProject, stopListen, stopSpeak]);
+  }, [resetKey, initialProject, openInStudio, stopListen, stopSpeak]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });

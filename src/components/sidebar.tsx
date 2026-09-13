@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 type NavItem = {
   id: string;
@@ -62,8 +62,12 @@ function NavButton({
   return (
     <button
       type="button"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+      className={`pointer-events-auto flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
         active
           ? "bg-okapi-forest text-white"
           : "text-okapi-ink/65 hover:bg-white/70 hover:text-okapi-ink"
@@ -83,6 +87,16 @@ export function Sidebar({
   loggedIn = false,
 }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    function onResize() {
+      if (window.matchMedia("(min-width: 1024px)").matches) {
+        setMobileOpen(false);
+      }
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   function go(id: string) {
     onNavChange(id);
@@ -114,11 +128,13 @@ export function Sidebar({
 
       <button
         type="button"
-        onClick={() => {
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
           onNewProject?.();
           setMobileOpen(false);
         }}
-        className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-okapi-amber px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-okapi-amber-deep"
+        className="pointer-events-auto mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-okapi-amber px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-okapi-amber-deep"
       >
         <span className="text-base leading-none">+</span>
         Nouvelle conversation
@@ -155,8 +171,12 @@ export function Sidebar({
         </div>
         <button
           type="button"
-          onClick={() => go("login")}
-          className="mt-0.5 flex w-full items-center gap-2 px-2 py-2 text-left"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            go("login");
+          }}
+          className="pointer-events-auto mt-0.5 flex w-full items-center gap-2 px-2 py-2 text-left"
         >
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-okapi-forest text-xs font-bold text-white">
             {(userLabel || "?").slice(0, 1).toUpperCase()}
@@ -176,7 +196,7 @@ export function Sidebar({
     <>
       <button
         type="button"
-        className="fixed left-4 top-4 z-40 rounded-xl border border-[var(--okapi-stroke)] bg-white/95 px-3 py-2 text-sm font-semibold lg:hidden"
+        className="fixed left-4 top-4 z-[60] rounded-xl border border-[var(--okapi-stroke)] bg-white/95 px-3 py-2 text-sm font-semibold shadow-sm lg:hidden"
         onClick={() => setMobileOpen(true)}
       >
         Menu
@@ -186,14 +206,14 @@ export function Sidebar({
         <button
           type="button"
           aria-label="Fermer le menu"
-          className="fixed inset-0 z-40 bg-okapi-ink/35 lg:hidden"
+          className="fixed inset-0 z-[55] bg-okapi-ink/35 lg:hidden"
           onClick={() => setMobileOpen(false)}
         />
       ) : null}
 
       <aside
-        className={`fixed inset-y-3 left-3 z-50 flex w-[272px] flex-col rounded-[28px] border border-[var(--okapi-stroke)] bg-[var(--okapi-glass)] p-3.5 backdrop-blur-xl transition-transform lg:static lg:inset-auto lg:translate-x-0 ${
-          mobileOpen ? "translate-x-0" : "-translate-x-[120%]"
+        className={`pointer-events-auto relative z-[60] flex w-[272px] shrink-0 flex-col rounded-[28px] border border-[var(--okapi-stroke)] bg-[var(--okapi-glass)] p-3.5 backdrop-blur-xl max-lg:fixed max-lg:inset-y-3 max-lg:left-3 max-lg:z-[60] max-lg:transition-transform ${
+          mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-[120%]"
         }`}
       >
         {content}
