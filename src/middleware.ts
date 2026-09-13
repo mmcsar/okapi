@@ -19,7 +19,8 @@ export function middleware(request: NextRequest) {
     const isLlm =
       pathname.startsWith("/api/chat") ||
       pathname.startsWith("/api/generate") ||
-      pathname.startsWith("/api/studio-edit");
+      pathname.startsWith("/api/studio-edit") ||
+      pathname.startsWith("/api/studio-project");
     const isAuthHeavy =
       pathname.startsWith("/api/admin") ||
       pathname.startsWith("/api/projects") ||

@@ -14,6 +14,7 @@ import {
   streamOpenRouterChat,
 } from "@/lib/openrouter";
 import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
+import { normalizeImageMime } from "@/lib/image";
 import { assertBodySize } from "@/lib/security";
 
 export const runtime = "nodejs";
@@ -58,7 +59,8 @@ type ChatBody = {
 type ImagePart = { mimeType: string; base64: string };
 
 export async function POST(request: Request) {
-  const tooBig = assertBodySize(request, 2_000_000);
+  // Images base64 compressées ~ < 2 Mo ; marge pour historique
+  const tooBig = assertBodySize(request, 8_000_000);
   if (tooBig) return tooBig;
 
   const provider = pickLlmProvider();
@@ -70,20 +72,37 @@ export async function POST(request: Request) {
   if (!quota.ok) return quotaExceededResponse(quota);
 
   const body = (await request.json().catch(() => null)) as ChatBody | null;
-  const imageBase64 = body?.image?.base64?.trim();
-  const imageMime = body?.image?.mimeType?.trim() || "image/jpeg";
-  const hasImage = Boolean(imageBase64);
+  const imageBase64 = body?.image?.base64?.replace(/\s/g, "").trim();
+  const imageMimeRaw = body?.image?.mimeType?.trim() || "image/jpeg";
+  const imageName = body?.image?.name?.trim();
+  const imageMime = normalizeImageMime(imageMimeRaw, imageName);
+  const hasImage = Boolean(imageBase64 && imageBase64.length > 32);
   const message =
     body?.message?.trim() ||
-    (hasImage ? "Describe this image and tell me what is useful." : "");
+    (hasImage
+      ? "Décris cette image clairement et dis ce qui est utile."
+      : "");
   if (!message) {
     return Response.json({ error: "Message vide." }, { status: 400 });
+  }
+  if (body?.image && !hasImage) {
+    return Response.json(
+      {
+        error:
+          "Image illisible. Réessaie avec un JPG ou PNG (max ~8 Mo avant compression).",
+      },
+      { status: 400 },
+    );
   }
 
   const sector = body?.sector?.trim();
   const language = body?.language?.trim() || "auto";
   const engine = resolveEngine(body?.engine);
-  const system = buildSystem(language, Boolean(body?.debug));
+  const system =
+    buildSystem(language, Boolean(body?.debug)) +
+    (hasImage
+      ? `\n\nVISION: An image is attached. You CAN see it. Describe what you see and answer the user in their language. Never say you cannot view images.`
+      : "");
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const userContent = sector
     ? `[Builder context (optional): ${sector}]\n\n${message}`
@@ -175,6 +194,7 @@ async function streamViaOpenRouter(
       system,
       engine,
       messages: toOpenRouterMessages(userContent, history, image),
+      vision: Boolean(image),
     });
   } catch (err) {
     return new Response(`\n\n${friendlyLlmError(err)}`, {

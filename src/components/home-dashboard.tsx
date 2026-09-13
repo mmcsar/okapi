@@ -32,6 +32,8 @@ import type { StudioFileId } from "@/components/okapi-studio";
 type HomeDashboardProps = {
   section: string;
   resetKey?: number;
+  /** Incrémente à chaque clic sidebar Studio pour forcer l’ouverture. */
+  studioKick?: number;
   initialProject?: OkapiProject | null;
   /** Ouvre directement Okapi Studio (mode Dev / VS Code). */
   openInStudio?: boolean;
@@ -48,6 +50,7 @@ function greetingFromHour(hour: number) {
 export function HomeDashboard({
   section,
   resetKey = 0,
+  studioKick = 0,
   initialProject = null,
   openInStudio = false,
   onGoHome,
@@ -77,6 +80,7 @@ export function HomeDashboard({
   const [studioFocusKey, setStudioFocusKey] = useState(0);
   const [debugArmed, setDebugArmed] = useState(false);
   const [devMode, setDevMode] = useState(false);
+  const [studioChatOpen, setStudioChatOpen] = useState(false);
   const [engine, setEngine] = useState<OkapiEngine>("flash");
   const [engineOpen, setEngineOpen] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -196,6 +200,9 @@ export function HomeDashboard({
     setGreeting(greetingFromHour(new Date().getHours()));
   }, []);
 
+  const openInStudioRef = useRef(openInStudio);
+  openInStudioRef.current = openInStudio;
+
   useEffect(() => {
     setPrompt("");
     setStatus(null);
@@ -206,6 +213,7 @@ export function HomeDashboard({
     stopListen();
     stopSpeak();
     setMessages([]);
+    const goStudio = openInStudioRef.current;
     if (initialProject) {
       setSector(initialProject.sector || "Général");
       setPreviewHtml(initialProject.html || null);
@@ -238,7 +246,6 @@ export function HomeDashboard({
           ? `/p/${initialProject.share_slug}`
           : null,
       );
-      const goStudio = openInStudio;
       setDevMode(goStudio);
       setDebugArmed(false);
       if (goStudio) {
@@ -272,15 +279,38 @@ export function HomeDashboard({
       setPreviewTitle("Preview");
       setProjectId(null);
       projectIdRef.current = null;
-      setDevMode(false);
+      setCloudStatus(null);
+      setDevMode(goStudio);
+      setDebugArmed(false);
+      if (goStudio) {
+        setStudioFocusKey((k) => k + 1);
+        setMessages([
+          {
+            role: "assistant",
+            content:
+              "Studio Okapi ouvert. Génère une app dans le chat, ou édite les fichiers ici — Accepter pour appliquer.",
+          },
+        ]);
+      }
     }
-  }, [resetKey, initialProject, openInStudio, stopListen, stopSpeak]);
+    // openInStudio lu via ref : ne pas le mettre en deps (sinon ça efface la preview au clic Studio)
+  }, [resetKey, initialProject, stopListen, stopSpeak]);
+
+  // Clic sidebar Studio / #studio → ouvre l’onglet sans reset du projet
+  useEffect(() => {
+    if (studioKick <= 0 && !openInStudio) return;
+    setDevMode(true);
+    setDebugArmed(false);
+    setStudioChatOpen(false);
+    setStudioFocusKey((k) => k + 1);
+  }, [openInStudio, studioKick]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
   const isHome = section === "dashboard";
+  const immersiveStudio = devMode;
   const split =
     Boolean(
       previewHtml ||
@@ -292,7 +322,15 @@ export function HomeDashboard({
         previewPython ||
         previewFlutter ||
         previewReadme,
-    ) || sending;
+    ) ||
+    sending ||
+    immersiveStudio;
+
+  function leaveStudio() {
+    setDevMode(false);
+    setStudioChatOpen(false);
+    onNavigate?.("home");
+  }
 
   async function persistProject(payload: {
     title: string;
@@ -445,10 +483,12 @@ export function HomeDashboard({
   async function onPickImage(file: File | null) {
     if (!file) return;
     try {
+      setStatus("Préparation de l’image…");
       const img = await fileToAttachedImage(file);
       setAttachedImage(img);
-      setStatus(null);
+      setStatus("Image prête — Okapi pourra la lire.");
     } catch (err) {
+      setAttachedImage(null);
       setStatus(err instanceof Error ? err.message : "Image invalide");
     }
   }
@@ -694,7 +734,7 @@ export function HomeDashboard({
           body: JSON.stringify({
             message:
               trimmed ||
-              "Describe this image and tell me what is useful.",
+              "Décris cette image clairement et dis ce qui est utile.",
             sector,
             language: activeLang,
             history: historyForChat,
@@ -950,11 +990,410 @@ export function HomeDashboard({
     );
   }
 
+  const workspacePanelProps = {
+    title: previewTitle,
+    html: previewHtml,
+    react: previewReact,
+    reactNative: previewReactNative,
+    nextjs: previewNext,
+    sql: previewSql,
+    api: previewApi,
+    python: previewPython,
+    flutter: previewFlutter,
+    readme: previewReadme,
+    sending,
+    device,
+    onDeviceChange: setDevice,
+    shareBusy,
+    shareUrl,
+    onShare: () => void shareProject(),
+    onExportHtml: exportHtml,
+    onExportSql: exportSql,
+    onExportApi: exportApi,
+    onExportReadme: exportReadme,
+    onExportZip: exportZip,
+    onChangeArtifact,
+    onSaveCloud: () => void saveCloudNow(),
+    onStudioCommitted: applyStudioCommit,
+    cloudStatus: saveBusy ? "Sauvegarde…" : cloudStatus,
+    engine,
+    focusPreviewKey: workspaceFocusKey,
+    focusStudioKey: studioFocusKey,
+  };
+
+  const messageListBlock =
+    messages.length > 0 ? (
+      <div className={`w-full space-y-3 text-left ${split ? "" : "max-w-3xl"}`}>
+        {messages.map((msg, i) => {
+          const isStreamingAssistant =
+            sending &&
+            msg.role === "assistant" &&
+            i === messages.length - 1;
+          const canSpeak =
+            supportedSpeak &&
+            msg.role === "assistant" &&
+            !isStreamingAssistant &&
+            msg.content.trim().length > 0 &&
+            !/^Okapi (réfléchit|analyse|debug|Flash|Pro|travaille)/i.test(
+              msg.content,
+            );
+          return (
+            <div
+              key={`${msg.role}-${i}`}
+              className={`rounded-[22px] border px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                msg.role === "user"
+                  ? "ml-8 border-okapi-forest/15 bg-okapi-forest text-white"
+                  : "mr-8 border-[var(--okapi-stroke)] bg-white/85 text-okapi-ink"
+              }`}
+            >
+              {msg.imageUrl ? (
+                <div className="mb-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={msg.imageUrl}
+                    alt="Pièce jointe"
+                    className="max-h-40 rounded-xl border border-white/20 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadDataUrl(
+                        msg.imageUrl!,
+                        `okapi-image-${i + 1}.png`,
+                      )
+                    }
+                    className={`mt-1.5 text-[11px] font-semibold underline-offset-2 hover:underline ${
+                      msg.role === "user"
+                        ? "text-white/85"
+                        : "text-okapi-forest/80"
+                    }`}
+                  >
+                    Télécharger l’image
+                  </button>
+                </div>
+              ) : null}
+              {isStreamingAssistant &&
+              /réfléchit|analyse|debug|en cours|travaille|Écriture/i.test(
+                msg.content,
+              ) ? (
+                <span className="typing-dots inline-flex items-center gap-0.5 text-okapi-ink/50">
+                  Okapi travaille
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              ) : (
+                msg.content
+              )}
+              {isStreamingAssistant &&
+              msg.content.trim() &&
+              !/réfléchit|analyse|debug|en cours|Écriture/i.test(
+                msg.content,
+              ) ? (
+                <span className="mt-2 block text-[10px] text-okapi-ink/35">
+                  …
+                </span>
+              ) : null}
+              {canSpeak ? (
+                <button
+                  type="button"
+                  onClick={() => toggleSpeak(msg.content)}
+                  className="mt-2 block text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
+                >
+                  {speaking ? "Stop audio" : "Écouter"}
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+        <div ref={chatEndRef} />
+      </div>
+    ) : null;
+
+  const renderPromptForm = (
+    formSplit: boolean,
+    extraClass = "",
+  ) => (
+    <form
+      onSubmit={onSubmit}
+      className={`prompt-glow w-full pt-4 ${extraClass} ${
+        formSplit
+          ? "mt-auto sticky bottom-0 bg-[rgba(248,250,248,0.92)] pb-1 backdrop-blur-xl"
+          : "mt-8 max-w-3xl"
+      }`}
+    >
+      <div className="rounded-[26px] border border-white/90 bg-white/90 p-3">
+        {attachedImage ? (
+          <div className="mb-2 flex items-center gap-3 rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-3 py-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={attachedImage.dataUrl}
+              alt=""
+              className="h-14 w-14 rounded-xl object-cover"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-okapi-ink/70">
+                {attachedImage.name}
+              </p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadDataUrl(
+                      attachedImage.dataUrl,
+                      attachedImage.name,
+                    )
+                  }
+                  className="text-[11px] font-semibold text-okapi-forest"
+                >
+                  Télécharger
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttachedImage(null)}
+                  className="text-[11px] font-semibold text-okapi-ink/45"
+                >
+                  Retirer
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <textarea
+          value={prompt}
+          onChange={(e) => {
+            setDraftVoice("");
+            setPrompt(e.target.value);
+          }}
+          rows={formSplit ? 2 : 3}
+          placeholder={
+            listening
+              ? "Écoute… parle maintenant"
+              : debugArmed
+                ? "Colle l’erreur ou décris le bug…"
+                : devMode
+                  ? "Demande un conseil — le code s’édite dans Studio…"
+                  : attachedImage
+                    ? "Que faire avec cette image ?"
+                    : previewHtml
+                      ? "Modifie, debug, ou dis ce qu’il faut changer…"
+                      : "Écris, parle ou ajoute une image…"
+          }
+          className="min-h-[64px] w-full resize-none bg-transparent px-2 py-2 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
+        />
+        {draftVoice ? (
+          <p className="px-2 text-xs italic text-okapi-ink/45">{draftVoice}</p>
+        ) : null}
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                void onPickImage(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setEngineOpen((o) => !o)}
+                disabled={sending}
+                className="inline-flex h-11 items-center gap-1.5 rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist px-3 text-xs font-semibold text-okapi-ink/75 transition hover:bg-white disabled:opacity-60"
+                aria-expanded={engineOpen}
+                aria-haspopup="listbox"
+              >
+                {engine === "pro" ? "Okapi Pro" : "Okapi Flash"}
+                <span className="text-[10px] font-medium text-okapi-ink/35">
+                  ▾
+                </span>
+              </button>
+              {engineOpen ? (
+                <div
+                  className="absolute bottom-[calc(100%+6px)] left-0 z-30 w-64 overflow-hidden rounded-2xl border border-[var(--okapi-stroke)] bg-white/95 shadow-lg backdrop-blur-md"
+                  role="listbox"
+                >
+                  {OKAPI_ENGINES.map((item) => {
+                    const active = engine === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        onClick={() => {
+                          setEngine(item.id);
+                          setStoredEngine(item.id);
+                          setEngineOpen(false);
+                        }}
+                        className={`flex w-full flex-col gap-0.5 px-3.5 py-2.5 text-left transition ${
+                          active
+                            ? "bg-okapi-forest/10"
+                            : "hover:bg-okapi-mist/80"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 text-xs font-semibold text-okapi-ink">
+                          {item.label}
+                          {item.badge ? (
+                            <span className="rounded-full bg-okapi-amber/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-okapi-amber-deep">
+                              {item.badge}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="text-[11px] leading-snug text-okapi-ink/45">
+                          {item.hint}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setDebugArmed((v) => {
+                  const next = !v;
+                  if (next) setDevMode(false);
+                  return next;
+                });
+              }}
+              disabled={sending}
+              className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
+                debugArmed
+                  ? "border-okapi-amber/40 bg-okapi-amber text-white"
+                  : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
+              }`}
+              title={
+                previewHtml
+                  ? "Mode Debug — corrige la Preview"
+                  : "Mode Debug — analyse une erreur"
+              }
+              aria-label="Mode Debug"
+              aria-pressed={debugArmed}
+            >
+              Debug
+            </button>
+            {!(openInStudio || immersiveStudio) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDevMode((v) => {
+                    const next = !v;
+                    if (next) {
+                      setDebugArmed(false);
+                      setStudioFocusKey((k) => k + 1);
+                      onNavigate?.("studio");
+                    }
+                    return next;
+                  });
+                }}
+                disabled={sending}
+                className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
+                  devMode
+                    ? "border-[#0f1a14]/50 bg-[#0f1a14] text-white"
+                    : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
+                }`}
+                title="Mode Dev — ouvre Studio pour coder ; le chat reste pour les conseils"
+                aria-label="Mode Dev"
+                aria-pressed={devMode}
+              >
+                Dev
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 transition hover:bg-white disabled:opacity-60"
+              title="Ajouter une image"
+              aria-label="Ajouter une image"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <circle cx="9" cy="10" r="1.5" />
+                <path d="M21 16l-5-5-8 8" />
+              </svg>
+            </button>
+            {supportedListen ? (
+              <button
+                type="button"
+                onClick={toggleListen}
+                disabled={sending}
+                className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border transition ${
+                  listening
+                    ? "border-okapi-amber/40 bg-okapi-amber text-white"
+                    : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
+                }`}
+                title={listening ? "Arrêter le micro" : "Dicter"}
+                aria-label={listening ? "Arrêter le micro" : "Dicter"}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5 11a7 7 0 0014 0M12 18v3" />
+                </svg>
+              </button>
+            ) : null}
+            {listening ? (
+              <span className="text-[11px] font-medium text-okapi-amber-deep">
+                Micro actif
+              </span>
+            ) : null}
+          </div>
+          <button
+            type="submit"
+            disabled={sending}
+            className="inline-flex items-center gap-2 rounded-2xl bg-okapi-amber px-5 py-3 text-sm font-semibold text-white transition hover:bg-okapi-amber-deep disabled:opacity-60"
+          >
+            {sending ? "…" : "Envoyer"}
+          </button>
+        </div>
+      </div>
+      {audioError ? (
+        <p className="mt-2 text-sm text-okapi-amber-deep">{audioError}</p>
+      ) : status ? (
+        <p className="mt-2 text-sm text-okapi-amber-deep">{status}</p>
+      ) : (
+        <p className="mt-2 text-[11px] text-okapi-ink/35">
+          {debugArmed
+            ? "Mode Debug actif — colle l’erreur puis Envoyer"
+            : devMode
+              ? "Mode Dev — Studio pour le code · chat pour conseils"
+              : "Image · micro · Debug · Dev — l’agent agit sur demande"}
+        </p>
+      )}
+    </form>
+  );
+
   return (
     <main className="app-shell ml-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] lg:ml-3">
-      <header className="flex items-center justify-between gap-3 border-b border-[var(--okapi-stroke)] px-4 py-3.5 lg:px-6">
+      <header
+        className={`flex items-center justify-between gap-3 border-b px-4 py-3.5 lg:px-6 ${
+          immersiveStudio
+            ? "border-white/10 bg-[#0f1814]"
+            : "border-[var(--okapi-stroke)]"
+        }`}
+      >
         <div className="flex min-w-0 items-center gap-3">
-          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-2xl ring-1 ring-[var(--okapi-stroke)]">
+          <div
+            className={`relative h-10 w-10 shrink-0 overflow-hidden rounded-2xl ring-1 ${
+              immersiveStudio ? "ring-white/15" : "ring-[var(--okapi-stroke)]"
+            }`}
+          >
             <Image
               src="/okapi-logo.png"
               alt=""
@@ -965,10 +1404,24 @@ export function HomeDashboard({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className="truncate font-[family-name:var(--font-syne)] text-base font-bold leading-none">
-                {previewHtml ? previewTitle : `${greeting}, ${displayName}`}
+              <p
+                className={`truncate font-[family-name:var(--font-syne)] text-base font-bold leading-none ${
+                  immersiveStudio ? "text-white" : ""
+                }`}
+              >
+                {immersiveStudio
+                  ? previewHtml
+                    ? previewTitle
+                    : "Okapi Studio"
+                  : previewHtml
+                    ? previewTitle
+                    : `${greeting}, ${displayName}`}
               </p>
-              {sending ? (
+              {immersiveStudio ? (
+                <span className="hidden rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/80 sm:inline">
+                  Studio
+                </span>
+              ) : sending ? (
                 <span className="hidden rounded-full bg-okapi-amber/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-okapi-amber-deep sm:inline">
                   Génération
                 </span>
@@ -978,85 +1431,103 @@ export function HomeDashboard({
                 </span>
               ) : null}
             </div>
-            <p className="mt-1.5 truncate text-[11px] text-okapi-ink/45">
-              {previewHtml
-                ? "Agent · preview sur demande"
-                : "Un agent · répond et construit sur demande"}
+            <p
+              className={`mt-1.5 truncate text-[11px] ${
+                immersiveStudio ? "text-white/45" : "text-okapi-ink/45"
+              }`}
+            >
+              {immersiveStudio
+                ? "Édite le code · Agent pour conseils"
+                : previewHtml
+                  ? "Agent · preview sur demande"
+                  : "Un agent · répond et construit sur demande"}
             </p>
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {supportedSpeak ? (
+          {immersiveStudio ? (
             <button
               type="button"
-              onClick={() => {
-                setVoiceOut((v) => {
-                  const next = !v;
-                  if (!next) stopSpeak();
-                  return next;
-                });
-              }}
-              className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition ${
-                voiceOut
-                  ? "border-okapi-forest/30 bg-okapi-forest/10 text-okapi-forest"
-                  : "border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70 hover:bg-white"
-              }`}
-              title="Lire les réponses à voix haute"
+              onClick={leaveStudio}
+              className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white/90 transition hover:bg-white/15"
             >
-              {voiceOut ? "Voix on" : "Voix"}
+              Retour Agent
             </button>
-          ) : null}
-          {split ? (
+          ) : (
             <>
-              <div className="hidden rounded-full border border-[var(--okapi-stroke)] bg-white/80 p-1 sm:flex">
+              {supportedSpeak ? (
                 <button
                   type="button"
-                  onClick={() => setDevice("mobile")}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-                    device === "mobile"
-                      ? "bg-okapi-forest text-white"
-                      : "text-okapi-ink/55 hover:text-okapi-ink"
+                  onClick={() => {
+                    setVoiceOut((v) => {
+                      const next = !v;
+                      if (!next) stopSpeak();
+                      return next;
+                    });
+                  }}
+                  className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition ${
+                    voiceOut
+                      ? "border-okapi-forest/30 bg-okapi-forest/10 text-okapi-forest"
+                      : "border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70 hover:bg-white"
                   }`}
+                  title="Lire les réponses à voix haute"
                 >
-                  Mobile
+                  {voiceOut ? "Voix on" : "Voix"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setDevice("desktop")}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-                    device === "desktop"
-                      ? "bg-okapi-forest text-white"
-                      : "text-okapi-ink/55 hover:text-okapi-ink"
-                  }`}
-                >
-                  Desktop
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setPreviewHtml(null);
-                  setPreviewReact(null);
-                  setPreviewReactNative(null);
-                  setPreviewNext(null);
-                  setPreviewSql(null);
-                  setPreviewApi(null);
-                  setPreviewPython(null);
-                  setPreviewFlutter(null);
-                  setPreviewReadme(null);
-                  setDebugArmed(false);
-                  setDevMode(false);
-                  setMessages([]);
-                  setStatus(null);
-                  stopSpeak();
-                }}
-                className="rounded-2xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-xs font-semibold text-okapi-ink/70 transition hover:bg-white"
-              >
-                Nouveau
-              </button>
+              ) : null}
+              {split ? (
+                <>
+                  <div className="hidden rounded-full border border-[var(--okapi-stroke)] bg-white/80 p-1 sm:flex">
+                    <button
+                      type="button"
+                      onClick={() => setDevice("mobile")}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                        device === "mobile"
+                          ? "bg-okapi-forest text-white"
+                          : "text-okapi-ink/55 hover:text-okapi-ink"
+                      }`}
+                    >
+                      Mobile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDevice("desktop")}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                        device === "desktop"
+                          ? "bg-okapi-forest text-white"
+                          : "text-okapi-ink/55 hover:text-okapi-ink"
+                      }`}
+                    >
+                      Desktop
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewHtml(null);
+                      setPreviewReact(null);
+                      setPreviewReactNative(null);
+                      setPreviewNext(null);
+                      setPreviewSql(null);
+                      setPreviewApi(null);
+                      setPreviewPython(null);
+                      setPreviewFlutter(null);
+                      setPreviewReadme(null);
+                      setDebugArmed(false);
+                      setDevMode(false);
+                      setMessages([]);
+                      setStatus(null);
+                      stopSpeak();
+                    }}
+                    className="rounded-2xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-xs font-semibold text-okapi-ink/70 transition hover:bg-white"
+                  >
+                    Nouveau
+                  </button>
+                </>
+              ) : null}
             </>
-          ) : null}
+          )}
           <UserMenu
             onNavigate={(id) => onNavigate?.(id)}
             loggedIn={Boolean(user)}
@@ -1069,6 +1540,52 @@ export function HomeDashboard({
         </div>
       </header>
 
+      {immersiveStudio ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+            <WorkspacePanel
+              {...workspacePanelProps}
+              immersive
+            />
+          </div>
+          <div
+            className={`shrink-0 border-t border-white/10 bg-[#0f1814] transition-[height] ${
+              studioChatOpen ? "h-[min(40vh,280px)]" : "h-14"
+            }`}
+          >
+            {!studioChatOpen ? (
+              <button
+                type="button"
+                onClick={() => setStudioChatOpen(true)}
+                className="flex h-full w-full items-center justify-center gap-2 text-sm font-medium text-white/70 transition hover:text-white/90"
+              >
+                Agent · conseils (hors code)
+              </button>
+            ) : (
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2">
+                  <span className="text-xs font-medium text-white/55">
+                    Agent · conseils (hors code)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setStudioChatOpen(false)}
+                    className="text-xs font-semibold text-white/75 transition hover:text-white"
+                  >
+                    Réduire
+                  </button>
+                </div>
+                <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-2 pt-2">
+                  {messageListBlock ? (
+                    <div className="mb-2">{messageListBlock}</div>
+                  ) : null}
+                  {renderPromptForm(true, "px-0 pb-0")}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className={`flex min-h-0 flex-1 ${split ? "flex-col lg:flex-row" : ""}`}>
         <section
           className={`relative flex min-h-0 flex-col ${
@@ -1116,388 +1633,19 @@ export function HomeDashboard({
               </div>
             )}
 
-            {messages.length > 0 ? (
-              <div className={`mt-5 w-full space-y-3 text-left ${split ? "" : "max-w-3xl"}`}>
-                {messages.map((msg, i) => {
-                  const isStreamingAssistant =
-                    sending &&
-                    msg.role === "assistant" &&
-                    i === messages.length - 1;
-                  const canSpeak =
-                    supportedSpeak &&
-                    msg.role === "assistant" &&
-                    !isStreamingAssistant &&
-                    msg.content.trim().length > 0 &&
-                    !/^Okapi (réfléchit|analyse|debug|Flash|Pro|travaille)/i.test(
-                      msg.content,
-                    );
-                  return (
-                    <div
-                      key={`${msg.role}-${i}`}
-                      className={`rounded-[22px] border px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-                        msg.role === "user"
-                          ? "ml-8 border-okapi-forest/15 bg-okapi-forest text-white"
-                          : "mr-8 border-[var(--okapi-stroke)] bg-white/85 text-okapi-ink"
-                      }`}
-                    >
-                      {msg.imageUrl ? (
-                        <div className="mb-2">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={msg.imageUrl}
-                            alt="Pièce jointe"
-                            className="max-h-40 rounded-xl border border-white/20 object-cover"
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              downloadDataUrl(
-                                msg.imageUrl!,
-                                `okapi-image-${i + 1}.png`,
-                              )
-                            }
-                            className={`mt-1.5 text-[11px] font-semibold underline-offset-2 hover:underline ${
-                              msg.role === "user"
-                                ? "text-white/85"
-                                : "text-okapi-forest/80"
-                            }`}
-                          >
-                            Télécharger l’image
-                          </button>
-                        </div>
-                      ) : null}
-                      {isStreamingAssistant &&
-                      /réfléchit|analyse|debug|en cours|travaille|Écriture/i.test(
-                        msg.content,
-                      ) ? (
-                        <span className="typing-dots inline-flex items-center gap-0.5 text-okapi-ink/50">
-                          Okapi travaille
-                          <span />
-                          <span />
-                          <span />
-                        </span>
-                      ) : (
-                        msg.content
-                      )}
-                      {isStreamingAssistant &&
-                      msg.content.trim() &&
-                      !/réfléchit|analyse|debug|en cours|Écriture/i.test(
-                        msg.content,
-                      ) ? (
-                        <span className="mt-2 block text-[10px] text-okapi-ink/35">
-                          …
-                        </span>
-                      ) : null}
-                      {canSpeak ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleSpeak(msg.content)}
-                          className="mt-2 block text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
-                        >
-                          {speaking ? "Stop audio" : "Écouter"}
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                <div ref={chatEndRef} />
+            {messageListBlock ? (
+              <div className={`mt-5 w-full ${split ? "" : "max-w-3xl"}`}>
+                {messageListBlock}
               </div>
             ) : null}
 
-            <form
-              onSubmit={onSubmit}
-              className={`prompt-glow mt-auto w-full pt-4 ${
-                split ? "sticky bottom-0 bg-[rgba(248,250,248,0.92)] pb-1 backdrop-blur-xl" : "mt-8 max-w-3xl"
-              }`}
-            >
-              <div className="rounded-[26px] border border-white/90 bg-white/90 p-3">
-                {attachedImage ? (
-                  <div className="mb-2 flex items-center gap-3 rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-3 py-2">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={attachedImage.dataUrl}
-                      alt=""
-                      className="h-14 w-14 rounded-xl object-cover"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-semibold text-okapi-ink/70">
-                        {attachedImage.name}
-                      </p>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            downloadDataUrl(
-                              attachedImage.dataUrl,
-                              attachedImage.name,
-                            )
-                          }
-                          className="text-[11px] font-semibold text-okapi-forest"
-                        >
-                          Télécharger
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setAttachedImage(null)}
-                          className="text-[11px] font-semibold text-okapi-ink/45"
-                        >
-                          Retirer
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-                <textarea
-                  value={prompt}
-                  onChange={(e) => {
-                    setDraftVoice("");
-                    setPrompt(e.target.value);
-                  }}
-                  rows={split ? 2 : 3}
-                  placeholder={
-                    listening
-                      ? "Écoute… parle maintenant"
-                      : debugArmed
-                        ? "Colle l’erreur ou décris le bug…"
-                        : devMode
-                          ? "Demande un conseil — le code s’édite dans Studio…"
-                          : attachedImage
-                            ? "Que faire avec cette image ?"
-                            : previewHtml
-                              ? "Modifie, debug, ou dis ce qu’il faut changer…"
-                              : "Écris, parle ou ajoute une image…"
-                  }
-                  className="min-h-[64px] w-full resize-none bg-transparent px-2 py-2 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
-                />
-                {draftVoice ? (
-                  <p className="px-2 text-xs italic text-okapi-ink/45">{draftVoice}</p>
-                ) : null}
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        void onPickImage(e.target.files?.[0] ?? null);
-                        e.target.value = "";
-                      }}
-                    />
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setEngineOpen((o) => !o)}
-                        disabled={sending}
-                        className="inline-flex h-11 items-center gap-1.5 rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist px-3 text-xs font-semibold text-okapi-ink/75 transition hover:bg-white disabled:opacity-60"
-                        aria-expanded={engineOpen}
-                        aria-haspopup="listbox"
-                      >
-                        {engine === "pro" ? "Okapi Pro" : "Okapi Flash"}
-                        <span className="text-[10px] font-medium text-okapi-ink/35">
-                          ▾
-                        </span>
-                      </button>
-                      {engineOpen ? (
-                        <div
-                          className="absolute bottom-[calc(100%+6px)] left-0 z-30 w-64 overflow-hidden rounded-2xl border border-[var(--okapi-stroke)] bg-white/95 shadow-lg backdrop-blur-md"
-                          role="listbox"
-                        >
-                          {OKAPI_ENGINES.map((item) => {
-                            const active = engine === item.id;
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                role="option"
-                                aria-selected={active}
-                                onClick={() => {
-                                  setEngine(item.id);
-                                  setStoredEngine(item.id);
-                                  setEngineOpen(false);
-                                }}
-                                className={`flex w-full flex-col gap-0.5 px-3.5 py-2.5 text-left transition ${
-                                  active
-                                    ? "bg-okapi-forest/10"
-                                    : "hover:bg-okapi-mist/80"
-                                }`}
-                              >
-                                <span className="flex items-center gap-2 text-xs font-semibold text-okapi-ink">
-                                  {item.label}
-                                  {item.badge ? (
-                                    <span className="rounded-full bg-okapi-amber/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-okapi-amber-deep">
-                                      {item.badge}
-                                    </span>
-                                  ) : null}
-                                </span>
-                                <span className="text-[11px] leading-snug text-okapi-ink/45">
-                                  {item.hint}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDebugArmed((v) => {
-                          const next = !v;
-                          if (next) setDevMode(false);
-                          return next;
-                        });
-                      }}
-                      disabled={sending}
-                      className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
-                        debugArmed
-                          ? "border-okapi-amber/40 bg-okapi-amber text-white"
-                          : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
-                      }`}
-                      title={
-                        previewHtml
-                          ? "Mode Debug — corrige la Preview"
-                          : "Mode Debug — analyse une erreur"
-                      }
-                      aria-label="Mode Debug"
-                      aria-pressed={debugArmed}
-                    >
-                      Debug
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDevMode((v) => {
-                          const next = !v;
-                          if (next) {
-                            setDebugArmed(false);
-                            setStudioFocusKey((k) => k + 1);
-                          }
-                          return next;
-                        });
-                      }}
-                      disabled={sending}
-                      className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
-                        devMode
-                          ? "border-[#0f1a14]/50 bg-[#0f1a14] text-white"
-                          : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
-                      }`}
-                      title="Mode Dev — ouvre Studio pour coder ; le chat reste pour les conseils"
-                      aria-label="Mode Dev"
-                      aria-pressed={devMode}
-                    >
-                      Dev
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={sending}
-                      className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 transition hover:bg-white disabled:opacity-60"
-                      title="Ajouter une image"
-                      aria-label="Ajouter une image"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        className="h-5 w-5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                      >
-                        <rect x="3" y="5" width="18" height="14" rx="2" />
-                        <circle cx="9" cy="10" r="1.5" />
-                        <path d="M21 16l-5-5-8 8" />
-                      </svg>
-                    </button>
-                    {supportedListen ? (
-                      <button
-                        type="button"
-                        onClick={toggleListen}
-                        disabled={sending}
-                        className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border transition ${
-                          listening
-                            ? "border-okapi-amber/40 bg-okapi-amber text-white"
-                            : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
-                        }`}
-                        title={listening ? "Arrêter le micro" : "Dicter"}
-                        aria-label={listening ? "Arrêter le micro" : "Dicter"}
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          className="h-5 w-5"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                        >
-                          <rect x="9" y="3" width="6" height="11" rx="3" />
-                          <path d="M5 11a7 7 0 0014 0M12 18v3" />
-                        </svg>
-                      </button>
-                    ) : null}
-                    {listening ? (
-                      <span className="text-[11px] font-medium text-okapi-amber-deep">
-                        Micro actif
-                      </span>
-                    ) : null}
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={sending}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-okapi-amber px-5 py-3 text-sm font-semibold text-white transition hover:bg-okapi-amber-deep disabled:opacity-60"
-                  >
-                    {sending ? "…" : "Envoyer"}
-                  </button>
-                </div>
-              </div>
-              {audioError ? (
-                <p className="mt-2 text-sm text-okapi-amber-deep">{audioError}</p>
-              ) : status ? (
-                <p className="mt-2 text-sm text-okapi-amber-deep">{status}</p>
-              ) : (
-                <p className="mt-2 text-[11px] text-okapi-ink/35">
-                  {debugArmed
-                    ? "Mode Debug actif — colle l’erreur puis Envoyer"
-                    : devMode
-                      ? "Mode Dev — Studio pour le code · chat pour conseils"
-                      : "Image · micro · Debug · Dev — l’agent agit sur demande"}
-                </p>
-              )}
-            </form>
+            {renderPromptForm(split)}
           </div>
         </section>
 
-        {split ? (
-          <WorkspacePanel
-            title={previewTitle}
-            html={previewHtml}
-            react={previewReact}
-            reactNative={previewReactNative}
-            nextjs={previewNext}
-            sql={previewSql}
-            api={previewApi}
-            python={previewPython}
-            flutter={previewFlutter}
-            readme={previewReadme}
-            sending={sending}
-            device={device}
-            onDeviceChange={setDevice}
-            shareBusy={shareBusy}
-            shareUrl={shareUrl}
-            onShare={() => void shareProject()}
-            onExportHtml={exportHtml}
-            onExportSql={exportSql}
-            onExportApi={exportApi}
-            onExportReadme={exportReadme}
-            onExportZip={exportZip}
-            onChangeArtifact={onChangeArtifact}
-            onSaveCloud={() => void saveCloudNow()}
-            onStudioCommitted={applyStudioCommit}
-            cloudStatus={saveBusy ? "Sauvegarde…" : cloudStatus}
-            engine={engine}
-            focusPreviewKey={workspaceFocusKey}
-            focusStudioKey={studioFocusKey}
-          />
-        ) : null}
+        {split ? <WorkspacePanel {...workspacePanelProps} /> : null}
       </div>
+      )}
     </main>
   );
 }

@@ -7,9 +7,10 @@ type NavItem = {
   id: string;
   label: string;
   icon: ReactNode;
+  hint?: string;
 };
 
-const navItems: NavItem[] = [
+const createItems: NavItem[] = [
   {
     id: "home",
     label: "Agent",
@@ -17,6 +18,16 @@ const navItems: NavItem[] = [
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="8" r="3.2" />
         <path d="M5 19c1.6-3.2 4-4.8 7-4.8s5.4 1.6 7 4.8" />
+      </svg>
+    ),
+  },
+  {
+    id: "studio",
+    label: "Studio",
+    hint: "Code",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M4 5h7v14H4zM13 5h7v6h-7zM13 13h7v6h-7z" />
       </svg>
     ),
   },
@@ -30,6 +41,9 @@ const navItems: NavItem[] = [
       </svg>
     ),
   },
+];
+
+const accountItems: NavItem[] = [
   {
     id: "billing",
     label: "Abonnement",
@@ -89,6 +103,37 @@ export function Sidebar({
     setMobileOpen(false);
   }
 
+  function renderNav(items: NavItem[]) {
+    return items.map((item) => {
+      const active = activeNav === item.id;
+      return (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => go(item.id)}
+          aria-current={active ? "page" : undefined}
+          className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+            active
+              ? "bg-okapi-forest text-white"
+              : "text-okapi-ink/65 hover:bg-white/70 hover:text-okapi-ink"
+          }`}
+        >
+          <span className={active ? "opacity-100" : "opacity-70"}>{item.icon}</span>
+          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+          {item.hint ? (
+            <span
+              className={`shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                active ? "bg-white/20 text-white/90" : "bg-okapi-mist text-okapi-ink/40"
+              }`}
+            >
+              {item.hint}
+            </span>
+          ) : null}
+        </button>
+      );
+    });
+  }
+
   const content = (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-3 px-1">
@@ -121,28 +166,19 @@ export function Sidebar({
         Nouvelle conversation
       </button>
 
-      <nav className="mt-5 flex-1 space-y-1" aria-label="Navigation Okapi">
-        {navItems.map((item) => {
-          const active = activeNav === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => go(item.id)}
-              aria-current={active ? "page" : undefined}
-              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
-                active
-                  ? "bg-okapi-forest text-white"
-                  : "text-okapi-ink/65 hover:bg-white/70 hover:text-okapi-ink"
-              }`}
-            >
-              <span className={active ? "opacity-100" : "opacity-70"}>
-                {item.icon}
-              </span>
-              {item.label}
-            </button>
-          );
-        })}
+      <nav className="mt-5 flex-1 space-y-4" aria-label="Navigation Okapi">
+        <div className="space-y-1">
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-okapi-ink/35">
+            Créer
+          </p>
+          {renderNav(createItems)}
+        </div>
+        <div className="space-y-1">
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-okapi-ink/35">
+            Compte
+          </p>
+          {renderNav(accountItems)}
+        </div>
       </nav>
 
       <div className="mt-auto rounded-2xl border border-[var(--okapi-stroke)] bg-white/55 p-1.5">
@@ -201,12 +237,10 @@ export function Sidebar({
         />
       ) : null}
 
-      {/* Desktop / tablette : toujours visible dans le flux */}
       <aside className="relative z-[40] hidden w-[260px] shrink-0 md:flex md:flex-col md:rounded-[28px] md:border md:border-[var(--okapi-stroke)] md:bg-[var(--okapi-glass)] md:p-3.5 md:backdrop-blur-xl">
         {content}
       </aside>
 
-      {/* Mobile : tiroir */}
       <aside
         className={`fixed inset-y-3 left-3 z-[80] flex w-[min(86vw,280px)] flex-col rounded-[28px] border border-[var(--okapi-stroke)] bg-white p-3.5 shadow-2xl transition-transform md:hidden ${
           mobileOpen ? "translate-x-0" : "-translate-x-[130%]"

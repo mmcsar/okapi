@@ -16,12 +16,29 @@ type ChatMessage = {
 
 /** Gratuit OpenRouter — utilisé si pas de crédit / modèle payant refusé. */
 const FREE_FALLBACK_MODEL = "nex-agi/nex-n2.5-mini:free";
+/** Fallback vision (doit supporter les images). */
+const FREE_VISION_FALLBACK =
+  process.env.OPENROUTER_MODEL_VISION_FREE?.trim() ||
+  "google/gemini-2.0-flash-exp:free";
 
 export function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
 }
 
-export function openRouterModel(engine: OkapiEngine = "flash") {
+export function openRouterModel(
+  engine: OkapiEngine = "flash",
+  opts?: { vision?: boolean },
+) {
+  if (opts?.vision) {
+    return (
+      process.env.OPENROUTER_MODEL_VISION?.trim() ||
+      (engine === "pro"
+        ? process.env.OPENROUTER_MODEL_PRO?.trim()
+        : process.env.OPENROUTER_MODEL_FLASH?.trim()) ||
+      process.env.OPENROUTER_MODEL?.trim() ||
+      "google/gemini-2.0-flash-001"
+    );
+  }
   if (engine === "pro") {
     return (
       process.env.OPENROUTER_MODEL_PRO?.trim() ||
@@ -138,11 +155,14 @@ export async function streamOpenRouterChat(opts: {
   system: string;
   engine?: OkapiEngine;
   messages: ChatMessage[];
+  vision?: boolean;
 }): Promise<Response> {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OPENROUTER_API_KEY manquante");
 
-  const primary = openRouterModel(opts.engine ?? "flash");
+  const vision = Boolean(opts.vision);
+  const primary = openRouterModel(opts.engine ?? "flash", { vision });
+  const fallback = vision ? FREE_VISION_FALLBACK : FREE_FALLBACK_MODEL;
   const messages: ChatMessage[] = [
     { role: "system", content: opts.system },
     ...opts.messages,
@@ -156,18 +176,35 @@ export async function streamOpenRouterChat(opts: {
     stream: true,
   });
 
-  if (
-    !upstream.ok &&
-    isPaymentBlocked(upstream.status) &&
-    primary !== FREE_FALLBACK_MODEL
-  ) {
-    upstream = await openRouterFetch({
-      key,
-      model: FREE_FALLBACK_MODEL,
-      messages,
-      maxTokens: 8192,
-      stream: true,
-    });
+  if (!upstream.ok) {
+    const failBody = (await upstream.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    const msg = failBody?.error?.message || "";
+    const canRetry =
+      primary !== fallback &&
+      (isPaymentBlocked(upstream.status, msg) ||
+        (vision &&
+          /vision|image|multimodal|content type|not support/i.test(msg)));
+
+    if (canRetry) {
+      upstream = await openRouterFetch({
+        key,
+        model: fallback,
+        messages,
+        maxTokens: 8192,
+        stream: true,
+      });
+    } else {
+      throw new Error(
+        msg ||
+          (upstream.status === 402
+            ? "Le crédit IA Okapi est épuisé."
+            : upstream.status === 429
+              ? "Okapi reçoit beaucoup de demandes. Réessaie dans un instant."
+              : `Erreur IA Okapi (${upstream.status})`),
+      );
+    }
   }
 
   if (!upstream.ok || !upstream.body) {

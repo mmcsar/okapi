@@ -56,6 +56,8 @@ type WorkspacePanelProps = {
   focusPreviewKey?: number;
   /** Bump to open Studio (mode Dev) */
   focusStudioKey?: number;
+  /** Mode Studio immersif : full-bleed, chrome minimal */
+  immersive?: boolean;
 };
 
 const TABS: { id: WorkspaceTab; label: string }[] = [
@@ -133,8 +135,9 @@ export function WorkspacePanel({
   engine = "flash",
   focusPreviewKey = 0,
   focusStudioKey = 0,
+  immersive = false,
 }: WorkspacePanelProps) {
-  const [tab, setTab] = useState<WorkspaceTab>("preview");
+  const [tab, setTab] = useState<WorkspaceTab>(immersive ? "studio" : "preview");
 
   useEffect(() => {
     if (focusPreviewKey > 0) setTab("preview");
@@ -143,6 +146,10 @@ export function WorkspacePanel({
   useEffect(() => {
     if (focusStudioKey > 0) setTab("studio");
   }, [focusStudioKey]);
+
+  useEffect(() => {
+    if (immersive) setTab("studio");
+  }, [immersive]);
 
   const exportForTab = () => {
     if (tab === "preview" || tab === "code" || tab === "studio") onExportHtml();
@@ -172,8 +179,60 @@ export function WorkspacePanel({
           ? "Exporter Docs"
           : "Exporter HTML";
 
+  const studioBleed = immersive && tab === "studio";
+
   return (
-    <section className="flex min-h-[48vh] flex-1 flex-col bg-[linear-gradient(180deg,rgba(223,230,225,0.85),rgba(232,238,233,0.9))] lg:min-h-0">
+    <section
+      className={`flex min-h-0 flex-1 flex-col lg:min-h-0 ${
+        studioBleed
+          ? "min-h-[48vh] bg-[#0a100e]"
+          : "min-h-[48vh] bg-[linear-gradient(180deg,rgba(223,230,225,0.85),rgba(232,238,233,0.9))]"
+      }`}
+    >
+      {studioBleed ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 bg-[#0f1814] px-3 py-1.5">
+          <div className="flex items-center gap-1">
+            {(
+              [
+                ["studio", "Studio"],
+                ["preview", "Preview"],
+                ["sql", "SQL"],
+                ["api", "API"],
+                ["docs", "Docs"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                  tab === id
+                    ? "bg-white/10 text-[#eef6f1]"
+                    : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            {onSaveCloud ? (
+              <button
+                type="button"
+                onClick={onSaveCloud}
+                className="rounded-lg bg-[#1b4f3a] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#2f6b4f]"
+              >
+                Sauvegarder
+              </button>
+            ) : null}
+            {cloudStatus ? (
+              <span className="max-w-[120px] truncate text-[10px] text-[#7d9588]">
+                {cloudStatus}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : (
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--okapi-stroke)] px-3 py-2 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {TABS.map((item) => {
@@ -296,6 +355,7 @@ export function WorkspacePanel({
           </p>
         </div>
       </div>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {tab === "studio" ? (
@@ -314,6 +374,7 @@ export function WorkspacePanel({
             engine={engine}
             onChangeFile={onChangeArtifact}
             onCommitted={onStudioCommitted}
+            onSaveCloud={onSaveCloud}
           />
         ) : null}
 

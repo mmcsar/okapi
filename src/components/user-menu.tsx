@@ -51,6 +51,16 @@ export function UserMenu({
           <button
             type="button"
             onClick={() => {
+              onNavigate("studio");
+              setOpen(false);
+            }}
+            className="flex w-full px-4 py-2.5 text-left text-sm text-okapi-ink/75 transition hover:bg-okapi-mist"
+          >
+            Studio
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               onNavigate("projects");
               setOpen(false);
             }}
