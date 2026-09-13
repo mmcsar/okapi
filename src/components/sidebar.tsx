@@ -50,35 +50,6 @@ type SidebarProps = {
   loggedIn?: boolean;
 };
 
-function NavButton({
-  item,
-  active,
-  onClick,
-}: {
-  item: NavItem;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClick();
-      }}
-      className={`pointer-events-auto flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
-        active
-          ? "bg-okapi-forest text-white"
-          : "text-okapi-ink/65 hover:bg-white/70 hover:text-okapi-ink"
-      }`}
-    >
-      <span className={active ? "opacity-100" : "opacity-70"}>{item.icon}</span>
-      {item.label}
-    </button>
-  );
-}
-
 export function Sidebar({
   activeNav,
   onNavChange,
@@ -90,7 +61,7 @@ export function Sidebar({
 
   useEffect(() => {
     function onResize() {
-      if (window.matchMedia("(min-width: 1024px)").matches) {
+      if (window.matchMedia("(min-width: 768px)").matches) {
         setMobileOpen(false);
       }
     }
@@ -103,8 +74,13 @@ export function Sidebar({
     setMobileOpen(false);
   }
 
+  function newChat() {
+    onNewProject?.();
+    setMobileOpen(false);
+  }
+
   const content = (
-    <>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-3 px-1">
         <div className="relative h-11 w-11 overflow-hidden rounded-2xl ring-1 ring-[var(--okapi-stroke)]">
           <Image
@@ -128,27 +104,35 @@ export function Sidebar({
 
       <button
         type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onNewProject?.();
-          setMobileOpen(false);
-        }}
-        className="pointer-events-auto mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-okapi-amber px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-okapi-amber-deep"
+        onClick={newChat}
+        className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-okapi-amber px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-okapi-amber-deep"
       >
         <span className="text-base leading-none">+</span>
         Nouvelle conversation
       </button>
 
-      <nav className="mt-5 flex-1 space-y-0.5">
-        {navItems.map((item) => (
-          <NavButton
-            key={item.id}
-            item={item}
-            active={activeNav === item.id}
-            onClick={() => go(item.id)}
-          />
-        ))}
+      <nav className="mt-5 flex-1 space-y-1" aria-label="Navigation Okapi">
+        {navItems.map((item) => {
+          const active = activeNav === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => go(item.id)}
+              aria-current={active ? "page" : undefined}
+              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+                active
+                  ? "bg-okapi-forest text-white"
+                  : "text-okapi-ink/65 hover:bg-white/70 hover:text-okapi-ink"
+              }`}
+            >
+              <span className={active ? "opacity-100" : "opacity-70"}>
+                {item.icon}
+              </span>
+              {item.label}
+            </button>
+          );
+        })}
       </nav>
 
       <div className="mt-auto rounded-2xl border border-[var(--okapi-stroke)] bg-white/55 p-1.5">
@@ -171,12 +155,8 @@ export function Sidebar({
         </div>
         <button
           type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            go("login");
-          }}
-          className="pointer-events-auto mt-0.5 flex w-full items-center gap-2 px-2 py-2 text-left"
+          onClick={() => go("login")}
+          className="mt-0.5 flex w-full items-center gap-2 px-2 py-2 text-left"
         >
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-okapi-forest text-xs font-bold text-white">
             {(userLabel || "?").slice(0, 1).toUpperCase()}
@@ -189,14 +169,14 @@ export function Sidebar({
           </div>
         </button>
       </div>
-    </>
+    </div>
   );
 
   return (
     <>
       <button
         type="button"
-        className="fixed left-4 top-4 z-[60] rounded-xl border border-[var(--okapi-stroke)] bg-white/95 px-3 py-2 text-sm font-semibold shadow-sm lg:hidden"
+        className="fixed left-4 top-4 z-[80] rounded-xl border border-[var(--okapi-stroke)] bg-white px-3 py-2 text-sm font-semibold shadow-md md:hidden"
         onClick={() => setMobileOpen(true)}
       >
         Menu
@@ -206,14 +186,20 @@ export function Sidebar({
         <button
           type="button"
           aria-label="Fermer le menu"
-          className="fixed inset-0 z-[55] bg-okapi-ink/35 lg:hidden"
+          className="fixed inset-0 z-[70] bg-okapi-ink/40 md:hidden"
           onClick={() => setMobileOpen(false)}
         />
       ) : null}
 
+      {/* Desktop / tablette : toujours visible dans le flux */}
+      <aside className="relative z-[40] hidden w-[260px] shrink-0 md:flex md:flex-col md:rounded-[28px] md:border md:border-[var(--okapi-stroke)] md:bg-[var(--okapi-glass)] md:p-3.5 md:backdrop-blur-xl">
+        {content}
+      </aside>
+
+      {/* Mobile : tiroir */}
       <aside
-        className={`pointer-events-auto relative z-[60] flex w-[272px] shrink-0 flex-col rounded-[28px] border border-[var(--okapi-stroke)] bg-[var(--okapi-glass)] p-3.5 backdrop-blur-xl max-lg:fixed max-lg:inset-y-3 max-lg:left-3 max-lg:z-[60] max-lg:transition-transform ${
-          mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-[120%]"
+        className={`fixed inset-y-3 left-3 z-[80] flex w-[min(86vw,280px)] flex-col rounded-[28px] border border-[var(--okapi-stroke)] bg-white p-3.5 shadow-2xl transition-transform md:hidden ${
+          mobileOpen ? "translate-x-0" : "-translate-x-[130%]"
         }`}
       >
         {content}
