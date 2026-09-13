@@ -148,7 +148,7 @@ export function SettingsPanel({ onBack, onOpenBilling }: SettingsPanelProps) {
               Abonnement · Mobile Pay
             </h2>
             <p className="mt-1 text-sm text-okapi-ink/45">
-              Paie Okapi Pro avec M-Pesa, Orange Money ou Airtel Money.
+              Paie Okapi Entreprise Plus (15 $ / mois) avec M-Pesa, Orange Money ou Airtel Money.
             </p>
             <div className="mt-4">
               <button

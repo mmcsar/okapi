@@ -1,5 +1,6 @@
 import {
   formatCdf,
+  formatUsd,
   makePaymentReference,
   normalizeDrPhone,
   ussdHint,
@@ -57,7 +58,7 @@ export async function startMobileCheckout(
     reference,
     provider: provider === "demo" ? "demo" : "manual",
     status: "pending",
-    message: `Demande créée. Paie ${formatCdf(input.amountCdf)} via ${operatorLabel(input.operator)} puis confirme sur ton téléphone.`,
+    message: `Demande créée. Entreprise Plus ${formatUsd(input.amountUsd ?? 15)} · paie ${formatCdf(input.amountCdf)} via ${operatorLabel(input.operator)}, puis confirme sur ton téléphone.`,
     ussdHint: ussdHint(input.operator, phone, input.amountCdf),
     providerRef: undefined,
   };

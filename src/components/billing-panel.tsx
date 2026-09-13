@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import {
   formatCdf,
+  formatPlanPrice,
+  getPayablePlans,
   MOBILE_OPERATORS,
-  OKAPI_PLANS,
   type MobileOperator,
   type OkapiPlanId,
 } from "@/lib/billing";
@@ -29,7 +30,7 @@ type PaymentRow = {
 
 export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
   const { user, authFetch, ready } = useAuth();
-  const [planId, setPlanId] = useState<OkapiPlanId>("pro_month");
+  const [planId, setPlanId] = useState<OkapiPlanId>("enterprise_plus");
   const [operator, setOperator] = useState<MobileOperator>("mpesa");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
@@ -121,7 +122,7 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
     }
   }
 
-  const paidPlans = OKAPI_PLANS.filter((p) => p.id !== "free");
+  const paidPlans = getPayablePlans();
 
   return (
     <main className="app-shell ml-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] lg:ml-3">
@@ -201,8 +202,13 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
                           ) : null}
                         </div>
                         <p className="mt-2 text-lg font-bold text-okapi-forest">
-                          {formatCdf(plan.priceCdf)}
+                          {formatPlanPrice(plan)}
                         </p>
+                        {plan.priceCdf > 0 ? (
+                          <p className="mt-0.5 text-xs text-okapi-ink/45">
+                            Mobile Money ≈ {formatCdf(plan.priceCdf)}
+                          </p>
+                        ) : null}
                         <ul className="mt-3 space-y-1 text-xs text-okapi-ink/55">
                           {plan.features.slice(0, 3).map((f) => (
                             <li key={f}>· {f}</li>

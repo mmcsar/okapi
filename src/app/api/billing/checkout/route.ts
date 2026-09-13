@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 
   if (!plan || plan.id === "free") {
     return NextResponse.json(
-      { error: "Choisis un plan payant (Pro mensuel ou annuel)." },
+      { error: "Choisis un plan payant (Entreprise Plus)." },
       { status: 400 },
     );
   }
@@ -60,6 +60,7 @@ export async function POST(request: Request) {
       operator,
       phone,
       amountCdf: plan.priceCdf,
+      amountUsd: plan.priceUsd,
       userId: auth.session.user.id,
     });
 

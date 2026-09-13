@@ -1,6 +1,6 @@
 /** Plans & helpers — Okapi Mobile Pay (RDC). */
 
-export type OkapiPlanId = "free" | "pro_month" | "pro_year";
+export type OkapiPlanId = "free" | "pro_month" | "pro_year" | "enterprise_plus";
 
 export type MobileOperator = "mpesa" | "orange" | "airtel";
 
@@ -22,16 +22,33 @@ export type SubscriptionStatus =
 export type OkapiPlan = {
   id: OkapiPlanId;
   label: string;
+  /** Prix affiché (USD). */
+  priceUsd: number;
+  /** Montant Mobile Money (CDF), dérivé du taux. */
   priceCdf: number;
   periodDays: number;
   badge?: string;
   features: string[];
 };
 
+/** Taux USD → CDF (surchargeable via OKAPI_USD_CDF_RATE). */
+export function usdToCdfRate() {
+  if (typeof process !== "undefined") {
+    const n = Number(process.env.OKAPI_USD_CDF_RATE);
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  }
+  return 2_800;
+}
+
+export function usdToCdf(usd: number) {
+  return Math.round(usd * usdToCdfRate());
+}
+
 export const OKAPI_PLANS: OkapiPlan[] = [
   {
     id: "free",
     label: "Okapi Flash",
+    priceUsd: 0,
     priceCdf: 0,
     periodDays: 0,
     features: [
@@ -41,11 +58,28 @@ export const OKAPI_PLANS: OkapiPlan[] = [
     ],
   },
   {
-    id: "pro_month",
-    label: "Okapi Pro",
-    priceCdf: 15_000,
+    id: "enterprise_plus",
+    label: "Entreprise Plus",
+    priceUsd: 15,
+    priceCdf: usdToCdf(15),
     periodDays: 30,
-    badge: "Populaire",
+    badge: "15 $",
+    features: [
+      "Okapi Pro (modèles avancés)",
+      "Plus de générations / jour",
+      "Sauvegarde cloud prioritaire",
+      "Support WhatsApp MMC",
+      "Idéal équipes & particuliers pros",
+    ],
+  },
+  {
+    // Alias historique — même offre que Entreprise Plus
+    id: "pro_month",
+    label: "Entreprise Plus",
+    priceUsd: 15,
+    priceCdf: usdToCdf(15),
+    periodDays: 30,
+    badge: "15 $",
     features: [
       "Okapi Pro (modèles avancés)",
       "Plus de générations / jour",
@@ -55,12 +89,13 @@ export const OKAPI_PLANS: OkapiPlan[] = [
   },
   {
     id: "pro_year",
-    label: "Okapi Pro Annuel",
-    priceCdf: 150_000,
+    label: "Entreprise Plus Annuel",
+    priceUsd: 150,
+    priceCdf: usdToCdf(150),
     periodDays: 365,
-    badge: "-17%",
+    badge: "150 $ · -17%",
     features: [
-      "Tout Pro mensuel",
+      "Tout Entreprise Plus",
       "2 mois offerts",
       "Priorité support",
     ],
@@ -78,11 +113,36 @@ export const MOBILE_OPERATORS: {
 ];
 
 export function getPlan(id: string): OkapiPlan | undefined {
+  if (id === "pro_month") {
+    return OKAPI_PLANS.find((p) => p.id === "enterprise_plus") ?? OKAPI_PLANS.find((p) => p.id === "pro_month");
+  }
   return OKAPI_PLANS.find((p) => p.id === id);
+}
+
+/** Plans visibles à l’achat (évite le doublon pro_month / enterprise_plus). */
+export function getPayablePlans() {
+  return OKAPI_PLANS.filter(
+    (p) => p.id === "enterprise_plus" || p.id === "pro_year",
+  );
 }
 
 export function formatCdf(amount: number) {
   return `${amount.toLocaleString("fr-FR")} CDF`;
+}
+
+export function formatUsd(amount: number) {
+  if (amount <= 0) return "Gratuit";
+  return `${amount.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+export function formatPlanPrice(plan: OkapiPlan) {
+  if (plan.priceUsd <= 0) return "Gratuit";
+  const period = plan.periodDays >= 360 ? "/ an" : "/ mois";
+  return `${formatUsd(plan.priceUsd)} ${period}`;
 }
 
 /** Normalize DRC mobile numbers to 243… */
