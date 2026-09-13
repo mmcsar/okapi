@@ -5,6 +5,7 @@ import {
   type MobileOperator,
   type OkapiPlanId,
 } from "@/lib/billing";
+import { kycIsReady } from "@/lib/kyc";
 import { billingWhatsappUrl, startMobileCheckout } from "@/lib/mobile-pay";
 import { requireUser } from "@/lib/supabase";
 import { assertBodySize } from "@/lib/security";
@@ -19,6 +20,24 @@ export async function POST(request: Request) {
 
   const tooBig = assertBodySize(request, 32_000);
   if (tooBig) return tooBig;
+
+  // KYC obligatoire avant Mobile Pay
+  const { data: profile } = await auth.session.supabase
+    .from("profiles")
+    .select("kyc_status")
+    .eq("id", auth.session.user.id)
+    .maybeSingle();
+
+  if (!kycIsReady(profile?.kyc_status)) {
+    return NextResponse.json(
+      {
+        error:
+          "KYC obligatoire. Remplis ton identité (nom + téléphone + pièce) avant de payer.",
+        code: "kyc_required",
+      },
+      { status: 403 },
+    );
+  }
 
   const body = (await request.json().catch(() => null)) as {
     planId?: string;

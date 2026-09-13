@@ -23,7 +23,8 @@ export function middleware(request: NextRequest) {
     const isAuthHeavy =
       pathname.startsWith("/api/admin") ||
       pathname.startsWith("/api/projects") ||
-      pathname.startsWith("/api/billing");
+      pathname.startsWith("/api/billing") ||
+      pathname.startsWith("/api/kyc");
 
     const limit = isLlm ? 40 : isAuthHeavy ? 120 : 200;
     const windowMs = 60_000;

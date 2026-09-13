@@ -13,6 +13,7 @@ export type CheckoutInput = {
   operator: MobileOperator;
   phone: string;
   amountCdf: number;
+  amountUsd?: number;
   userId: string;
 };
 

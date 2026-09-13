@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPlan } from "@/lib/billing";
+import { kycIsReady, kycStatusLabel } from "@/lib/kyc";
 import { requireUser } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -7,6 +8,14 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const auth = await requireUser(request);
   if ("error" in auth) return auth.error;
+
+  const { data: kycProfile } = await auth.session.supabase
+    .from("profiles")
+    .select(
+      "full_name, phone, city, account_type, kyc_status, id_doc_type, id_doc_number, nif, rccm",
+    )
+    .eq("id", auth.session.user.id)
+    .maybeSingle();
 
   const { data: sub, error: subErr } = await auth.session.supabase
     .from("subscriptions")
@@ -29,6 +38,9 @@ export async function GET(request: Request) {
         subscription: null,
         payments: [],
         plan: getPlan("free"),
+        kycReady: kycIsReady(kycProfile?.kyc_status),
+        kycLabel: kycStatusLabel(kycProfile?.kyc_status),
+        kyc: kycProfile,
       },
       { status: missing ? 200 : 500 },
     );
@@ -63,5 +75,8 @@ export async function GET(request: Request) {
         },
     plan: getPlan(active ? planId : "free") ?? getPlan("free"),
     payments: payments ?? [],
+    kycReady: kycIsReady(kycProfile?.kyc_status),
+    kycLabel: kycStatusLabel(kycProfile?.kyc_status),
+    kyc: kycProfile,
   });
 }

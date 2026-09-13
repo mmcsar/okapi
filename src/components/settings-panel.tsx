@@ -145,10 +145,11 @@ export function SettingsPanel({ onBack, onOpenBilling }: SettingsPanelProps) {
 
           <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/70 p-5 backdrop-blur-md">
             <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
-              Abonnement · Mobile Pay
+              Abonnement · Mobile Pay + KYC
             </h2>
             <p className="mt-1 text-sm text-okapi-ink/45">
-              Paie Okapi Entreprise Plus (15 $ / mois) avec M-Pesa, Orange Money ou Airtel Money.
+              KYC obligatoire puis paiement Entreprise Plus (15 $) via Mobile
+              Money.
             </p>
             <div className="mt-4">
               <button
@@ -156,7 +157,7 @@ export function SettingsPanel({ onBack, onOpenBilling }: SettingsPanelProps) {
                 onClick={() => onOpenBilling?.()}
                 className="rounded-2xl bg-okapi-forest px-4 py-2.5 text-sm font-semibold text-white hover:bg-okapi-leaf"
               >
-                Ouvrir Mobile Pay
+                KYC & Mobile Pay
               </button>
             </div>
           </section>

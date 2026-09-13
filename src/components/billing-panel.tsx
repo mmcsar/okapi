@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
+import { KycForm } from "@/components/kyc-form";
 import {
   formatCdf,
   formatPlanPrice,
@@ -10,6 +11,7 @@ import {
   type MobileOperator,
   type OkapiPlanId,
 } from "@/lib/billing";
+import { kycStatusLabel } from "@/lib/kyc";
 
 type BillingPanelProps = {
   onBack?: () => void;
@@ -42,6 +44,19 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
   const [subLabel, setSubLabel] = useState("Flash (gratuit)");
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [kycReady, setKycReady] = useState(false);
+  const [kycLabel, setKycLabel] = useState("Non rempli");
+  const [kyc, setKyc] = useState<{
+    full_name?: string | null;
+    phone?: string | null;
+    city?: string | null;
+    account_type?: string | null;
+    id_doc_type?: string | null;
+    id_doc_number?: string | null;
+    nif?: string | null;
+    rccm?: string | null;
+    kyc_status?: string | null;
+  } | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -55,6 +70,9 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
         plan?: { label?: string };
         subscription?: { active?: boolean; status?: string; plan_id?: string };
         payments?: PaymentRow[];
+        kycReady?: boolean;
+        kycLabel?: string;
+        kyc?: typeof kyc;
       };
       if (!res.ok && !data.setupRequired) {
         throw new Error(data.error ?? `Erreur ${res.status}`);
@@ -71,6 +89,12 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
         setSubLabel(data.plan?.label ?? "Flash (gratuit)");
       }
       setPayments(data.payments ?? []);
+      setKycReady(Boolean(data.kycReady));
+      setKycLabel(data.kycLabel ?? kycStatusLabel(data.kyc?.kyc_status));
+      setKyc(data.kyc ?? null);
+      if (data.kyc?.phone) {
+        setPhone((prev) => prev || data.kyc?.phone || "");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chargement impossible");
     } finally {
@@ -156,7 +180,10 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
               {loading ? "…" : subLabel}
             </p>
             <p className="mt-2 text-sm text-okapi-ink/50">
-              Particuliers : pas de NIF. Paiement Mobile Money sur ton numéro.
+              KYC obligatoire · particuliers sans NIF · Mobile Money
+            </p>
+            <p className="mt-2 text-xs font-semibold text-okapi-forest">
+              Identité : {loading ? "…" : kycLabel}
             </p>
           </section>
 
@@ -175,9 +202,22 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
             </section>
           ) : (
             <>
+              <section className="rounded-3xl border border-okapi-amber/25 bg-okapi-amber/5 p-5">
+                <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
+                  1. KYC (obligatoire)
+                </h2>
+                <p className="mt-1 text-sm text-okapi-ink/55">
+                  Nom, téléphone et pièce d’identité. NIF/RCCM seulement si
+                  compte entreprise.
+                </p>
+                <div className="mt-4">
+                  <KycForm initial={kyc} onDone={() => void load()} />
+                </div>
+              </section>
+
               <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5">
                 <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
-                  Choisir un plan
+                  2. Choisir un plan
                 </h2>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   {paidPlans.map((plan) => {
@@ -222,10 +262,12 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
 
               <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5">
                 <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
-                  Mobile Pay
+                  3. Mobile Pay
                 </h2>
                 <p className="mt-1 text-sm text-okapi-ink/45">
-                  Choisis l’opérateur et ton numéro Mobile Money.
+                  {kycReady
+                    ? "Choisis l’opérateur et ton numéro Mobile Money."
+                    : "Complète d’abord le KYC (étape 1) pour débloquer le paiement."}
                 </p>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -264,11 +306,15 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
 
                 <button
                   type="button"
-                  disabled={busy || !phone.trim()}
+                  disabled={busy || !phone.trim() || !kycReady}
                   onClick={() => void pay()}
                   className="mt-4 w-full rounded-2xl bg-okapi-amber px-4 py-3 text-sm font-semibold text-white hover:bg-okapi-amber-deep disabled:opacity-60"
                 >
-                  {busy ? "Envoi…" : "Payer avec Mobile Pay"}
+                  {busy
+                    ? "Envoi…"
+                    : !kycReady
+                      ? "KYC requis avant paiement"
+                      : "Payer avec Mobile Pay"}
                 </button>
 
                 {error ? (
