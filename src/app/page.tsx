@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "@/components/auth-provider";
+import { BillingPanel } from "@/components/billing-panel";
 import { HomeDashboard } from "@/components/home-dashboard";
 import { LoginPanel } from "@/components/login-panel";
 import { ProjectsPanel } from "@/components/projects-panel";
@@ -9,7 +10,7 @@ import { SettingsPanel } from "@/components/settings-panel";
 import { Sidebar } from "@/components/sidebar";
 import type { OkapiProject } from "@/lib/supabase";
 
-type NavId = "home" | "projects" | "settings" | "login";
+type NavId = "home" | "projects" | "settings" | "login" | "billing";
 
 function parseHash(): NavId {
   if (typeof window === "undefined") return "home";
@@ -17,8 +18,18 @@ function parseHash(): NavId {
   if (raw === "projects" || raw === "projets") return "projects";
   if (raw === "settings" || raw === "parametres" || raw === "paramètres")
     return "settings";
+  if (raw === "billing" || raw === "abonnement" || raw === "pay")
+    return "billing";
   if (raw === "login" || raw === "connexion") return "login";
   return "home";
+}
+
+function hashFor(id: NavId) {
+  if (id === "projects") return "#projects";
+  if (id === "settings") return "#settings";
+  if (id === "billing") return "#billing";
+  if (id === "login") return "#login";
+  return "#home";
 }
 
 function HomeApp() {
@@ -37,8 +48,7 @@ function HomeApp() {
 
   const setNav = useCallback((id: NavId) => {
     setActiveNav(id);
-    const next =
-      id === "home" ? "#home" : id === "projects" ? "#projects" : id === "settings" ? "#settings" : "#login";
+    const next = hashFor(id);
     if (window.location.hash !== next) {
       window.location.hash = next;
     }
@@ -75,6 +85,10 @@ function HomeApp() {
         setNav("settings");
         return;
       }
+      if (id === "billing" || id === "abonnement") {
+        setNav("billing");
+        return;
+      }
       setNav("home");
     },
     [setNav, signOut],
@@ -106,7 +120,11 @@ function HomeApp() {
   }
 
   const sidebarActive =
-    activeNav === "projects" || activeNav === "settings" ? activeNav : "home";
+    activeNav === "projects" ||
+    activeNav === "settings" ||
+    activeNav === "billing"
+      ? activeNav
+      : "home";
 
   return (
     <div className="relative z-10 flex min-h-screen w-full flex-col gap-3 p-3 md:flex-row md:gap-2 md:p-4">
@@ -119,7 +137,6 @@ function HomeApp() {
       />
 
       <div className="relative z-0 flex min-h-0 min-w-0 flex-1 flex-col gap-2 pt-12 md:pt-0">
-        {/* Barre de secours — toujours cliquable même si le tiroir latéral pose problème */}
         <div className="flex flex-wrap items-center gap-2 md:hidden">
           <button
             type="button"
@@ -152,6 +169,17 @@ function HomeApp() {
           </button>
           <button
             type="button"
+            onClick={() => navigate("billing")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+              activeNav === "billing"
+                ? "bg-okapi-forest text-white"
+                : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
+            }`}
+          >
+            Abo
+          </button>
+          <button
+            type="button"
             onClick={() => navigate("settings")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold ${
               activeNav === "settings"
@@ -164,7 +192,15 @@ function HomeApp() {
         </div>
 
         {activeNav === "settings" ? (
-          <SettingsPanel onBack={() => navigate("home")} />
+          <SettingsPanel
+            onBack={() => navigate("home")}
+            onOpenBilling={() => navigate("billing")}
+          />
+        ) : activeNav === "billing" ? (
+          <BillingPanel
+            onBack={() => navigate("home")}
+            onNeedLogin={() => navigate("login")}
+          />
         ) : activeNav === "login" ? (
           <LoginPanel
             onBack={() => navigate("home")}

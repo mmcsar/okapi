@@ -10,9 +10,10 @@ import {
 
 type SettingsPanelProps = {
   onBack?: () => void;
+  onOpenBilling?: () => void;
 };
 
-export function SettingsPanel({ onBack }: SettingsPanelProps) {
+export function SettingsPanel({ onBack, onOpenBilling }: SettingsPanelProps) {
   const [name, setName] = useState("Christian");
   const [city, setCity] = useState("Kinshasa");
   const [email, setEmail] = useState("christian@okapi.cd");
@@ -139,6 +140,24 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                   className="w-full rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/80 px-4 py-2.5 text-sm text-okapi-ink/70 outline-none"
                 />
               </label>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/70 p-5 backdrop-blur-md">
+            <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
+              Abonnement · Mobile Pay
+            </h2>
+            <p className="mt-1 text-sm text-okapi-ink/45">
+              Paie Okapi Pro avec M-Pesa, Orange Money ou Airtel Money.
+            </p>
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => onOpenBilling?.()}
+                className="rounded-2xl bg-okapi-forest px-4 py-2.5 text-sm font-semibold text-white hover:bg-okapi-leaf"
+              >
+                Ouvrir Mobile Pay
+              </button>
             </div>
           </section>
 

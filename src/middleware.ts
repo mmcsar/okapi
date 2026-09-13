@@ -21,7 +21,9 @@ export function middleware(request: NextRequest) {
       pathname.startsWith("/api/generate") ||
       pathname.startsWith("/api/studio-edit");
     const isAuthHeavy =
-      pathname.startsWith("/api/admin") || pathname.startsWith("/api/projects");
+      pathname.startsWith("/api/admin") ||
+      pathname.startsWith("/api/projects") ||
+      pathname.startsWith("/api/billing");
 
     const limit = isLlm ? 40 : isAuthHeavy ? 120 : 200;
     const windowMs = 60_000;

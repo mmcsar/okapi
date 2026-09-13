@@ -31,6 +31,16 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    id: "billing",
+    label: "Abonnement",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="3" y="6" width="18" height="12" rx="2" />
+        <path d="M3 10h18M7 14h3" />
+      </svg>
+    ),
+  },
+  {
     id: "settings",
     label: "Paramètres",
     icon: (

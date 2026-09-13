@@ -61,6 +61,16 @@ export function UserMenu({
           <button
             type="button"
             onClick={() => {
+              onNavigate("billing");
+              setOpen(false);
+            }}
+            className="flex w-full px-4 py-2.5 text-left text-sm text-okapi-ink/75 transition hover:bg-okapi-mist"
+          >
+            Abonnement
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               onNavigate("settings");
               setOpen(false);
             }}
