@@ -32,6 +32,7 @@ import {
   keepOrReplace,
   listFilledArtifactLabels,
 } from "@/lib/project-artifacts";
+import { parseGenerateStreamLine } from "@/lib/generate-stream";
 import { WorkspacePanel } from "@/components/workspace-panel";
 import {
   studioFileIdToArtifactKey,
@@ -877,29 +878,7 @@ export function HomeDashboard({
 
       const handleGenerateEvent = async (line: string) => {
         if (!line.trim()) return;
-        let event: {
-          type: string;
-          message?: string;
-          text?: string;
-          html?: string;
-          react?: string | null;
-          reactNative?: string | null;
-          nextjs?: string | null;
-          sql?: string | null;
-          api?: string | null;
-          readme?: string | null;
-          title?: string;
-          summary?: string;
-          mode?: string;
-          error?: string;
-        };
-        try {
-          event = JSON.parse(line) as typeof event;
-        } catch {
-          throw new Error(
-            "Réponse Okapi interrompue. Réessaie dans quelques secondes.",
-          );
-        }
+        const event = parseGenerateStreamLine(line);
 
         if (event.type === "status" && event.message) {
           setAssistant(event.message);

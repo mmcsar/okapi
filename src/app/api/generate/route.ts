@@ -22,6 +22,11 @@ import {
   wantsLargeProject,
   type GenerateMode,
 } from "@/lib/fullstack";
+import { ensureReadmeArtifact } from "@/lib/project-artifacts";
+import {
+  encodeGenerateStreamEvent,
+  type GenerateStreamEvent,
+} from "@/lib/generate-stream";
 import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
 
@@ -460,17 +465,18 @@ export async function POST(request: Request) {
       };
     }
     const title = titleFromHtml(artifacts.html, `Projet ${sector}`);
-    if (!artifacts.readme?.trim()) {
-      artifacts.readme = [
-        `# ${title}`,
-        "",
-        "Projet généré avec Okapi (MMC SARL).",
-        "",
-        "- Preview : `app.html`",
-        "- Studio : React / Next / SQL / API selon les fichiers livrés",
-        "",
-      ].join("\n");
-    }
+    const withReadme = ensureReadmeArtifact(
+      {
+        react: artifacts.react,
+        reactNative: artifacts.reactNative,
+        nextjs: artifacts.nextjs,
+        sql: artifacts.sql,
+        api: artifacts.api,
+        readme: artifacts.readme,
+      },
+      { title, hasHtml: true },
+    );
+    artifacts.readme = withReadme.readme ?? artifacts.readme;
     const fullstackReady = Boolean(artifacts.sql || artifacts.api);
     const summary = debug
       ? artifacts.readme?.trim() ||
@@ -534,8 +540,8 @@ export async function POST(request: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (obj: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
+      const send = (obj: GenerateStreamEvent) => {
+        controller.enqueue(encoder.encode(encodeGenerateStreamEvent(obj)));
       };
 
       try {
