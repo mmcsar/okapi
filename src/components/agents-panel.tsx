@@ -28,7 +28,7 @@ const initialAgents: Agent[] = [
     role: "Génération d’apps",
     sector: "Tous",
     description:
-      "Transforme un prompt en site ou mini-app (UI + preview). Fullstack + Studio Dev (édition type VS Code).",
+      "Transforme un prompt en site ou mini-app (UI + preview). Fullstack + Studio Dev Okapi.",
     active: true,
   },
   {

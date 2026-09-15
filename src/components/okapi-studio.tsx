@@ -9,6 +9,7 @@ import {
   type StudioFileGroup,
   type StudioFileId,
 } from "@/lib/studio-files";
+import { wantsStudioScaffold } from "@/lib/fullstack";
 
 export type { StudioFileId } from "@/lib/studio-files";
 
@@ -67,17 +68,11 @@ type TermLine = {
 type TermTab = "problems" | "output" | "terminal";
 
 const SUGGESTIONS = [
-  "Crée un projet complet : CRM clients + stock pour une boutique à Kinshasa",
-  "Ajoute un header responsive",
-  "Crée un formulaire login",
-  "Améliore le design mobile",
+  "Grand projet : CRM clients + stock + Mobile Money pour une boutique à Kinshasa",
+  "Plateforme école : élèves, notes, présence, WhatsApp parents",
+  "Dashboard clinique : patients, rendez-vous, pharmacie",
+  "Améliore le design mobile de l’écran actuel",
 ];
-
-function wantsStudioProject(text: string) {
-  return /\b(projet complet|grand projet|fullstack|full[\s-]?stack|scaffold|génère(r)? (tout|le projet)|crée(r)? (un |une )?(projet|app|application|site|plateforme|crm|saas|dashboard)|build (a |an |the )?full)\b/i.test(
-    text,
-  );
-}
 
 function countLines(text: string) {
   if (!text) return 0;
@@ -119,6 +114,40 @@ function roughLineDiff(before: string, after: string, max = 24): DiffLine[] {
     j += 1;
   }
   return out;
+}
+
+function diffStats(before: string, after: string) {
+  const lines = roughLineDiff(before, after, 800);
+  let added = 0;
+  let removed = 0;
+  for (const line of lines) {
+    if (line.type === "add") added += 1;
+    if (line.type === "del") removed += 1;
+  }
+  return { added, removed };
+}
+
+const MONACO_FONT =
+  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+
+function monacoReviewOptions(readOnly: boolean) {
+  return {
+    readOnly,
+    fontSize: 13,
+    fontFamily: MONACO_FONT,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    wordWrap: "on" as const,
+    tabSize: 2,
+    padding: { top: 12, bottom: 12 },
+    renderLineHighlight: "none" as const,
+    lineNumbers: "on" as const,
+    scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    renderWhitespace: "none" as const,
+  };
 }
 
 function previewSlug(title: string) {
@@ -215,8 +244,7 @@ export function OkapiStudio({
   );
 
   const [activeId, setActiveId] = useState<StudioFileId>(DEFAULT_STUDIO_FILE_ID);
-  const active = files.find((f) => f.id === activeId) ?? files[0];
-  const [openTabs, setOpenTabs] = useState<StudioFileId[]>([DEFAULT_STUDIO_FILE_ID]);
+  const [openTabs, setOpenTabs] = useState<StudioFileId[]>([]);
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
   const [quickIndex, setQuickIndex] = useState(0);
@@ -226,6 +254,8 @@ export function OkapiStudio({
   const [cmdIndex, setCmdIndex] = useState(0);
   const cmdInputRef = useRef<HTMLInputElement>(null);
   const [dirtyIds, setDirtyIds] = useState<Set<StudioFileId>>(() => new Set());
+  /** Fichiers ouverts à la main (Ctrl+P) même encore vides. */
+  const [pinnedIds, setPinnedIds] = useState<Set<StudioFileId>>(() => new Set());
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [aiOpen, setAiOpen] = useState(true);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -237,7 +267,7 @@ export function OkapiStudio({
   const [termTab, setTermTab] = useState<TermTab>("terminal");
   const [termLines, setTermLines] = useState<TermLine[]>([
     {
-      t: "Okapi Terminal — comme Cursor. Ctrl+` pour ouvrir/fermer · tape help",
+      t: "Okapi Terminal — Ctrl+` pour ouvrir/fermer · tape help",
       kind: "info",
     },
   ]);
@@ -256,10 +286,11 @@ export function OkapiStudio({
     {
       role: "assistant",
       content:
-        "Salut — je suis l’agent Okapi Studio. Demande un projet complet (CRM, boutique, école…) : je génère plusieurs fichiers, tu Acceptes. Ou édite un fichier précis. Ctrl+L pour me focus.",
+        "Salut — je suis ton coach Okapi Studio. Décris un grand projet (CRM, école, clinique, boutique…) : je livre plusieurs fichiers, tu Acceptes, l’explorateur se remplit. Ctrl+L pour me focus.",
     },
   ]);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
+  const seenContentRef = useRef<Set<StudioFileId>>(new Set());
 
   const previewUrl = `okapi://preview/${previewSlug(title)}`;
 
@@ -268,20 +299,40 @@ export function OkapiStudio({
     setTermLines((prev) => [...prev, { t: `[${stamp}] ${text}`, kind }]);
   }, []);
 
+  const isFileVisible = useCallback(
+    (f: StudioFile) =>
+      Boolean(f.value.trim()) ||
+      pendingList.some((p) => p.fileId === f.id) ||
+      pinnedIds.has(f.id) ||
+      dirtyIds.has(f.id),
+    [pendingList, pinnedIds, dirtyIds],
+  );
+
+  const visibleFiles = useMemo(
+    () => files.filter(isFileVisible),
+    [files, isFileVisible],
+  );
+
+  const active =
+    files.find((f) => f.id === activeId) ??
+    visibleFiles[0] ??
+    files[0];
+
   const groups = useMemo(() => {
     const order: StudioFile["group"][] = ["web", "mobile", "data", "docs"];
     return order
       .map((g) => ({
         id: g,
         label: STUDIO_GROUP_LABEL[g],
-        items: files.filter((f) => f.group === g),
+        items: visibleFiles.filter((f) => f.group === g),
       }))
       .filter((g) => g.items.length > 0);
-  }, [files]);
+  }, [visibleFiles]);
 
   const quickMatches = useMemo(() => {
     const q = quickQuery.trim().toLowerCase();
-    if (!q) return files;
+    const pool = q ? files : visibleFiles.length ? visibleFiles : files;
+    if (!q) return pool;
     return files.filter(
       (f) =>
         f.label.toLowerCase().includes(q) ||
@@ -289,14 +340,14 @@ export function OkapiStudio({
         f.badge.toLowerCase().includes(q) ||
         STUDIO_GROUP_LABEL[f.group].toLowerCase().includes(q),
     );
-  }, [files, quickQuery]);
+  }, [files, visibleFiles, quickQuery]);
 
   const tabFiles = useMemo(
     () =>
       openTabs
         .map((id) => files.find((f) => f.id === id))
-        .filter((f): f is StudioFile => Boolean(f)),
-    [openTabs, files],
+        .filter((f): f is StudioFile => Boolean(f && isFileVisible(f))),
+    [openTabs, files, isFileVisible],
   );
 
   const pendingDiffLines = useMemo(() => {
@@ -438,18 +489,34 @@ export function OkapiStudio({
   }, [studioCommands, cmdQuery]);
 
   useEffect(() => {
-    const preferred =
-      files.find((f) => f.value.trim())?.id ?? DEFAULT_STUDIO_FILE_ID;
-    setActiveId((prev) => {
-      const still = files.find((f) => f.id === prev);
-      if (still?.value.trim()) return prev;
-      return preferred;
-    });
+    const withContent = files.filter((f) => f.value.trim()).map((f) => f.id);
+    const preferred = withContent[0] ?? null;
+
     setOpenTabs((prev) => {
-      if (prev.includes(preferred)) return prev;
-      return prev.length ? [...prev, preferred] : [preferred];
+      const kept = prev.filter((id) => {
+        const f = files.find((x) => x.id === id);
+        return f ? isFileVisible(f) : false;
+      });
+      // Premier contenu d’un fichier → ouvrir l’onglet une fois
+      for (const id of withContent) {
+        if (!seenContentRef.current.has(id)) {
+          seenContentRef.current.add(id);
+          if (!kept.includes(id)) kept.push(id);
+        }
+      }
+      for (const p of pendingList) {
+        if (!kept.includes(p.fileId)) kept.push(p.fileId);
+      }
+      if (kept.length === 0 && preferred) return [preferred];
+      return kept;
     });
-  }, [files]);
+
+    setActiveId((prev) => {
+      const cur = files.find((f) => f.id === prev);
+      if (cur && isFileVisible(cur)) return prev;
+      return preferred ?? prev;
+    });
+  }, [files, pendingList, isFileVisible]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -610,6 +677,12 @@ export function OkapiStudio({
   }
 
   function openFile(id: StudioFileId) {
+    setPinnedIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
     setActiveId(id);
     setOpenTabs((prev) => (prev.includes(id) ? prev : [...prev, id]));
     setQuickOpen(false);
@@ -620,14 +693,20 @@ export function OkapiStudio({
   function closeTab(id: StudioFileId) {
     setOpenTabs((prev) => {
       const next = prev.filter((x) => x !== id);
-      const fallback = (next[0] ?? DEFAULT_STUDIO_FILE_ID) as StudioFileId;
       if (next.length === 0) {
+        const fallback =
+          visibleFiles.find((f) => f.id !== id)?.id ??
+          files.find((f) => f.value.trim() && f.id !== id)?.id;
+        if (fallback) {
+          setActiveId(fallback);
+          return [fallback];
+        }
         setActiveId(DEFAULT_STUDIO_FILE_ID);
-        return [DEFAULT_STUDIO_FILE_ID];
+        return [];
       }
       if (activeId === id) {
         const idx = prev.indexOf(id);
-        setActiveId(next[Math.max(0, idx - 1)] ?? fallback);
+        setActiveId(next[Math.max(0, idx - 1)] ?? next[0]!);
       }
       return next;
     });
@@ -648,16 +727,19 @@ export function OkapiStudio({
     setAiPrompt("");
     setAiMessages((prev) => [...prev, { role: "user", content: instruction }]);
 
-    const asProject = wantsStudioProject(instruction);
+    const asProject = wantsStudioScaffold(instruction, {
+      hasExistingFiles: visibleFiles.some((f) => f.value.trim()),
+    });
 
     try {
       if (asProject) {
-        logTerm(`IA · projet complet demandé…`, "cmd");
+        logTerm(`Coach · grand projet multi-fichiers…`, "cmd");
         setAiMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: "Je construis le projet multi-fichiers (comme Cursor)…",
+            content:
+              "Je construis le projet complet (UI + React/Next + SQL + API), puis je le livre directement dans ton Studio — comme avec ton coach.",
           },
         ]);
 
@@ -673,6 +755,7 @@ export function OkapiStudio({
         const data = (await res.json().catch(() => null)) as {
           title?: string;
           note?: string;
+          large?: boolean;
           files?: { fileId: StudioFileId; content: string }[];
           error?: string;
         } | null;
@@ -691,30 +774,11 @@ export function OkapiStudio({
           };
         });
 
-        setPendingList(batch);
-        setOpenTabs((prev) => {
-          const ids = batch.map((b) => b.fileId);
-          const merged = [...prev];
-          for (const id of ids) {
-            if (!merged.includes(id)) merged.push(id);
-          }
-          return merged;
+        // Mode coach : livrer tout de suite (pas d’attente Accepter pour les grands projets)
+        deliverProjectBatch(batch, {
+          note: data.note,
+          large: Boolean(data.large),
         });
-        setActiveId(batch[0]!.fileId);
-        setDiffView("after");
-        setSplitDiff(true);
-        setAiOpen(true);
-        setAiMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `${data.note || "Projet prêt."} ${batch.length} fichiers à Accepter (tout ou un par un).`,
-          },
-        ]);
-        logTerm(
-          `Projet prêt · ${batch.length} fichiers — en attente d’Acceptation`,
-          "ok",
-        );
         return;
       }
 
@@ -784,12 +848,65 @@ export function OkapiStudio({
     }
   }
 
+  function deliverProjectBatch(
+    batch: PendingEdit[],
+    opts?: { note?: string; large?: boolean },
+  ) {
+    if (batch.length === 0) return;
+    let hadHtml = false;
+    for (const item of batch) {
+      onChangeFile(item.fileId, item.after);
+      onCommitted?.(item.fileId, item.after);
+      clearDirty(item.fileId);
+      seenContentRef.current.add(item.fileId);
+      if (item.fileId === "app.html") hadHtml = true;
+    }
+    const n = batch.length;
+    const ids = batch.map((b) => b.fileId);
+    setPendingList([]);
+    setOpenTabs((prev) => {
+      const merged = [...prev];
+      for (const id of ids) {
+        if (!merged.includes(id)) merged.push(id);
+      }
+      return merged;
+    });
+    const preferHtml = batch.find((b) => b.fileId === "app.html");
+    setActiveId(preferHtml?.fileId ?? batch[0]!.fileId);
+    setDiffView("after");
+    setAiOpen(true);
+    if (hadHtml) {
+      setPreviewOpen(true);
+      setPreviewKey((k) => k + 1);
+    }
+    const names = ids.slice(0, 6).join(", ") + (ids.length > 6 ? "…" : "");
+    setAiMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: [
+          opts?.note || "Projet livré.",
+          `✓ ${n} fichier${n > 1 ? "s" : ""} dans l’explorateur${
+            opts?.large ? " · grand projet" : ""
+          }.`,
+          names ? `(${names})` : "",
+          "Dis la suite — je continue comme ton coach.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      },
+    ]);
+    logTerm(`Livré · ${n} fichiers (mode coach)`, "ok");
+    window.setTimeout(() => aiInputRef.current?.focus(), 80);
+  }
+
   function acceptPending() {
     if (!pending) return;
     onChangeFile(pending.fileId, pending.after);
     const wasHtml = pending.fileId === "app.html";
     const { fileId, after } = pending;
     clearDirty(fileId);
+    seenContentRef.current.add(fileId);
     onCommitted?.(fileId, after);
 
     const remaining = pendingList.filter((p) => p.fileId !== fileId);
@@ -802,17 +919,20 @@ export function OkapiStudio({
           role: "assistant",
           content: `✓ ${fileId} accepté.${
             wasHtml ? " Preview dispo." : ""
-          } Projet à jour — dis la suite.`,
+          } Dis la suite — je continue.`,
         },
       ]);
-      if (wasHtml) setPreviewOpen(true);
+      if (wasHtml) {
+        setPreviewOpen(true);
+        setPreviewKey((k) => k + 1);
+      }
     } else {
       setActiveId(remaining[0]!.fileId);
       setAiMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `✓ ${fileId} accepté. Reste ${remaining.length} fichier(s) — Accepte tout ou continue un par un.`,
+          content: `✓ ${fileId} accepté. Reste ${remaining.length} — Accepte tout (Ctrl+Enter) ou continue.`,
         },
       ]);
     }
@@ -822,26 +942,7 @@ export function OkapiStudio({
 
   function acceptAllPending() {
     if (pendingList.length === 0) return;
-    let hadHtml = false;
-    const batch = [...pendingList];
-    for (const item of batch) {
-      onChangeFile(item.fileId, item.after);
-      onCommitted?.(item.fileId, item.after);
-      clearDirty(item.fileId);
-      if (item.fileId === "app.html") hadHtml = true;
-    }
-    const n = batch.length;
-    setPendingList([]);
-    setAiMessages((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: `✓ Projet appliqué · ${n} fichiers acceptés. Ouvre Preview si besoin.`,
-      },
-    ]);
-    logTerm(`Accepté tout · ${n} fichiers`, "ok");
-    if (hadHtml) setPreviewOpen(true);
-    window.setTimeout(() => aiInputRef.current?.focus(), 80);
+    deliverProjectBatch([...pendingList], { note: "Projet appliqué." });
   }
 
   function rejectPending() {
@@ -879,7 +980,7 @@ export function OkapiStudio({
           target.tagName === "TEXTAREA" ||
           target.isContentEditable);
 
-      // Ctrl+` — toggle terminal (comme Cursor / VS Code)
+      // Ctrl+` — toggle terminal
       if (meta && (e.key === "`" || e.code === "Backquote")) {
         e.preventDefault();
         setTerminalOpen((v) => {
@@ -901,7 +1002,7 @@ export function OkapiStudio({
         setCmdOpen(true);
         return;
       }
-      // Ctrl+B — explorateur (Cursor / VS Code)
+      // Ctrl+B — explorateur
       if (meta && e.key.toLowerCase() === "b" && !typing) {
         e.preventDefault();
         setExplorerOpen((v) => !v);
@@ -947,7 +1048,7 @@ export function OkapiStudio({
         setQuickOpen(false);
         return;
       }
-      // Ctrl+J — panneau bas (Cursor)
+      // Ctrl+J — panneau bas
       if (meta && e.key.toLowerCase() === "j" && !typing) {
         e.preventDefault();
         setTerminalOpen((v) => {
@@ -969,6 +1070,12 @@ export function OkapiStudio({
       if (e.key === "Escape" && pending) {
         e.preventDefault();
         rejectPending();
+        return;
+      }
+      if (meta && e.key === "Enter" && pendingList.length > 0) {
+        e.preventDefault();
+        acceptAllPending();
+        return;
       }
     }
     window.addEventListener("keydown", onKey);
@@ -989,6 +1096,9 @@ export function OkapiStudio({
   const pendingDelta = pending
     ? countLines(pending.after) - countLines(pending.before)
     : 0;
+  const pendingStats = pending
+    ? diffStats(pending.before, pending.after)
+    : { added: 0, removed: 0 };
 
   const termColor: Record<TermLine["kind"], string> = {
     info: "text-[#9bb0a4]",
@@ -1003,7 +1113,7 @@ export function OkapiStudio({
       <div className="okapi-studio-chrome flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
         <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[#e8892a] shadow-[0_0_8px_rgba(232,137,42,0.65)]" />
         <p className="text-[11px] leading-snug text-[#b7c9bf]">
-          Agent à droite · Terminal bas comme Cursor (
+          Agent à droite · Terminal en bas (
           <span className="font-mono text-[#ffd7a8]">Ctrl+`</span>
           ) — diffs après{" "}
           <span className="font-semibold text-[#3d8f68]">Accepter</span>.
@@ -1094,7 +1204,18 @@ export function OkapiStudio({
               </p>
             </div>
             <nav className="scrollbar-thin flex-1 overflow-auto px-1.5 py-2">
-              {groups.map((group) => (
+              {groups.length === 0 ? (
+                <div className="mx-1.5 rounded-lg border border-dashed border-white/10 px-3 py-4 text-center">
+                  <p className="text-[11px] font-semibold text-[#c8ddd2]">
+                    Projet vide
+                  </p>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-[#6a7f74]">
+                    Les fichiers (React, Next, SQL…) n’apparaissent qu’après ta
+                    demande à l’Agent.
+                  </p>
+                </div>
+              ) : (
+                groups.map((group) => (
                 <div key={group.id} className="mb-3">
                   <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#5f766a]">
                     {group.label}
@@ -1139,7 +1260,8 @@ export function OkapiStudio({
                     );
                   })}
                 </div>
-              ))}
+              ))
+              )}
             </nav>
           </aside>
         ) : null}
@@ -1149,7 +1271,7 @@ export function OkapiStudio({
           <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
             {/* Editor */}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {/* Tabs bar — multi-fichiers comme Cursor */}
+              {/* Tabs bar — multi-fichiers Okapi */}
               <div className="okapi-studio-chrome flex items-stretch border-b">
                 <div className="flex min-w-0 flex-1 items-center gap-0 overflow-x-auto">
                   {tabFiles.map((file) => {
@@ -1210,33 +1332,37 @@ export function OkapiStudio({
                   </button>
                 </div>
                 {hasPendingHere ? (
-                  <div className="flex items-center gap-1 px-2">
-                    <button
-                      type="button"
-                      onClick={() => setDiffView("before")}
-                      className={`rounded px-2.5 py-1 text-[11px] font-semibold ${
-                        diffView === "before"
-                          ? "bg-white/15 text-white"
-                          : "text-[#7d9588] hover:text-white"
-                      }`}
-                    >
-                      Avant
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDiffView("after")}
-                      className={`rounded px-2.5 py-1 text-[11px] font-semibold ${
-                        diffView === "after"
-                          ? "bg-[#e8892a]/30 text-[#ffd7a8]"
-                          : "text-[#7d9588] hover:text-white"
-                      }`}
-                    >
-                      Après
-                    </button>
+                  <div className="flex items-center gap-1.5 border-l border-white/10 px-2">
+                    {!splitDiff ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setDiffView("before")}
+                          className={`rounded px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide ${
+                            diffView === "before"
+                              ? "bg-white/12 text-white"
+                              : "text-[#7d9588] hover:text-white"
+                          }`}
+                        >
+                          Original
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDiffView("after")}
+                          className={`rounded px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide ${
+                            diffView === "after"
+                              ? "bg-[#e8892a]/25 text-[#ffd7a8]"
+                              : "text-[#7d9588] hover:text-white"
+                          }`}
+                        >
+                          Proposé
+                        </button>
+                      </>
+                    ) : null}
                     <button
                       type="button"
                       onClick={acceptPending}
-                      className="rounded bg-[#2f6b4f] px-3 py-1 text-[11px] font-bold text-white hover:bg-[#3a7d5c]"
+                      className="rounded bg-[#2f6b4f] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#3a7d5c]"
                     >
                       Accepter
                     </button>
@@ -1244,7 +1370,7 @@ export function OkapiStudio({
                       <button
                         type="button"
                         onClick={acceptAllPending}
-                        className="rounded bg-[#e8892a] px-3 py-1 text-[11px] font-bold text-white hover:bg-[#d67a1f]"
+                        className="rounded bg-[#e8892a] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#d67a1f]"
                       >
                         Tout ({pendingList.length})
                       </button>
@@ -1252,7 +1378,7 @@ export function OkapiStudio({
                     <button
                       type="button"
                       onClick={rejectPending}
-                      className="rounded bg-white/10 px-3 py-1 text-[11px] font-semibold text-[#d5e4db] hover:bg-white/15"
+                      className="rounded border border-white/15 px-2.5 py-1 text-[11px] font-semibold text-[#c8ddd2] hover:bg-white/5"
                     >
                       Refuser
                     </button>
@@ -1271,18 +1397,34 @@ export function OkapiStudio({
                 )}
               </div>
 
-              {hasPendingHere ? (
-                <div className="flex items-center justify-between gap-3 border-b border-[#e8892a]/35 bg-gradient-to-r from-[#e8892a]/15 to-transparent px-3 py-1.5">
-                  <p className="text-[11px] text-[#ffd7a8]">
-                    Diff IA · {countLines(pending!.before)} → {countLines(pending!.after)} lignes
-                    — vérifie puis Accepte
-                  </p>
+              {hasPendingHere && pending ? (
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e8892a]/30 bg-[#121c18] px-3 py-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="rounded bg-[#e8892a]/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
+                      Review
+                    </span>
+                    <span className="truncate font-mono text-[12px] text-[#eef6f1]">
+                      {active.label}
+                    </span>
+                    <span className="font-mono text-[11px] text-[#9fd4b5]">
+                      +{pendingStats.added}
+                    </span>
+                    <span className="font-mono text-[11px] text-red-300/90">
+                      −{pendingStats.removed}
+                    </span>
+                    {pendingDelta !== 0 ? (
+                      <span className="text-[10px] text-[#7d9588]">
+                        ({pendingDelta > 0 ? "+" : ""}
+                        {pendingDelta} lignes)
+                      </span>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setSplitDiff((v) => !v)}
-                    className="rounded-lg border border-[#e8892a]/30 px-2 py-0.5 text-[10px] font-semibold text-[#ffd7a8] hover:bg-[#e8892a]/15"
+                    className="shrink-0 rounded border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold text-[#c8ddd2] hover:border-[#e8892a]/40 hover:text-[#ffd7a8]"
                   >
-                    {splitDiff ? "Vue simple" : "Côte à côte"}
+                    {splitDiff ? "Vue unique" : "Côte à côte"}
                   </button>
                 </div>
               ) : null}
@@ -1291,76 +1433,65 @@ export function OkapiStudio({
                 {!editorValue.trim() && !hasPendingHere ? (
                   <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-8">
                     <div className="max-w-sm rounded-2xl border border-white/10 bg-[#0d1512]/90 px-5 py-4 text-center backdrop-blur-sm">
-                      <p className="text-sm font-semibold text-[#eef6f1]">Fichier vide</p>
+                      <p className="text-sm font-semibold text-[#eef6f1]">
+                        {visibleFiles.length === 0
+                          ? "En attente du modèle"
+                          : "Fichier vide"}
+                      </p>
                       <p className="mt-1.5 text-[12px] leading-relaxed text-[#7d9588]">
-                        {active.emptyHint}
+                        {visibleFiles.length === 0
+                          ? "Demande un projet ou un fichier à l’Agent — React, Next, SQL… n’apparaissent qu’alors."
+                          : active.emptyHint}
                       </p>
                     </div>
                   </div>
                 ) : null}
                 {hasPendingHere && splitDiff && pending ? (
                   <div className="flex h-full min-h-0 flex-col lg:flex-row">
-                    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-b border-white/10 lg:border-b-0 lg:border-r">
-                      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3">
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-red-300">
-                          Avant
-                        </span>
-                        <span className="font-mono text-[10px] text-red-200/70">
-                          {countLines(pending.before)} lignes
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-b border-white/10 lg:border-b-0 lg:border-r lg:border-r-red-500/20">
+                      <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-red-500/25 bg-[#1a1212] px-3">
+                        <div className="flex items-center gap-2">
+                          <span className="h-full w-0.5 self-stretch bg-red-400/80" />
+                          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-red-200">
+                            Original
+                          </span>
+                        </div>
+                        <span className="font-mono text-[10px] text-red-200/60">
+                          {countLines(pending.before)} ln · −{pendingStats.removed}
                         </span>
                       </div>
-                      <div className="min-h-0 flex-1">
+                      <div className="min-h-0 flex-1 border-l-2 border-red-500/35">
                         <MonacoEditor
                           height="100%"
                           language={active.language}
                           theme="vs-dark"
                           value={pending.before}
-                          options={{
-                            readOnly: true,
-                            fontSize: 12.5,
-                            fontFamily:
-                              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                            minimap: { enabled: false },
-                            scrollBeyondLastLine: false,
-                            automaticLayout: true,
-                            wordWrap: "on",
-                            tabSize: 2,
-                            padding: { top: 10, bottom: 10 },
-                            renderLineHighlight: "none",
-                            lineNumbers: "on",
-                          }}
+                          options={monacoReviewOptions(true)}
                         />
                       </div>
                     </div>
                     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[#3d8f68]/30 bg-[#1b4f3a]/25 px-3">
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-[#9fd4b5]">
-                          Après
-                        </span>
-                        <span className="font-mono text-[10px] text-[#9fd4b5]/80">
-                          {countLines(pending.after)} lignes
+                      <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-[#3d8f68]/35 bg-[#0f1a15] px-3">
+                        <div className="flex items-center gap-2">
+                          <span className="h-full w-0.5 self-stretch bg-[#3d8f68]" />
+                          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#9fd4b5]">
+                            Proposé
+                          </span>
+                          <span className="rounded bg-[#e8892a]/20 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#ffd7a8]">
+                            Modèle
+                          </span>
+                        </div>
+                        <span className="font-mono text-[10px] text-[#9fd4b5]/75">
+                          {countLines(pending.after)} ln · +{pendingStats.added}
                         </span>
                       </div>
-                      <div className="min-h-0 flex-1">
+                      <div className="min-h-0 flex-1 border-l-2 border-[#3d8f68]/50">
                         <MonacoEditor
                           height="100%"
                           language={active.language}
                           theme="vs-dark"
                           value={pending.after}
-                          options={{
-                            readOnly: true,
-                            fontSize: 12.5,
-                            fontFamily:
-                              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                            minimap: { enabled: false },
-                            scrollBeyondLastLine: false,
-                            automaticLayout: true,
-                            wordWrap: "on",
-                            tabSize: 2,
-                            padding: { top: 10, bottom: 10 },
-                            renderLineHighlight: "none",
-                            lineNumbers: "on",
-                          }}
+                          options={monacoReviewOptions(true)}
                         />
                       </div>
                     </div>
@@ -1377,16 +1508,8 @@ export function OkapiStudio({
                       markDirty(active.id);
                     }}
                     options={{
-                      readOnly: hasPendingHere,
+                      ...monacoReviewOptions(hasPendingHere),
                       fontSize: 13.5,
-                      fontFamily:
-                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                      minimap: { enabled: false },
-                      scrollBeyondLastLine: false,
-                      automaticLayout: true,
-                      wordWrap: "on",
-                      tabSize: 2,
-                      padding: { top: 14, bottom: 14 },
                       renderLineHighlight: "line",
                       smoothScrolling: true,
                       cursorBlinking: "smooth",
@@ -1396,7 +1519,7 @@ export function OkapiStudio({
                 )}
               </div>
 
-              {/* Status bar — clic Terminal comme Cursor */}
+              {/* Status bar */}
               <div className="flex h-[22px] shrink-0 items-center justify-between gap-3 border-t border-[#e8892a]/20 bg-gradient-to-r from-[#1b4f3a] via-[#245a44] to-[#1b4f3a] px-3 text-[10px] text-[#c8ddd2]">
                 <div className="flex items-center gap-3">
                   <span className="font-semibold">Okapi Studio</span>
@@ -1436,10 +1559,12 @@ export function OkapiStudio({
                   {aiBusy ? (
                     <span className="flex items-center gap-1.5 text-[#ffd7a8]">
                       <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#e8892a]" />
-                      Agent écrit…
+                      Modèle…
                     </span>
                   ) : pending ? (
-                    <span className="text-[#ffd7a8]">Diff en attente</span>
+                    <span className="font-mono text-[#ffd7a8]">
+                      Review +{pendingStats.added}/−{pendingStats.removed}
+                    </span>
                   ) : null}
                   <span>UTF-8</span>
                   <span className="text-[#ffd7a8]">MMC SARL</span>
@@ -1448,7 +1573,7 @@ export function OkapiStudio({
             </div>
           </div>
 
-          {/* Terminal panel — style Cursor bas */}
+          {/* Terminal panel */}
           {terminalOpen ? (
             <div
               className="okapi-studio-panel flex shrink-0 flex-col border-t border-white/10"
@@ -1528,8 +1653,8 @@ export function OkapiStudio({
                     <div className="flex items-start gap-2 text-[#ffd7a8]">
                       <span className="mt-0.5 text-[#e8892a]">●</span>
                       <span>
-                        Diff IA en attente sur {pending.fileId} — compare Avant/Après puis
-                        Accepter ou Refuser.
+                        Diff modèle en attente sur {pending.fileId} — Review Original / Proposé
+                        puis Accepter ou Refuser.
                       </span>
                     </div>
                   ) : (
@@ -1622,24 +1747,26 @@ export function OkapiStudio({
           </div>
         ) : null}
 
-        {/* Agent Cursor-style — toujours à droite du code */}
+        {/* Agent Okapi — à droite du code */}
         {aiOpen ? (
           <aside className="okapi-studio-panel flex max-h-[46vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(40%,420px)] lg:border-l lg:border-t-0">
             <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#e8892a]">
-                  Agent Okapi
-                </p>
-                <p className="mt-0.5 truncate font-mono text-[11px] text-[#b7c9bf]">
-                  @{active.label}
+                <div className="flex items-center gap-2">
+                  <p className="text-[11px] font-semibold tracking-wide text-[#eef6f1]">
+                    Agent
+                  </p>
+                  <span className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[9px] uppercase text-[#8aa89a]">
+                    {engine}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate font-mono text-[11px] text-[#7d9588]">
+                  Contexte · {active.label}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
-                <span className="hidden rounded-md border border-white/10 px-1.5 py-0.5 font-mono text-[9px] text-[#5f766a] sm:inline">
+                <span className="hidden rounded border border-white/10 px-1.5 py-0.5 font-mono text-[9px] text-[#5f766a] sm:inline">
                   Ctrl+L
-                </span>
-                <span className="rounded-full bg-[#1b4f3a]/40 px-2 py-0.5 text-[9px] font-bold uppercase text-[#b8d4c6]">
-                  {engine}
                 </span>
                 <button
                   type="button"
@@ -1652,147 +1779,147 @@ export function OkapiStudio({
               </div>
             </div>
 
-            <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
+            <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
               {aiMessages.map((m, i) => (
                 <div
                   key={`${m.role}-${i}`}
-                  className={`rounded-xl px-3 py-2 text-[12px] leading-relaxed ${
-                    m.role === "user"
-                      ? "ml-4 bg-[#1b4f3a]/45 text-[#eef6f1]"
-                      : "mr-1 border border-white/5 bg-white/[0.03] text-[#b7c9bf]"
+                  className={`text-[12px] leading-relaxed ${
+                    m.role === "user" ? "ml-3" : "mr-1"
                   }`}
                 >
-                  {m.content}
+                  <p
+                    className={`mb-1 text-[9px] font-bold uppercase tracking-[0.14em] ${
+                      m.role === "user" ? "text-[#8aa89a]" : "text-[#e8892a]/90"
+                    }`}
+                  >
+                    {m.role === "user" ? "Toi" : "Okapi"}
+                  </p>
+                  <div
+                    className={`rounded-lg px-3 py-2 ${
+                      m.role === "user"
+                        ? "bg-[#1b4f3a]/40 text-[#eef6f1]"
+                        : "border border-white/8 bg-[#0c1411]/80 text-[#b7c9bf]"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
                 </div>
               ))}
 
               {pending && pendingFile ? (
-                <div className="rounded-xl border border-[#e8892a]/40 bg-[#e8892a]/10 p-3">
-                  <div className="flex items-start justify-between gap-2">
+                <div className="overflow-hidden rounded-lg border border-[#e8892a]/35 bg-[#121a16]">
+                  <div className="flex items-center justify-between gap-2 border-b border-[#e8892a]/25 bg-[#e8892a]/10 px-3 py-2">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
+                        Revue modèle
                         {pendingList.length > 1
-                          ? `Projet · ${pendingList.length} fichiers`
-                          : "Diff en attente"}
-                      </p>
-                      <p className="mt-1 truncate font-mono text-[12px] text-[#eef6f1]">
-                        {pendingFile.label}
-                      </p>
-                      <p className="mt-1 text-[11px] text-[#c9b896]">
-                        {countLines(pending.before)} → {countLines(pending.after)} lignes
-                        {pendingDelta !== 0
-                          ? ` (${pendingDelta > 0 ? "+" : ""}${pendingDelta})`
+                          ? ` · ${pendingList.length} fichiers`
                           : ""}
                       </p>
+                      <p className="mt-0.5 truncate font-mono text-[12px] text-[#eef6f1]">
+                        {pendingFile.label}
+                      </p>
                     </div>
+                    <div className="flex shrink-0 items-center gap-2 font-mono text-[11px]">
+                      <span className="text-[#9fd4b5]">+{pendingStats.added}</span>
+                      <span className="text-red-300">−{pendingStats.removed}</span>
+                    </div>
+                  </div>
+                  <div className="p-3">
                     {pending.fileId !== active.id ? (
                       <button
                         type="button"
                         onClick={() => openFile(pending.fileId)}
-                        className="shrink-0 rounded-lg border border-white/15 px-2 py-1 text-[10px] font-semibold text-[#d5e4db] hover:bg-white/5"
+                        className="mb-2 rounded border border-white/12 px-2 py-1 text-[10px] font-semibold text-[#d5e4db] hover:bg-white/5"
                       >
-                        Ouvrir
+                        Ouvrir dans l’éditeur
                       </button>
                     ) : null}
-                  </div>
-                  {pendingList.length > 1 ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {pendingList.map((p) => (
-                        <button
-                          key={p.fileId}
-                          type="button"
-                          onClick={() => openFile(p.fileId)}
-                          className={`rounded-md px-2 py-0.5 font-mono text-[10px] ${
-                            p.fileId === pending.fileId
-                              ? "bg-[#e8892a]/30 text-[#ffd7a8]"
-                              : "bg-white/5 text-[#9bb0a4] hover:bg-white/10"
-                          }`}
-                        >
-                          {p.fileId}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  <p className="mt-2 text-[11px] leading-relaxed text-[#e8d9c0]">
-                    {pending.note}
-                  </p>
-                  {pendingDiffLines.length > 0 ? (
-                    <pre className="okapi-studio-code mt-2 max-h-36 overflow-auto rounded-lg border border-white/10 p-2 font-mono text-[10px] leading-relaxed">
-                      {pendingDiffLines.map((line, idx) => (
-                        <div
-                          key={`${line.type}-${idx}`}
-                          className={
-                            line.type === "add"
-                              ? "bg-[#1b4f3a]/35 text-[#9fd4b5]"
-                              : line.type === "del"
-                                ? "bg-red-500/15 text-red-300"
-                                : "text-[#5f766a]"
-                          }
-                        >
-                          <span className="inline-block w-3 select-none opacity-70">
-                            {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
-                          </span>
-                          {line.text || " "}
-                        </div>
-                      ))}
-                    </pre>
-                  ) : null}
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (pending.fileId !== active.id) openFile(pending.fileId);
-                        setDiffView("before");
-                        setSplitDiff(false);
-                      }}
-                      className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
-                        hasPendingHere && diffView === "before"
-                          ? "bg-white/20 text-white"
-                          : "bg-white/5 text-[#b7c9bf] hover:bg-white/10"
-                      }`}
-                    >
-                      Avant
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (pending.fileId !== active.id) openFile(pending.fileId);
-                        setDiffView("after");
-                        setSplitDiff(false);
-                      }}
-                      className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
-                        hasPendingHere && diffView === "after"
-                          ? "bg-[#e8892a]/35 text-[#ffd7a8]"
-                          : "bg-white/5 text-[#b7c9bf] hover:bg-white/10"
-                      }`}
-                    >
-                      Après
-                    </button>
-                    <button
-                      type="button"
-                      onClick={acceptPending}
-                      className="rounded-lg bg-[#2f6b4f] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#3a7d5c]"
-                    >
-                      Accepter
-                    </button>
                     {pendingList.length > 1 ? (
+                      <div className="mb-2 flex flex-wrap gap-1">
+                        {pendingList.map((p) => (
+                          <button
+                            key={p.fileId}
+                            type="button"
+                            onClick={() => openFile(p.fileId)}
+                            className={`rounded px-2 py-0.5 font-mono text-[10px] ${
+                              p.fileId === pending.fileId
+                                ? "bg-[#e8892a]/25 text-[#ffd7a8]"
+                                : "bg-white/5 text-[#9bb0a4] hover:bg-white/10"
+                            }`}
+                          >
+                            {p.fileId}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    <p className="text-[11px] leading-relaxed text-[#c9b896]">
+                      {pending.note}
+                    </p>
+                    {pendingDiffLines.length > 0 ? (
+                      <pre className="mt-2 max-h-40 overflow-auto rounded border border-white/10 bg-[#0a100e] p-2 font-mono text-[10px] leading-relaxed">
+                        {pendingDiffLines.map((line, idx) => (
+                          <div
+                            key={`${line.type}-${idx}`}
+                            className={
+                              line.type === "add"
+                                ? "bg-[#1b4f3a]/40 text-[#9fd4b5]"
+                                : line.type === "del"
+                                  ? "bg-red-500/15 text-red-300"
+                                  : "text-[#5f766a]"
+                            }
+                          >
+                            <span className="inline-block w-3 select-none opacity-70">
+                              {line.type === "add"
+                                ? "+"
+                                : line.type === "del"
+                                  ? "-"
+                                  : " "}
+                            </span>
+                            {line.text || " "}
+                          </div>
+                        ))}
+                      </pre>
+                    ) : null}
+                    <div className="mt-3 flex flex-wrap gap-1.5">
                       <button
                         type="button"
-                        onClick={acceptAllPending}
-                        className="rounded-lg bg-[#e8892a] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#d67a1f]"
+                        onClick={() => {
+                          if (pending.fileId !== active.id) openFile(pending.fileId);
+                          setSplitDiff(true);
+                        }}
+                        className="rounded border border-white/12 px-2.5 py-1.5 text-[11px] font-semibold text-[#c8ddd2] hover:bg-white/5"
                       >
-                        Accepter tout ({pendingList.length})
+                        Voir le code
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={rejectPending}
-                      className="rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-[#d5e4db] hover:bg-white/15"
-                    >
-                      Refuser
-                    </button>
+                      <button
+                        type="button"
+                        onClick={acceptPending}
+                        className="rounded bg-[#2f6b4f] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#3a7d5c]"
+                      >
+                        Accepter
+                      </button>
+                      {pendingList.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={acceptAllPending}
+                          className="rounded bg-[#e8892a] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#d67a1f]"
+                        >
+                          Accepter tout ({pendingList.length})
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={rejectPending}
+                        className="rounded border border-white/12 px-3 py-1.5 text-[11px] font-semibold text-[#d5e4db] hover:bg-white/5"
+                      >
+                        Refuser
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[10px] text-[#6a7f74]">
+                      Esc refuse · barre Review dans l’éditeur
+                    </p>
                   </div>
-                  <p className="mt-2 text-[10px] text-[#8a7a62]">Échap = Refuser tout</p>
                 </div>
               ) : null}
 
@@ -1817,7 +1944,7 @@ export function OkapiStudio({
                     key={s}
                     type="button"
                     onClick={() => useSuggestion(s)}
-                    className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] text-[#9bb0a4] transition hover:border-[#e8892a]/40 hover:text-[#ffd7a8]"
+                    className="rounded border border-white/10 bg-transparent px-2 py-1 text-[10px] text-[#8aa89a] transition hover:border-[#e8892a]/35 hover:text-[#ffd7a8]"
                   >
                     {s}
                   </button>
@@ -1827,8 +1954,11 @@ export function OkapiStudio({
 
             <form
               onSubmit={(e) => void askStudioAi(e)}
-              className="border-t border-white/10 p-3"
+              className="border-t border-white/10 bg-[#0a1210]/60 p-3"
             >
+              <label className="mb-1.5 block text-[9px] font-bold uppercase tracking-[0.14em] text-[#6a7f74]">
+                Composer
+              </label>
               <textarea
                 ref={aiInputRef}
                 value={aiPrompt}
@@ -1843,21 +1973,21 @@ export function OkapiStudio({
                 disabled={Boolean(pendingList.length)}
                 placeholder={
                   pendingList.length
-                    ? "Accepte ou refuse le projet d’abord…"
+                    ? "Termine la revue (Accepter / Refuser)…"
                     : `Projet complet ou edit de ${active.label}…`
                 }
-                className="w-full resize-none rounded-xl border border-[#e8892a]/20 bg-[#06100c]/55 px-3 py-2.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
+                className="w-full resize-none rounded-lg border border-white/12 bg-[#06100c]/70 px-3 py-2.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
               />
               <div className="mt-2 flex items-center gap-2">
                 <button
                   type="submit"
                   disabled={aiBusy || !aiPrompt.trim() || pendingList.length > 0}
-                  className="flex-1 rounded-xl bg-[#e8892a] px-3 py-2.5 text-[12px] font-semibold text-white transition hover:bg-[#d67a1f] disabled:opacity-45"
+                  className="flex-1 rounded-lg bg-[#e8892a] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-[#d67a1f] disabled:opacity-45"
                 >
-                  {aiBusy ? "Écriture…" : "Proposer / Générer"}
+                  {aiBusy ? "Le modèle écrit…" : "Envoyer au modèle"}
                 </button>
-                <span className="hidden text-[9px] text-[#5f766a] sm:inline">
-                  Entrée
+                <span className="hidden font-mono text-[9px] text-[#5f766a] sm:inline">
+                  ↵
                 </span>
               </div>
             </form>
@@ -1881,7 +2011,7 @@ export function OkapiStudio({
         )}
       </div>
 
-      {/* Quick Open — Ctrl+P comme Cursor */}
+      {/* Quick Open — Ctrl+P */}
       {quickOpen ? (
         <div className="absolute inset-0 z-50 flex items-start justify-center bg-black/55 px-4 pt-[12vh] backdrop-blur-[2px]">
           <button
@@ -1962,7 +2092,7 @@ export function OkapiStudio({
         </div>
       ) : null}
 
-      {/* Command Palette — Ctrl+Shift+P comme Cursor */}
+      {/* Command Palette — Ctrl+Shift+P */}
       {cmdOpen ? (
         <div className="absolute inset-0 z-50 flex items-start justify-center bg-black/55 px-4 pt-[12vh] backdrop-blur-[2px]">
           <button
@@ -2088,7 +2218,7 @@ export function OkapiStudio({
               ))}
             </ul>
             <p className="border-t border-white/10 px-4 py-3 text-[11px] text-[#5f766a]">
-              Élève Okapi · comme chez le coach Cursor · MMC SARL
+              Élève Okapi · Studio professionnel · MMC SARL
             </p>
           </div>
         </div>

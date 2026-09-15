@@ -8,6 +8,7 @@ import {
 import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
 import { resolveEngine } from "@/lib/okapi-engine";
+import { wantsLargeProject } from "@/lib/fullstack";
 import { assertBodySize } from "@/lib/security";
 import {
   STUDIO_FILE_IDS,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/studio-files";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const ALLOWED = STUDIO_FILE_IDS;
 
@@ -56,6 +57,7 @@ async function complete(opts: {
   system: string;
   user: string;
   engine: ReturnType<typeof resolveEngine>;
+  maxTokens: number;
 }) {
   const provider = pickLlmProvider();
   if (!provider) throw new Error(missingLlmMessage());
@@ -64,7 +66,7 @@ async function complete(opts: {
     return openAiComplete({
       system: opts.system,
       user: opts.user,
-      maxTokens: 12000,
+      maxTokens: opts.maxTokens,
       engine: opts.engine,
     });
   }
@@ -72,19 +74,35 @@ async function complete(opts: {
     return openRouterComplete({
       system: opts.system,
       user: opts.user,
-      maxTokens: 12000,
+      maxTokens: opts.maxTokens,
       engine: opts.engine,
     });
   }
   throw new Error(missingLlmMessage());
 }
 
-const SYSTEM = `You are Okapi Studio (MMC SARL) — full project scaffolder, like a senior Cursor agent.
+function buildSystem(large: boolean, engine: string) {
+  const scale = large
+    ? `SCALE — GRAND PROJET (engine=${engine}):
+- Ship a real product skeleton for RDC businesses (CRM, boutique, école, clinique, flotte…).
+- app.html: multi-screen SPA (nav + at least 4–6 views/modules), Tailwind CDN, mobile-first.
+- App.tsx + app/page.tsx: mirror the same product structure (usable stubs, not placeholders).
+- schema.sql: several related tables, indexes, RLS policies, seed comments.
+- api.ts: several route stubs (CRUD + auth/session where relevant).
+- README.md: architecture modules + how to run in Okapi Studio.
+- Optional App.native.tsx / main.py / main.dart only if they clearly help.
+- Think end-to-end: list → detail → form → empty states → WhatsApp / Mobile Money hooks when useful.`
+    : `SCALE — projet standard:
+- Complete, lean product: solid HTML + React + SQL + API + README.
+- At least 2–3 screens in HTML. Code must run in Preview.`;
 
-Return ONLY valid JSON (no markdown outside JSON) with this shape:
+  return `You are Okapi Studio (MMC SARL) — senior product engineer and coding coach for builders in DR Congo.
+You plan like a tech lead, then deliver a complete multi-file project the user can Accept in Studio.
+
+Return ONLY valid JSON (no markdown outside JSON):
 {
-  "title": "Project name",
-  "note": "Short French summary of what was built",
+  "title": "Nom du projet",
+  "note": "Résumé court en français : modules livrés + comment tester",
   "files": {
     "app.html": "<!DOCTYPE html>...",
     "App.tsx": "...",
@@ -95,14 +113,19 @@ Return ONLY valid JSON (no markdown outside JSON) with this shape:
   }
 }
 
+Mandatory files for a complete app: app.html, App.tsx, app/page.tsx, schema.sql, api.ts, README.md.
+Optional: App.native.tsx, main.py, main.dart when relevant.
+
 Rules:
-- Always include at least: app.html, App.tsx, schema.sql, api.ts, README.md when building a complete app.
-- Optional: App.native.tsx, app/page.tsx, main.py, main.dart if useful.
-- app.html must be a complete document (DOCTYPE + </html>), Tailwind CDN, mobile-first, RDC-friendly (WhatsApp / Mobile Money) when relevant.
-- No third-party AI vendor names in UI strings — say Okapi / MMC SARL.
-- Prefer French UI labels when the user writes in French.
-- Code must be complete enough to open in Okapi Studio and Preview.
-- Keep each file focused; avoid useless fluff.`;
+1. ${scale}
+2. app.html must be a full document (DOCTYPE … </html>), Tailwind CDN, RDC-friendly UX.
+3. Photos: https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
+4. Never invent real API keys. Use NEXT_PUBLIC_OKAPI_DB_URL / NEXT_PUBLIC_OKAPI_DB_ANON_KEY placeholders.
+5. Never mention third-party AI or database vendor brand names in UI or README — say « base Okapi » / Okapi / MMC SARL.
+6. UI copy in the user's language (French if they write French).
+7. Every file must be substantial and coherent with the others — no empty stubs, no lorem-only pages.
+8. Prefer working demo logic (localStorage / in-memory) in HTML when it helps the Preview feel real.`;
+}
 
 export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 200_000);
@@ -128,18 +151,29 @@ export async function POST(request: Request) {
   }
 
   const engine = resolveEngine(body?.engine);
+  const large = wantsLargeProject(instruction) || engine === "pro";
   const hintTitle = body?.title?.trim();
+  const maxTokens = large ? 16000 : 12000;
 
-  const user = `Build a COMPLETE Okapi project from this brief:
+  const user = `Build a COMPLETE Okapi Studio project from this brief.
+Aim for coach-level quality: coherent modules, real UI, SQL + API aligned with the product.
+
+BRIEF:
 -----
 ${instruction}
 -----
 ${hintTitle ? `Suggested title: ${hintTitle}` : ""}
+Mode: ${large ? "GRAND PROJET" : "projet standard"} · engine=${engine}
 
-Return JSON only with title, note, and files map.`;
+Return JSON only with title, note, and files map. Include all mandatory files.`;
 
   try {
-    const raw = await complete({ system: SYSTEM, user, engine });
+    const raw = await complete({
+      system: buildSystem(large, engine),
+      user,
+      engine,
+      maxTokens,
+    });
     const parsed = extractJsonObject(raw);
     if (!parsed || typeof parsed !== "object") {
       return Response.json(
@@ -183,6 +217,7 @@ Return JSON only with title, note, and files map.`;
       ok: true,
       title,
       note,
+      large,
       files,
     });
   } catch (err) {

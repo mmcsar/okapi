@@ -19,7 +19,10 @@ const FULLSTACK_RE =
   /\b(fullstack|full[\s-]?stack|backend|back[\s-]?end|supabase|postgres|postgresql|base de donn[eé]es|bdd|schema sql|rls|crud|api rest|auth|authentification|login|inscription|serveur|endpoint|table sql|migration)\b/i;
 
 const LARGE_PROJECT_RE =
-  /\b(grand projet|gros projet|projet complet|plateforme|saas|crm|erp|dashboard|tableau de bord|marketplace|ecommerce|e-commerce|multi[- ]?page|plusieurs pages|module|modules|admin panel|back[- ]?office|gestion (des |de |d')?(clients|stocks|ventes|rh|employes|ecole|hopital|clinique|flotte)|systeme de|syst[eè]me de)\b/i;
+  /\b(grand projet|gros projet|projet complet|plateforme|saas|crm|erp|dashboard|tableau de bord|marketplace|ecommerce|e-commerce|multi[- ]?page|plusieurs pages|module|modules|admin panel|back[- ]?office|gestion (des |de |d')?(clients|stocks|ventes|rh|employ[eé]s|ecole|[eé]cole|hopital|h[oô]pital|clinique|flotte|boutique|restaurant|pharmacie)|systeme de|syst[eè]me de|mini[- ]?erp|pos|caisse)\b/i;
+
+const STUDIO_SCAFFOLD_RE =
+  /\b(projet complet|grand projet|gros projet|scaffold|g[eé]n[eè]re(r)? (tout|le projet|une? app|un site)|cr[eé]e(r)? (un |une )?(projet|app|application|site|plateforme|crm|saas|dashboard|boutique)|build (a |an |the )?full|fais[- ]moi (un |une )?(projet|crm|saas|dashboard|plateforme|boutique|app))\b/i;
 
 /** User clearly asks for backend / DB. */
 export function wantsFullstack(message: string): boolean {
@@ -31,6 +34,25 @@ export function wantsFullstack(message: string): boolean {
 export function wantsLargeProject(message: string): boolean {
   const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
   return LARGE_PROJECT_RE.test(m);
+}
+
+/**
+ * Studio Agent should scaffold a multi-file project (not a single-file tweak).
+ * If the workspace is empty, broader “crée une app…” intents also scaffold.
+ */
+export function wantsStudioScaffold(
+  message: string,
+  opts?: { hasExistingFiles?: boolean },
+): boolean {
+  const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  if (wantsLargeProject(message)) return true;
+  if (STUDIO_SCAFFOLD_RE.test(m)) return true;
+  if (!opts?.hasExistingFiles) {
+    return /\b(cr[eé]e|creer|fais|g[eé]n[eè]re|build|construire).{0,48}\b(app|site|projet|crm|saas|boutique|[eé]cole|clinique|dashboard|plateforme)\b/i.test(
+      m,
+    );
+  }
+  return false;
 }
 
 export function resolveGenerateMode(

@@ -46,7 +46,7 @@ type HomeDashboardProps = {
   /** Incrémente à chaque clic sidebar Studio pour forcer l’ouverture. */
   studioKick?: number;
   initialProject?: OkapiProject | null;
-  /** Ouvre directement Okapi Studio (mode Dev / VS Code). */
+  /** Ouvre directement Okapi Studio (mode Dev). */
   openInStudio?: boolean;
   onGoHome?: () => void;
   onNavigate?: (id: string) => void;
@@ -267,7 +267,7 @@ export function HomeDashboard({
         setMessages([
           {
             role: "assistant",
-            content: `Studio ouvert : ${initialProject.title}. Chat = conseils · Studio = code (comme VS Code).`,
+            content: `Studio ouvert : ${initialProject.title}. Chat = conseils · Studio = code Okapi.`,
           },
         ]);
       } else {
