@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import {
+  OKAPI_PUBLIC_SANDBOX,
+  stripOkapiRuntime,
+} from "@/lib/okapi-runtime";
 
 type PublicProject = {
   title: string;
@@ -50,6 +54,11 @@ export default function PublicProjectPage() {
     };
   }, [slug]);
 
+  const safeHtml = useMemo(
+    () => stripOkapiRuntime(project?.html || ""),
+    [project?.html],
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#e8eee9] text-sm text-okapi-ink/50">
@@ -79,7 +88,7 @@ export default function PublicProjectPage() {
     <div className="flex min-h-screen flex-col bg-[#e8eee9]">
       <header className="flex items-center justify-between gap-3 border-b border-[var(--okapi-stroke)] bg-white/80 px-4 py-3 backdrop-blur">
         <div className="min-w-0">
-          <p className="truncate font-[family-name:var(--font-syne)] text-lg font-bold">
+          <p className="truncate font-[family-name:var(--font-syne)] text-lg font-bold text-okapi-ink">
             {project.title}
           </p>
           <p className="text-[11px] text-okapi-ink/45">
@@ -95,8 +104,9 @@ export default function PublicProjectPage() {
       </header>
       <iframe
         title={project.title}
-        srcDoc={project.html}
-        sandbox="allow-scripts allow-forms allow-same-origin"
+        srcDoc={safeHtml}
+        sandbox={OKAPI_PUBLIC_SANDBOX}
+        referrerPolicy="no-referrer"
         className="min-h-0 w-full flex-1 bg-white"
       />
     </div>

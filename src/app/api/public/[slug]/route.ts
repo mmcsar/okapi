@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { stripOkapiRuntime } from "@/lib/okapi-runtime";
 import { getSupabase, type OkapiProject } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -45,9 +46,15 @@ export async function GET(_request: Request, ctx: Ctx) {
       );
     }
 
+    const row = data as OkapiProject;
+    const project = {
+      ...row,
+      html: stripOkapiRuntime(row.html || ""),
+    };
+
     return NextResponse.json({
       ok: true,
-      project: data as OkapiProject,
+      project,
     });
   } catch (err) {
     return NextResponse.json(

@@ -1,8 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { StudioFileId } from "@/components/okapi-studio";
+import { useOkapiPreviewBridge } from "@/hooks/use-okapi-preview-bridge";
+import {
+  OKAPI_PREVIEW_SANDBOX,
+  injectOkapiRuntime,
+} from "@/lib/okapi-runtime";
 
 const OkapiStudio = dynamic(
   () =>
@@ -52,10 +57,18 @@ type WorkspacePanelProps = {
   onStudioCommitted?: (fileId: StudioFileId, content: string) => void;
   cloudStatus?: string | null;
   engine?: string;
+  /** Secteur Accueil pour agents métier Studio */
+  sector?: string;
+  /** Projet cloud — active Preview données réelles */
+  projectId?: string | null;
+  accessToken?: string | null;
   /** Bump when a new generation finishes to focus Preview */
   focusPreviewKey?: number;
   /** Bump to open Studio (mode Dev) */
   focusStudioKey?: number;
+  /** Seed Agent Studio after Accueil generate */
+  studioSeedKey?: number;
+  studioSeedMessages?: { role: "user" | "assistant"; content: string }[];
   /** Mode Studio immersif : full-bleed, chrome minimal */
   immersive?: boolean;
 };
@@ -153,11 +166,28 @@ export function WorkspacePanel({
   onStudioCommitted,
   cloudStatus = null,
   engine = "flash",
+  sector,
+  projectId = null,
+  accessToken = null,
   focusPreviewKey = 0,
   focusStudioKey = 0,
+  studioSeedKey = 0,
+  studioSeedMessages,
   immersive = false,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<WorkspaceTab>(immersive ? "studio" : "preview");
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  useOkapiPreviewBridge(previewIframeRef, projectId);
+
+  const liveHtml = useMemo(() => {
+    if (!html) return html;
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    return injectOkapiRuntime(html, {
+      projectId: projectId ?? null,
+      parentOrigin: origin,
+    });
+  }, [html, projectId]);
 
   useEffect(() => {
     if (focusPreviewKey > 0) setTab("preview");
@@ -392,6 +422,11 @@ export function WorkspacePanel({
             readme={readme}
             showPreview
             engine={engine}
+            sector={sector}
+            projectId={projectId}
+            accessToken={accessToken}
+            seedKey={studioSeedKey}
+            seedMessages={studioSeedMessages}
             onChangeFile={onChangeArtifact}
             onCommitted={onStudioCommitted}
             onSaveCloud={onSaveCloud}
@@ -424,9 +459,11 @@ export function WorkspacePanel({
                 }
               >
                 <iframe
+                  ref={previewIframeRef}
                   title={title}
-                  srcDoc={html}
-                  sandbox="allow-scripts allow-forms allow-same-origin"
+                  srcDoc={liveHtml || ""}
+                  sandbox={OKAPI_PREVIEW_SANDBOX}
+                  referrerPolicy="no-referrer"
                   className={`w-full bg-white ${
                     device === "mobile"
                       ? "h-[640px] pt-6"

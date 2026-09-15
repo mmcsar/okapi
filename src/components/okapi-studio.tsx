@@ -10,6 +10,24 @@ import {
   type StudioFileId,
 } from "@/lib/studio-files";
 import { wantsStudioScaffold } from "@/lib/fullstack";
+import { useOkapiPreviewBridge } from "@/hooks/use-okapi-preview-bridge";
+import {
+  OKAPI_PREVIEW_SANDBOX,
+  injectOkapiRuntime,
+} from "@/lib/okapi-runtime";
+import {
+  OKAPI_AGENTS,
+  type OkapiAgentId,
+  resolveOkapiAgent,
+} from "@/lib/studio-agents";
+import {
+  analyzeStudioProblems,
+  buildMultiProblemFixPrompt,
+  buildProblemFixPrompt,
+  countStudioProblemBadge,
+  type StudioProblem,
+} from "@/lib/studio-problems";
+import { readStudioStream } from "@/lib/studio-stream";
 
 export type { StudioFileId } from "@/lib/studio-files";
 
@@ -46,6 +64,13 @@ type OkapiStudioProps = {
   readme: string | null;
   showPreview: boolean;
   engine?: string;
+  /** Secteur Accueil (aide à choisir l’agent métier) */
+  sector?: string;
+  projectId?: string | null;
+  accessToken?: string | null;
+  /** Bump after Accueil generate to inject chat continuity */
+  seedKey?: number;
+  seedMessages?: { role: "user" | "assistant"; content: string }[];
   onChangeFile: (id: StudioFileId, value: string) => void;
   onCommitted?: (fileId: StudioFileId, content: string) => void;
   onSaveCloud?: () => void | Promise<boolean>;
@@ -66,13 +91,6 @@ type TermLine = {
 };
 
 type TermTab = "problems" | "output" | "terminal";
-
-const SUGGESTIONS = [
-  "Grand projet : CRM clients + stock + Mobile Money pour une boutique à Kinshasa",
-  "Plateforme école : élèves, notes, présence, WhatsApp parents",
-  "Dashboard clinique : patients, rendez-vous, pharmacie",
-  "Améliore le design mobile de l’écran actuel",
-];
 
 function countLines(text: string) {
   if (!text) return 0;
@@ -223,6 +241,11 @@ export function OkapiStudio({
   readme,
   showPreview: _showPreview,
   engine = "flash",
+  sector = "Général",
+  projectId = null,
+  accessToken = null,
+  seedKey = 0,
+  seedMessages,
   onChangeFile,
   onCommitted,
   onSaveCloud,
@@ -274,6 +297,12 @@ export function OkapiStudio({
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState<OkapiAgentId>("general");
+  const [aiProgress, setAiProgress] = useState<{
+    message: string;
+    step: number;
+    total: number;
+  } | null>(null);
   const [pendingList, setPendingList] = useState<PendingEdit[]>([]);
   const pending =
     pendingList.find((p) => p.fileId === activeId) ?? pendingList[0] ?? null;
@@ -286,18 +315,68 @@ export function OkapiStudio({
     {
       role: "assistant",
       content:
-        "Salut — je suis ton coach Okapi Studio. Décris un grand projet (CRM, école, clinique, boutique…) : je livre plusieurs fichiers, tu Acceptes, l’explorateur se remplit. Ctrl+L pour me focus.",
+        "Coach Okapi prêt. Décris ton projet ou une modif — je réponds à la demande.",
     },
   ]);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
   const seenContentRef = useRef<Set<StudioFileId>>(new Set());
+  const lastSeedKeyRef = useRef(0);
 
   const previewUrl = `okapi://preview/${previewSlug(title)}`;
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  useOkapiPreviewBridge(previewIframeRef, projectId);
+
+  const liveHtml = useMemo(() => {
+    if (!html) return html;
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    return injectOkapiRuntime(html, {
+      projectId: projectId ?? null,
+      parentOrigin: origin,
+    });
+  }, [html, projectId]);
 
   const logTerm = useCallback((text: string, kind: TermLine["kind"] = "info") => {
     const stamp = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     setTermLines((prev) => [...prev, { t: `[${stamp}] ${text}`, kind }]);
   }, []);
+
+  useEffect(() => {
+    if (!seedKey || seedKey === lastSeedKeyRef.current) return;
+    if (!seedMessages?.length) return;
+    lastSeedKeyRef.current = seedKey;
+    const brief = seedMessages.find((m) => m.role === "user")?.content || "";
+    const detected = resolveOkapiAgent({
+      sector,
+      instruction: brief,
+    });
+    setAgentId(detected.id);
+    setAiMessages(
+      seedMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    );
+    setAiOpen(true);
+    setPreviewOpen(Boolean(html?.trim()));
+    const stamp = new Date().toLocaleTimeString("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    setTermLines((prev) => [
+      ...prev,
+      {
+        t: `[${stamp}] Pont Accueil → Studio · Agent ${detected.label}`,
+        kind: "ok",
+      },
+    ]);
+  }, [seedKey, seedMessages, html, sector]);
+
+  useEffect(() => {
+    const fromSector = resolveOkapiAgent({ sector });
+    if (fromSector.id !== "general") setAgentId(fromSector.id);
+  }, [sector]);
 
   const isFileVisible = useCallback(
     (f: StudioFile) =>
@@ -311,6 +390,24 @@ export function OkapiStudio({
   const visibleFiles = useMemo(
     () => files.filter(isFileVisible),
     [files, isFileVisible],
+  );
+
+  const studioProblems = useMemo(
+    () =>
+      analyzeStudioProblems({
+        html,
+        react,
+        nextjs,
+        sql,
+        api,
+        pendingFileIds: pendingList.map((p) => p.fileId),
+      }),
+    [html, react, nextjs, sql, api, pendingList],
+  );
+
+  const problemsBadge = useMemo(
+    () => countStudioProblemBadge(studioProblems),
+    [studioProblems],
   );
 
   const active =
@@ -518,9 +615,13 @@ export function OkapiStudio({
     });
   }, [files, pendingList, isFileVisible]);
 
+  const aiProgressKey = aiProgress
+    ? `${aiProgress.step}/${aiProgress.total}:${aiProgress.message}`
+    : "";
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [aiMessages, aiBusy]);
+  }, [aiMessages, aiBusy, aiProgressKey]);
 
   useEffect(() => {
     termEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -690,6 +791,16 @@ export function OkapiStudio({
     logTerm(`Ouverture ${file?.label ?? id}`, "cmd");
   }
 
+  function openProblem(problem: StudioProblem) {
+    openFile(problem.fileId);
+    setTerminalOpen(true);
+    setTermTab("problems");
+    logTerm(
+      `Problems · ${problem.severity} · ${problem.fileId}: ${problem.message}`,
+      problem.severity === "error" ? "err" : "info",
+    );
+  }
+
   function closeTab(id: StudioFileId) {
     setOpenTabs((prev) => {
       const next = prev.filter((x) => x !== id);
@@ -717,29 +828,80 @@ export function OkapiStudio({
     logTerm("Preview actualisée", "info");
   }
 
-  async function askStudioAi(e?: FormEvent) {
+  async function askStudioAi(
+    e?: FormEvent,
+    opts?: {
+      instruction?: string;
+      fileId?: StudioFileId;
+      forceEdit?: boolean;
+    },
+  ) {
     e?.preventDefault();
-    const instruction = aiPrompt.trim();
-    if (!instruction || aiBusy || pendingList.length > 0) return;
+    const instruction = (opts?.instruction ?? aiPrompt).trim();
+    if (!instruction || aiBusy) return;
+
+    const target =
+      files.find((f) => f.id === (opts?.fileId ?? activeId)) ?? active;
+
+    const activeAgent = resolveOkapiAgent({
+      agentId,
+      sector,
+      instruction,
+    });
+    if (activeAgent.id !== agentId) setAgentId(activeAgent.id);
+
+    // Nouvelle demande = on laisse tomber les diffs non acceptés
+    if (pendingList.length > 0) {
+      setPendingList([]);
+      logTerm("Diffs précédents annulés (nouvelle demande)", "info");
+    }
 
     setAiBusy(true);
     setAiError(null);
-    setAiPrompt("");
+    setAiProgress(null);
+    if (!opts?.instruction) setAiPrompt("");
     setAiMessages((prev) => [...prev, { role: "user", content: instruction }]);
+    logTerm(`Agent ${activeAgent.label} · ${activeAgent.short}`, "cmd");
 
-    const asProject = wantsStudioScaffold(instruction, {
-      hasExistingFiles: visibleFiles.some((f) => f.value.trim()),
-    });
+    const asProject =
+      !opts?.forceEdit &&
+      wantsStudioScaffold(instruction, {
+        hasExistingFiles: visibleFiles.some((f) => f.value.trim()),
+      });
+
+    // Contexte multi-fichiers + historique Agent (envoyé aux APIs Studio)
+    const workspacePayload = files
+      .filter((f) => f.value.trim())
+      .map((f) => ({
+        fileId: f.id,
+        label: f.label,
+        content: f.value,
+      }));
+    const historyPayload = [
+      ...aiMessages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .slice(-5)
+        .map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+      { role: "user" as const, content: instruction },
+    ].slice(-6);
 
     try {
       if (asProject) {
         logTerm(`Coach · grand projet multi-fichiers…`, "cmd");
+        setAiProgress({
+          message: "Okapi planifie le projet…",
+          step: 1,
+          total: 4,
+        });
         setAiMessages((prev) => [
           ...prev,
           {
             role: "assistant",
             content:
-              "Je construis le projet complet (UI + React/Next + SQL + API), puis je le livre directement dans ton Studio — comme avec ton coach.",
+              "Je construis le projet complet — tu verras la progression en direct.",
           },
         ]);
 
@@ -750,18 +912,54 @@ export function OkapiStudio({
             instruction,
             engine,
             title: title || undefined,
+            agentId: activeAgent.id,
+            sector,
+            workspace: workspacePayload,
+            history: historyPayload,
+            stream: true,
           }),
         });
-        const data = (await res.json().catch(() => null)) as {
+
+        if (!res.ok) {
+          const fail = (await res.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(fail?.error || "Génération projet impossible.");
+        }
+
+        const contentType = res.headers.get("content-type") || "";
+        let data: {
           title?: string;
           note?: string;
           large?: boolean;
+          repaired?: boolean;
           files?: { fileId: StudioFileId; content: string }[];
-          error?: string;
-        } | null;
+        };
 
-        if (!res.ok || !data?.files?.length) {
-          throw new Error(data?.error || "Génération projet impossible.");
+        if (contentType.includes("ndjson") || contentType.includes("x-ndjson")) {
+          const done = await readStudioStream(res, (event) => {
+            if (event.type === "status") {
+              setAiProgress({
+                message: event.message,
+                step: event.step ?? 1,
+                total: event.total ?? 4,
+              });
+              logTerm(event.message, event.repairing ? "ok" : "cmd");
+            }
+          });
+          data = done;
+        } else {
+          const json = (await res.json().catch(() => null)) as typeof data & {
+            error?: string;
+          } | null;
+          if (!json?.files?.length) {
+            throw new Error(json?.error || "Génération projet impossible.");
+          }
+          data = json;
+        }
+
+        if (!data.files?.length) {
+          throw new Error("Génération projet impossible.");
         }
 
         const batch: PendingEdit[] = data.files.map((f) => {
@@ -774,7 +972,11 @@ export function OkapiStudio({
           };
         });
 
-        // Mode coach : livrer tout de suite (pas d’attente Accepter pour les grands projets)
+        if (data.repaired) {
+          logTerm("Coach · auto-correction du scaffold appliquée", "ok");
+        }
+
+        setAiProgress(null);
         deliverProjectBatch(batch, {
           note: data.note,
           large: Boolean(data.large),
@@ -782,30 +984,66 @@ export function OkapiStudio({
         return;
       }
 
-      logTerm(`IA · édition demandée sur ${active.label}…`, "cmd");
+      logTerm(`IA · édition demandée sur ${target.label}…`, "cmd");
+      setAiProgress({
+        message: `Édition de ${target.label}…`,
+        step: 1,
+        total: 2,
+      });
       const res = await fetch("/api/studio-edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           instruction,
-          fileId: active.id,
-          fileLabel: active.label,
-          language: active.language,
-          content: active.value,
+          fileId: target.id,
+          fileLabel: target.label,
+          language: target.language,
+          content: target.value,
           engine,
+          agentId: activeAgent.id,
+          sector,
+          workspace: workspacePayload,
+          history: historyPayload,
         }),
+      });
+      setAiProgress({
+        message: "Préparation des diffs…",
+        step: 2,
+        total: 2,
       });
       const data = (await res.json().catch(() => null)) as {
         content?: string;
         note?: string;
+        multi?: boolean;
+        files?: { fileId: StudioFileId; content: string }[];
         error?: string;
       } | null;
 
-      if (!res.ok || !data?.content) {
+      if (!res.ok) {
         throw new Error(data?.error || "Édition impossible.");
       }
 
-      if (data.content === active.value) {
+      const edits: PendingEdit[] = (
+        data?.files?.length
+          ? data.files
+          : data?.content
+            ? [{ fileId: target.id, content: data.content }]
+            : []
+      )
+        .map((f) => {
+          const current = files.find((x) => x.id === f.fileId);
+          const before = current?.value ?? "";
+          if (f.content === before) return null;
+          return {
+            fileId: f.fileId,
+            before,
+            after: f.content,
+            note: data?.note || `Proposition pour ${f.fileId}`,
+          } satisfies PendingEdit;
+        })
+        .filter((x): x is PendingEdit => Boolean(x));
+
+      if (edits.length === 0) {
         setAiMessages((prev) => [
           ...prev,
           { role: "assistant", content: "Aucun changement détecté." },
@@ -814,26 +1052,34 @@ export function OkapiStudio({
         return;
       }
 
-      setPendingList([
-        {
-          fileId: active.id,
-          before: active.value,
-          after: data.content,
-          note: data.note || `Proposition pour ${active.label}`,
-        },
-      ]);
+      setPendingList(edits);
+      setOpenTabs((prev) => {
+        const merged = [...prev];
+        for (const e of edits) {
+          if (!merged.includes(e.fileId)) merged.push(e.fileId);
+        }
+        return merged;
+      });
+      setActiveId(edits[0]!.fileId);
       setDiffView("after");
       setSplitDiff(true);
       setAiOpen(true);
+
+      const names = edits.map((e) => e.fileId).join(", ");
       setAiMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `${data.note || "Proposition prête."} Vérifie le diff, puis Accepte ou Refuse.`,
+          content:
+            edits.length > 1
+              ? `${data?.note || "Proposition multi-fichiers."} ${edits.length} fichiers : ${names}. Accepte un par un, Tout (Ctrl+Enter), ou continue à discuter.`
+              : `${data?.note || "Proposition prête."} Vérifie le diff, puis Accepte ou Refuse.`,
         },
       ]);
       logTerm(
-        `Diff prêt · ${active.label} (${countLines(active.value)} → ${countLines(data.content)} lignes) — en attente d’Acceptation`,
+        edits.length > 1
+          ? `Diff multi · ${edits.length} fichiers (${names})`
+          : `Diff prêt · ${edits[0]!.fileId} (${countLines(edits[0]!.before)} → ${countLines(edits[0]!.after)} lignes)`,
         "ok",
       );
     } catch (err) {
@@ -845,7 +1091,47 @@ export function OkapiStudio({
       setTermTab("terminal");
     } finally {
       setAiBusy(false);
+      setAiProgress(null);
     }
+  }
+
+  function fixProblem(problem: StudioProblem) {
+    if (aiBusy) return;
+    if (problem.id.startsWith("pending-")) {
+      openProblem(problem);
+      setAiOpen(true);
+      return;
+    }
+    openFile(problem.fileId);
+    setAiOpen(true);
+    setTerminalOpen(true);
+    setTermTab("problems");
+    logTerm(`Fix Agent · ${problem.fileId}`, "cmd");
+    void askStudioAi(undefined, {
+      instruction: buildProblemFixPrompt(problem),
+      fileId: problem.fileId,
+      forceEdit: true,
+    });
+  }
+
+  function fixAllProblems() {
+    if (aiBusy) return;
+    const fixable = studioProblems.filter(
+      (p) =>
+        (p.severity === "error" || p.severity === "warning") &&
+        !p.id.startsWith("pending-"),
+    );
+    if (fixable.length === 0) return;
+    openFile(fixable[0]!.fileId);
+    setAiOpen(true);
+    setTerminalOpen(true);
+    setTermTab("problems");
+    logTerm(`Fix Agent · ${fixable.length} problèmes`, "cmd");
+    void askStudioAi(undefined, {
+      instruction: buildMultiProblemFixPrompt(fixable),
+      fileId: fixable[0]!.fileId,
+      forceEdit: true,
+    });
   }
 
   function deliverProjectBatch(
@@ -962,12 +1248,6 @@ export function OkapiStudio({
     ]);
     logTerm(`Refusé · ${n} proposition(s)`, "info");
     window.setTimeout(() => aiInputRef.current?.focus(), 80);
-  }
-
-  function useSuggestion(text: string) {
-    if (pendingList.length > 0 || aiBusy) return;
-    setAiPrompt(text);
-    window.setTimeout(() => aiInputRef.current?.focus(), 40);
   }
 
   useEffect(() => {
@@ -1616,9 +1896,9 @@ export function OkapiStudio({
                     }`}
                   >
                     {label}
-                    {id === "problems" && pending ? (
+                    {id === "problems" && problemsBadge > 0 ? (
                       <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#e8892a]/30 px-1 text-[9px] font-bold text-[#ffd7a8]">
-                        1
+                        {problemsBadge}
                       </span>
                     ) : null}
                   </button>
@@ -1649,16 +1929,77 @@ export function OkapiStudio({
                     <div ref={termEndRef} />
                   </>
                 ) : termTab === "problems" ? (
-                  pending ? (
-                    <div className="flex items-start gap-2 text-[#ffd7a8]">
-                      <span className="mt-0.5 text-[#e8892a]">●</span>
-                      <span>
-                        Diff modèle en attente sur {pending.fileId} — Review Original / Proposé
-                        puis Accepter ou Refuser.
-                      </span>
-                    </div>
-                  ) : (
+                  studioProblems.length === 0 ? (
                     <p className="text-[#5f766a]">Aucun problème détecté.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {problemsBadge > 0 ? (
+                        <div className="flex items-center justify-between gap-2 pb-1">
+                          <p className="text-[10px] text-[#5f766a]">
+                            {problemsBadge} à corriger
+                          </p>
+                          <button
+                            type="button"
+                            disabled={aiBusy}
+                            onClick={() => fixAllProblems()}
+                            className="rounded border border-[#e8892a]/40 bg-[#e8892a]/15 px-2 py-0.5 text-[10px] font-bold text-[#ffd7a8] transition hover:bg-[#e8892a]/25 disabled:opacity-45"
+                          >
+                            Corriger tout
+                          </button>
+                        </div>
+                      ) : null}
+                      {studioProblems.map((p) => (
+                        <div
+                          key={p.id}
+                          className={`flex items-start gap-2 rounded px-1.5 py-1 ${
+                            p.severity === "error"
+                              ? "text-[#ffb4a8]"
+                              : p.severity === "warning"
+                                ? "text-[#ffd7a8]"
+                                : "text-[#9bb0a4]"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => openProblem(p)}
+                            className="flex min-w-0 flex-1 items-start gap-2 text-left transition hover:opacity-90"
+                          >
+                            <span
+                              className={`mt-0.5 shrink-0 ${
+                                p.severity === "error"
+                                  ? "text-[#e85d4a]"
+                                  : p.severity === "warning"
+                                    ? "text-[#e8892a]"
+                                    : "text-[#5f766a]"
+                              }`}
+                            >
+                              ●
+                            </span>
+                            <span className="min-w-0">
+                              <span className="font-semibold text-[#c8ddd2]">
+                                {p.fileId}
+                                {p.line ? `:${p.line}` : ""}
+                              </span>
+                              <span className="text-[#5f766a]"> · </span>
+                              <span>{p.message}</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={aiBusy}
+                            title={
+                              p.id.startsWith("pending-")
+                                ? "Ouvrir la revue"
+                                : "Demander à l’Agent de corriger"
+                            }
+                            onClick={() => fixProblem(p)}
+                            className="shrink-0 rounded border border-white/12 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#eef6f1] transition hover:border-[#e8892a]/50 hover:bg-[#e8892a]/15 hover:text-[#ffd7a8] disabled:opacity-45"
+                          >
+                            {p.id.startsWith("pending-") ? "Voir" : "Fix"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   )
                 ) : (
                   <div className="space-y-1 text-[#5f766a]">
@@ -1729,10 +2070,12 @@ export function OkapiStudio({
             <div className="min-h-0 flex-1 bg-white">
               {html?.trim() ? (
                 <iframe
+                  ref={previewIframeRef}
                   key={previewKey}
                   title={`${title} preview`}
-                  srcDoc={html}
-                  sandbox="allow-scripts allow-forms allow-same-origin"
+                  srcDoc={liveHtml || ""}
+                  sandbox={OKAPI_PREVIEW_SANDBOX}
+                  referrerPolicy="no-referrer"
                   className="h-full w-full"
                 />
               ) : (
@@ -1750,23 +2093,26 @@ export function OkapiStudio({
         {/* Agent Okapi — à droite du code */}
         {aiOpen ? (
           <aside className="okapi-studio-panel flex max-h-[46vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(40%,420px)] lg:border-l lg:border-t-0">
-            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-[11px] font-semibold tracking-wide text-[#eef6f1]">
-                    Agent
-                  </p>
-                  <span className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[9px] uppercase text-[#8aa89a]">
-                    {engine}
-                  </span>
-                </div>
-                <p className="mt-0.5 truncate font-mono text-[11px] text-[#7d9588]">
-                  Contexte · {active.label}
-                </p>
+                <p className="text-[12px] font-semibold text-[#eef6f1]">Agent</p>
+                <select
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value as OkapiAgentId)}
+                  disabled={aiBusy}
+                  className="mt-1 max-w-[180px] truncate rounded border border-white/12 bg-[#06100c] px-1.5 py-0.5 text-[10px] text-[#ffd7a8] outline-none focus:border-[#e8892a]"
+                  title="Agent métier"
+                >
+                  {OKAPI_AGENTS.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label} · {a.short}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
-                <span className="hidden rounded border border-white/10 px-1.5 py-0.5 font-mono text-[9px] text-[#5f766a] sm:inline">
-                  Ctrl+L
+                <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-[#8aa89a]">
+                  {engine}
                 </span>
                 <button
                   type="button"
@@ -1923,11 +2269,40 @@ export function OkapiStudio({
                 </div>
               ) : null}
 
-              {aiBusy ? (
-                <p className="flex items-center gap-2 text-[11px] text-[#e8892a]">
-                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#e8892a]" />
-                  Okapi écrit le diff…
-                </p>
+              {aiBusy || aiProgress ? (
+                <div className="rounded-lg border border-[#e8892a]/30 bg-[#e8892a]/8 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="flex min-w-0 items-center gap-2 text-[11px] font-medium text-[#ffd7a8]">
+                      <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#e8892a]" />
+                      <span className="truncate">
+                        {aiProgress?.message || "Okapi répond…"}
+                      </span>
+                    </p>
+                    {aiProgress ? (
+                      <span className="shrink-0 font-mono text-[10px] text-[#8aa89a]">
+                        {aiProgress.step}/{aiProgress.total}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#0c1411]">
+                    <div
+                      className="h-full rounded-full bg-[#e8892a] transition-[width] duration-500 ease-out"
+                      style={{
+                        width: `${
+                          aiProgress
+                            ? Math.min(
+                                100,
+                                Math.round(
+                                  (aiProgress.step / Math.max(1, aiProgress.total)) *
+                                    100,
+                                ),
+                              )
+                            : 35
+                        }%`,
+                      }}
+                    />
+                  </div>
+                </div>
               ) : null}
               {aiError ? (
                 <p className="rounded-lg bg-red-500/10 px-2 py-1.5 text-[11px] text-red-300">
@@ -1937,28 +2312,10 @@ export function OkapiStudio({
               <div ref={chatEndRef} />
             </div>
 
-            {!pending && !aiBusy ? (
-              <div className="flex flex-wrap gap-1.5 border-t border-white/5 px-3 py-2">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => useSuggestion(s)}
-                    className="rounded border border-white/10 bg-transparent px-2 py-1 text-[10px] text-[#8aa89a] transition hover:border-[#e8892a]/35 hover:text-[#ffd7a8]"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
             <form
               onSubmit={(e) => void askStudioAi(e)}
-              className="border-t border-white/10 bg-[#0a1210]/60 p-3"
+              className="border-t border-white/10 p-3"
             >
-              <label className="mb-1.5 block text-[9px] font-bold uppercase tracking-[0.14em] text-[#6a7f74]">
-                Composer
-              </label>
               <textarea
                 ref={aiInputRef}
                 value={aiPrompt}
@@ -1969,27 +2326,22 @@ export function OkapiStudio({
                     void askStudioAi();
                   }
                 }}
-                rows={3}
-                disabled={Boolean(pendingList.length)}
+                rows={2}
+                disabled={aiBusy}
                 placeholder={
                   pendingList.length
-                    ? "Termine la revue (Accepter / Refuser)…"
-                    : `Projet complet ou edit de ${active.label}…`
+                    ? "Accepte / Refuse, ou écris une nouvelle demande…"
+                    : "Écris ta demande (1 fichier ou plusieurs)…"
                 }
                 className="w-full resize-none rounded-lg border border-white/12 bg-[#06100c]/70 px-3 py-2.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
               />
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={aiBusy || !aiPrompt.trim() || pendingList.length > 0}
-                  className="flex-1 rounded-lg bg-[#e8892a] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-[#d67a1f] disabled:opacity-45"
-                >
-                  {aiBusy ? "Le modèle écrit…" : "Envoyer au modèle"}
-                </button>
-                <span className="hidden font-mono text-[9px] text-[#5f766a] sm:inline">
-                  ↵
-                </span>
-              </div>
+              <button
+                type="submit"
+                disabled={aiBusy || !aiPrompt.trim()}
+                className="mt-2 w-full rounded-lg bg-[#e8892a] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-[#d67a1f] disabled:opacity-45"
+              >
+                {aiBusy ? "…" : "Envoyer"}
+              </button>
             </form>
           </aside>
         ) : (

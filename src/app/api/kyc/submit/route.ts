@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizeDrPhone } from "@/lib/billing";
+import { openSensitive, sealSensitive } from "@/lib/crypto-aes";
 import {
   validateKycInput,
   type AccountType,
@@ -9,6 +10,17 @@ import { assertBodySize } from "@/lib/security";
 import { requireUser } from "@/lib/supabase";
 
 export const runtime = "nodejs";
+
+function revealKycProfile<T extends Record<string, unknown>>(row: T) {
+  return {
+    ...row,
+    id_doc_number: openSensitive(
+      typeof row.id_doc_number === "string" ? row.id_doc_number : null,
+    ),
+    nif: openSensitive(typeof row.nif === "string" ? row.nif : null),
+    rccm: openSensitive(typeof row.rccm === "string" ? row.rccm : null),
+  };
+}
 
 export async function POST(request: Request) {
   const auth = await requireUser(request);
@@ -60,6 +72,25 @@ export async function POST(request: Request) {
   }
 
   const now = new Date().toISOString();
+  let sealedDoc: string | null;
+  let sealedNif: string | null;
+  let sealedRccm: string | null;
+  try {
+    sealedDoc = sealSensitive(input.idDocNumber);
+    sealedNif =
+      input.accountType === "business" ? sealSensitive(input.nif) : null;
+    sealedRccm =
+      input.accountType === "business" ? sealSensitive(input.rccm) : null;
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          "Chiffrement AES non configuré. Ajoute OKAPI_AES_KEY sur le serveur.",
+      },
+      { status: 503 },
+    );
+  }
+
   const payload = {
     id: auth.session.user.id,
     full_name: input.fullName,
@@ -68,9 +99,10 @@ export async function POST(request: Request) {
     city: input.city,
     account_type: input.accountType,
     id_doc_type: input.idDocType,
-    id_doc_number: input.idDocNumber,
-    nif: input.accountType === "business" ? input.nif || null : null,
-    rccm: input.accountType === "business" ? input.rccm || null : null,
+    // AES-256-GCM at rest — pièce d’identité / NIF / RCCM
+    id_doc_number: sealedDoc,
+    nif: sealedNif,
+    rccm: sealedRccm,
     kyc_status: "pending",
     kyc_submitted_at: now,
     updated_at: now,
@@ -99,7 +131,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    profile: data,
+    profile: data ? revealKycProfile(data) : data,
     message:
       "KYC envoyé. Tu peux payer — MMC valide ton identité sous peu.",
   });

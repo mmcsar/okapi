@@ -16,6 +16,10 @@ type ChatMessage = {
 
 /** Gratuit OpenRouter — utilisé si pas de crédit / modèle payant refusé. */
 const FREE_FALLBACK_MODEL = "nex-agi/nex-n2.5-mini:free";
+/** Pro par défaut (payant) — retombe sur FREE_FALLBACK_MODEL si 402. */
+const DEFAULT_PRO_MODEL = "openai/gpt-4o";
+/** Flash par défaut : gratuit pour RDC sans crédit. */
+const DEFAULT_FLASH_MODEL = FREE_FALLBACK_MODEL;
 /** Fallback vision (doit supporter les images). */
 const FREE_VISION_FALLBACK =
   process.env.OPENROUTER_MODEL_VISION_FREE?.trim() ||
@@ -43,13 +47,13 @@ export function openRouterModel(
     return (
       process.env.OPENROUTER_MODEL_PRO?.trim() ||
       process.env.OPENROUTER_MODEL?.trim() ||
-      FREE_FALLBACK_MODEL
+      DEFAULT_PRO_MODEL
     );
   }
   return (
     process.env.OPENROUTER_MODEL_FLASH?.trim() ||
     process.env.OPENROUTER_MODEL?.trim() ||
-    FREE_FALLBACK_MODEL
+    DEFAULT_FLASH_MODEL
   );
 }
 

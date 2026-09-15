@@ -33,6 +33,7 @@ import {
   listFilledArtifactLabels,
 } from "@/lib/project-artifacts";
 import { parseGenerateStreamLine } from "@/lib/generate-stream";
+import { stripOkapiRuntime } from "@/lib/okapi-runtime";
 import { WorkspacePanel } from "@/components/workspace-panel";
 import {
   studioFileIdToArtifactKey,
@@ -67,7 +68,7 @@ export function HomeDashboard({
   onGoHome,
   onNavigate,
 }: HomeDashboardProps) {
-  const { user, displayName, authFetch, signOut } = useAuth();
+  const { user, displayName, authFetch, signOut, accessToken } = useAuth();
   const [prompt, setPrompt] = useState("");
   const [sector, setSector] = useState<string>("Général");
   const [status, setStatus] = useState<string | null>(null);
@@ -89,6 +90,11 @@ export function HomeDashboard({
   const [previewTitle, setPreviewTitle] = useState("Preview");
   const [workspaceFocusKey, setWorkspaceFocusKey] = useState(0);
   const [studioFocusKey, setStudioFocusKey] = useState(0);
+  const [studioSeedKey, setStudioSeedKey] = useState(0);
+  const [studioSeedMessages, setStudioSeedMessages] = useState<
+    { role: "user" | "assistant"; content: string }[]
+  >([]);
+  const [studioHandoffReady, setStudioHandoffReady] = useState(false);
   const [debugArmed, setDebugArmed] = useState(false);
   const [devMode, setDevMode] = useState(false);
   const [studioChatOpen, setStudioChatOpen] = useState(false);
@@ -346,6 +352,15 @@ export function HomeDashboard({
     onNavigate?.("home");
   }
 
+  function continueInStudio() {
+    setDevMode(true);
+    setDebugArmed(false);
+    setStudioChatOpen(false);
+    setStudioFocusKey((k) => k + 1);
+    setStudioHandoffReady(false);
+    onNavigate?.("studio");
+  }
+
   async function persistProject(payload: {
     title: string;
     sector: string;
@@ -386,7 +401,7 @@ export function HomeDashboard({
       const body = {
         title: payload.title,
         sector: payload.sector,
-        html: payload.html,
+        html: stripOkapiRuntime(payload.html || ""),
         summary: payload.summary,
         // Full explicit bundle — server merges only present keys; we send all.
         artifacts: {
@@ -434,9 +449,11 @@ export function HomeDashboard({
 
   function applyStudioCommit(fileId: StudioFileId, content: string) {
     const key = studioFileIdToArtifactKey(fileId);
-    const next = content || null;
+    const safe =
+      fileId === "app.html" ? stripOkapiRuntime(content || "") : content;
+    const next = safe || null;
     snapRef.current = { ...snapRef.current, [key]: next };
-    onChangeArtifact(fileId, content);
+    onChangeArtifact(fileId, safe);
     scheduleCloudSave();
   }
 
@@ -913,8 +930,20 @@ export function HomeDashboard({
           setPreviewApi(nextApi);
           setPreviewReadme(nextReadme);
           setPreviewTitle(title);
-          if (devModeRef.current) setStudioFocusKey((k) => k + 1);
-          else setWorkspaceFocusKey((k) => k + 1);
+          // Preview d’abord (visible) — Studio via bouton « Continuer »
+          setWorkspaceFocusKey((k) => k + 1);
+          setStudioHandoffReady(true);
+          setStudioSeedMessages([
+            { role: "user", content: trimmed },
+            {
+              role: "assistant",
+              content: [
+                event.summary ?? `Preview « ${title} » prête.`,
+                "Projet prêt. Clique Continuer dans Studio pour éditer, ou demande une modif ici.",
+              ].join(" "),
+            },
+          ]);
+          setStudioSeedKey((k) => k + 1);
 
           snapRef.current = {
             ...snapRef.current,
@@ -964,6 +993,7 @@ export function HomeDashboard({
                 : user
                   ? "· Sauvegardé cloud"
                   : "",
+              "· Studio prêt — continue l’édition là-bas.",
             ]
               .filter(Boolean)
               .join(" "),
@@ -1061,8 +1091,13 @@ export function HomeDashboard({
     onStudioCommitted: applyStudioCommit,
     cloudStatus: saveBusy ? "Sauvegarde…" : cloudStatus,
     engine,
+    sector,
+    projectId,
+    accessToken,
     focusPreviewKey: workspaceFocusKey,
     focusStudioKey: studioFocusKey,
+    studioSeedKey,
+    studioSeedMessages,
   };
 
   const messageListBlock =
@@ -1145,6 +1180,20 @@ export function HomeDashboard({
                   className="mt-2 block text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
                 >
                   {speaking ? "Stop audio" : "Écouter"}
+                </button>
+              ) : null}
+              {msg.role === "assistant" &&
+              !isStreamingAssistant &&
+              studioHandoffReady &&
+              i === messages.length - 1 &&
+              previewHtml &&
+              !immersiveStudio ? (
+                <button
+                  type="button"
+                  onClick={continueInStudio}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-okapi-forest px-3.5 py-2 text-[12px] font-semibold text-white transition hover:bg-okapi-forest/90"
+                >
+                  Continuer dans Studio
                 </button>
               ) : null}
             </div>

@@ -22,6 +22,12 @@ import {
   wantsLargeProject,
   type GenerateMode,
 } from "@/lib/fullstack";
+import {
+  assessGenerateQuality,
+  buildGenerateRepairPrompt,
+  maxGenerateRepairAttempts,
+  shouldRepairGenerate,
+} from "@/lib/generate-quality";
 import { ensureReadmeArtifact } from "@/lib/project-artifacts";
 import {
   encodeGenerateStreamEvent,
@@ -29,14 +35,20 @@ import {
 } from "@/lib/generate-stream";
 import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
+import {
+  agentSystemBlock,
+  resolveOkapiAgent,
+} from "@/lib/studio-agents";
 
 export const runtime = "nodejs";
+/** Generate + 1 repair pass can need the full window. */
 export const maxDuration = 60;
 
 function buildSystemHtml(
   language?: string | null,
   engine: OkapiEngine = "flash",
   large = false,
+  agentBlock = "",
 ) {
   const scale =
     large || engine === "pro"
@@ -48,7 +60,7 @@ function buildSystemHtml(
 
   return `You are Okapi (MMC SARL AI platform) HTML engine — engine=${engine}.
 Generate ONE complete web app as a single HTML file ONLY when asked.
-
+${agentBlock}
 Rules:
 1. ONLY the HTML document (start with <!DOCTYPE html> and ALWAYS end with </html>). No markdown.
 2. Do only what was requested — no useless bonus sections. Prefer a complete short page over a truncated long one.
@@ -61,6 +73,7 @@ Rules:
 7. On edit: return the FULL updated HTML, always closed with </html>.
 8. Never mention third-party AI vendors in the generated UI.
 9. Keep Flash pages compact enough to finish: hero + 1–2 sections + footer is enough unless asked for more.
+10. For interactive lists/forms prefer window.Okapi.list/create/update/remove (real Okapi cloud). Avoid localStorage demos when Okapi is available; fallback message if !Okapi.ready.
 ${scale}
 
 ${languageInstruction(language)}
@@ -73,6 +86,7 @@ function buildSystemFullstack(
   language?: string | null,
   engine: OkapiEngine = "flash",
   large = false,
+  agentBlock = "",
 ) {
   const scale =
     large || engine === "pro"
@@ -89,7 +103,7 @@ function buildSystemFullstack(
   return `You are Okapi (MMC SARL AI platform) fullstack engine — engine=${engine}.
 When asked, generate a web app WITH backend scaffolding for Okapi cloud database (Postgres-compatible).
 Both Okapi Flash and Okapi Pro can create large projects; Pro goes deeper on architecture and edge cases.
-
+${agentBlock}
 OUTPUT FORMAT — use these exact markers (no markdown fences around the whole reply):
 
 ===OKAPI_HTML===
@@ -120,6 +134,8 @@ Rules:
 7. Do only what was requested — no useless marketing filler.
 8. Never mention third-party AI or database vendor brand names in user-facing text.
 9. On edit: return ALL sections updated (never omit a section that existed).
+10. Follow AGENT MÉTIER rules when present (screens, schema, payments).
+11. Interactive HTML should use window.Okapi.list/create (real persistence) when possible — not localStorage-only demos.
 ${scale}
 
 ${languageInstruction(language)}
@@ -339,7 +355,7 @@ async function generateWithFallback(
   }
 
   const model =
-    process.env.GEMINI_MODEL?.trim() || "gemini-flash-lite-latest";
+    process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash";
   const ai = new GoogleGenAI({ apiKey: key });
 
   try {
@@ -380,13 +396,14 @@ export async function POST(request: Request) {
   if (tooBig) return tooBig;
 
   const body = (await request.json().catch(() => null)) as Body | null;
-  const message = body?.message?.trim();
-  if (!message) {
+  const rawMessage = body?.message?.trim();
+  if (!rawMessage) {
     return Response.json({ error: "Message vide." }, { status: 400 });
   }
-  if (message.length > 20_000) {
+  if (rawMessage.length > 20_000) {
     return Response.json({ error: "Message trop long." }, { status: 400 });
   }
+  const message: string = rawMessage;
 
   if (!pickLlmProvider()) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
@@ -428,11 +445,14 @@ export async function POST(request: Request) {
   const currentApi = body?.currentApi?.trim();
   const wantStream = body?.stream !== false;
 
+  const agent = resolveOkapiAgent({ sector, instruction: message });
+  const agentBlock = agentSystemBlock(agent);
+
   const system = debug
     ? buildSystemDebug(language, mode === "fullstack")
     : mode === "fullstack"
-      ? buildSystemFullstack(language, engine, large)
-      : buildSystemHtml(language, engine, large);
+      ? buildSystemFullstack(language, engine, large, agentBlock)
+      : buildSystemHtml(language, engine, large, agentBlock);
 
   const prompt = buildPrompt(
     sector,
@@ -512,16 +532,56 @@ export async function POST(request: Request) {
     };
   };
 
-  if (!wantStream) {
-    try {
-      const raw = await generateWithFallback(
-        prompt,
+  /** One-shot generate, then auto-repair if HTML/fullstack is incomplete. */
+  async function generateWithQualityLoop(opts: {
+    onChunk?: (text: string) => void;
+    onStatus?: (msg: string) => void;
+  }) {
+    let raw = await generateWithFallback(
+      prompt,
+      system,
+      opts.onChunk,
+      opts.onStatus,
+      maxTokens,
+      engine,
+    );
+
+    for (let attempt = 0; attempt < maxGenerateRepairAttempts(); attempt++) {
+      const artifacts = parseOkapiArtifacts(raw);
+      artifacts.html = ensureHtmlDocument(artifacts.html);
+      const issues = assessGenerateQuality(artifacts, { mode, raw });
+      if (!shouldRepairGenerate(issues)) break;
+
+      opts.onStatus?.(
+        "Okapi vérifie la génération et corrige automatiquement…",
+      );
+
+      const repairPrompt = buildGenerateRepairPrompt({
+        sector,
+        message,
+        mode,
+        issues,
+        previousRaw: raw,
+        language,
+      });
+
+      // Repair pass: no live deltas (avoids mixing two drafts in the UI).
+      raw = await generateWithFallback(
+        repairPrompt,
         system,
         undefined,
-        undefined,
+        opts.onStatus,
         maxTokens,
         engine,
       );
+    }
+
+    return raw;
+  }
+
+  if (!wantStream) {
+    try {
+      const raw = await generateWithQualityLoop({});
       const out = finish(raw);
       if (!("ok" in out) || !out.ok) {
         return Response.json(out, { status: out.status });
@@ -561,14 +621,10 @@ export async function POST(request: Request) {
           large,
           engine,
         });
-        const raw = await generateWithFallback(
-          prompt,
-          system,
-          (text) => send({ type: "delta", text }),
-          (msg) => send({ type: "status", message: msg, mode }),
-          maxTokens,
-          engine,
-        );
+        const raw = await generateWithQualityLoop({
+          onChunk: (text) => send({ type: "delta", text }),
+          onStatus: (msg) => send({ type: "status", message: msg, mode }),
+        });
 
         const out = finish(raw);
         if (!("ok" in out) || !out.ok) {

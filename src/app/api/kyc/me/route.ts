@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { normalizeDrPhone } from "@/lib/billing";
+import { openSensitive } from "@/lib/crypto-aes";
 import {
   kycIsReady,
   kycStatusLabel,
@@ -11,6 +11,16 @@ export const runtime = "nodejs";
 
 const SELECT =
   "id, full_name, phone, city, account_type, id_doc_type, id_doc_number, nif, rccm, kyc_status, kyc_submitted_at, kyc_verified_at";
+
+function revealKycProfile(profile: KycProfile | null): KycProfile | null {
+  if (!profile) return null;
+  return {
+    ...profile,
+    id_doc_number: openSensitive(profile.id_doc_number),
+    nif: openSensitive(profile.nif),
+    rccm: openSensitive(profile.rccm),
+  };
+}
 
 export async function GET(request: Request) {
   const auth = await requireUser(request);
@@ -37,7 +47,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const profile = (data as KycProfile | null) ?? null;
+  const profile = revealKycProfile((data as KycProfile | null) ?? null);
   return NextResponse.json({
     ok: true,
     profile,

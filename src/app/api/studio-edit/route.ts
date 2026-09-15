@@ -9,8 +9,23 @@ import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
 import { resolveEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
+import {
+  formatStudioHistory,
+  formatStudioWorkspaceContext,
+  sanitizeStudioHistory,
+  sanitizeStudioWorkspace,
+} from "@/lib/studio-context";
+import {
+  agentSystemBlock,
+  resolveOkapiAgent,
+} from "@/lib/studio-agents";
+import {
+  STUDIO_FILE_IDS,
+  type StudioFileId,
+} from "@/lib/studio-files";
 
 export const runtime = "nodejs";
+export const maxDuration = 90;
 
 const FILE_HINTS: Record<string, string> = {
   "app.html": "Complete single-file HTML document (start with <!DOCTYPE html>).",
@@ -35,6 +50,10 @@ type Body = {
   language?: string;
   content?: string;
   engine?: string;
+  agentId?: string;
+  sector?: string;
+  workspace?: unknown;
+  history?: unknown;
 };
 
 function stripFences(text: string) {
@@ -43,19 +62,71 @@ function stripFences(text: string) {
   return (fenced?.[1] ?? trimmed).trim();
 }
 
-function buildSystem(fileId: string, language: string) {
+function extractJsonObject(raw: string): Record<string, unknown> | null {
+  const cleaned = stripFences(raw);
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1)) as Record<
+          string,
+          unknown
+        >;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+/** Prefer multi-file JSON when the brief clearly spans several artifacts. */
+function prefersMultiFile(instruction: string): boolean {
+  const m = instruction.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  return /\b(plusieurs fichiers|tous les fichiers|partout|coherent|cohérence|et le sql|et l'api|et l api|et react|et next|html et|sql et|schema et|api et|mise a jour globale|synchronis|aligne|aligner)\b/i.test(
+    m,
+  );
+}
+
+function buildSystem(
+  fileId: string,
+  language: string,
+  multiBias: boolean,
+  agentBlock: string,
+) {
   const hint = FILE_HINTS[fileId] || `Source file (${language}).`;
   return `You are Okapi Studio AI (MMC SARL). You edit code inside Okapi Studio.
+${agentBlock}
+OUTPUT — choose ONE format:
+
+A) SINGLE FILE (only the active file changes):
+Return ONLY the full updated file content. No markdown fences. No JSON.
+
+B) MULTI FILE (2+ files must change for consistency — e.g. HTML + SQL + API):
+Return ONLY valid JSON:
+{
+  "note": "Court résumé FR des fichiers touchés",
+  "files": {
+    "app.html": "...full content...",
+    "schema.sql": "...",
+    "api.ts": "..."
+  }
+}
+Include every file you change (full content each). Allowed keys: ${STUDIO_FILE_IDS.join(", ")}.
 
 Rules:
-- Return ONLY the full updated file content for the active file.
-- No markdown fences, no explanations before/after the code.
 - Keep the user's intent. Improve or create code as asked.
-- Never name third-party AI/cloud vendors in comments or UI strings (say Okapi / MMC SARL).
-- Do not embed secrets, API keys, tokens, or credentials.
-- Code is produced for the Okapi user project; keep it clean and professional.
-- File target: ${fileId}
-- Expected format: ${hint}
+- Prefer B when the change touches data model, API contracts, or mirrored UI (React/Next/HTML).
+- Prefer A for local UI/copy tweaks on the active file only.
+${multiBias ? "- This request likely needs MULTI FILE (format B)." : ""}
+- Use WORKSPACE CONTEXT to stay consistent with sibling files.
+- Use AGENT HISTORY for continuity.
+- Never name third-party AI/cloud vendors (say Okapi / MMC SARL).
+- Do not embed secrets or API keys.
+- Active file default target: ${fileId} (${hint})
 - Prefer French for UI strings / README when the user writes in French.`;
 }
 
@@ -63,6 +134,7 @@ async function complete(opts: {
   system: string;
   user: string;
   engine: ReturnType<typeof resolveEngine>;
+  maxTokens: number;
 }) {
   const provider = pickLlmProvider();
   if (!provider) throw new Error(missingLlmMessage());
@@ -71,7 +143,7 @@ async function complete(opts: {
     return openAiComplete({
       system: opts.system,
       user: opts.user,
-      maxTokens: 7000,
+      maxTokens: opts.maxTokens,
       engine: opts.engine,
     });
   }
@@ -79,11 +151,26 @@ async function complete(opts: {
     return openRouterComplete({
       system: opts.system,
       user: opts.user,
-      maxTokens: 7000,
+      maxTokens: opts.maxTokens,
       engine: opts.engine,
     });
   }
   throw new Error(missingLlmMessage());
+}
+
+function parseMultiFiles(
+  parsed: Record<string, unknown>,
+): { fileId: StudioFileId; content: string }[] {
+  const filesRaw = parsed.files;
+  if (!filesRaw || typeof filesRaw !== "object") return [];
+  const out: { fileId: StudioFileId; content: string }[] = [];
+  for (const id of STUDIO_FILE_IDS) {
+    const value = (filesRaw as Record<string, unknown>)[id];
+    if (typeof value === "string" && value.trim()) {
+      out.push({ fileId: id, content: value.trim() });
+    }
+  }
+  return out;
 }
 
 export async function POST(request: Request) {
@@ -118,32 +205,112 @@ export async function POST(request: Request) {
   const language = body?.language?.trim() || "plaintext";
   const content = (body?.content ?? "").slice(0, 400_000);
   const engine = resolveEngine(body?.engine);
-
-  const system = buildSystem(fileId, language);
+  const workspace = sanitizeStudioWorkspace(body?.workspace);
+  const history = sanitizeStudioHistory(body?.history);
+  const multiBias = prefersMultiFile(instruction);
+  const maxTokens = multiBias || engine === "pro" ? 12000 : 8000;
+  const agent = resolveOkapiAgent({
+    agentId: body?.agentId,
+    sector: body?.sector,
+    instruction,
+  });
+  const system = buildSystem(
+    fileId,
+    language,
+    multiBias,
+    agentSystemBlock(agent),
+  );
   const user = `Active file: ${fileLabel} (${language})
 Instruction: ${instruction}
 
-Current file content:
+AGENT HISTORY (recent):
+${formatStudioHistory(history)}
+
+WORKSPACE CONTEXT (sibling files — stay consistent):
+${formatStudioWorkspaceContext(workspace, { excludeFileId: fileId })}
+
+Current active file content:
 -----
 ${content || "(empty file — create from scratch)"}
 -----
 
-Return the FULL new file content only.`;
+Return format A (single file body) OR format B (JSON multi-file).`;
 
   try {
-    const raw = await complete({ system, user, engine });
+    const raw = await complete({ system, user, engine, maxTokens });
+    const parsed = extractJsonObject(raw);
+    const multi =
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.files &&
+      typeof parsed.files === "object"
+        ? parseMultiFiles(parsed)
+        : [];
+
+    if (multi.length >= 2) {
+      const note =
+        (typeof parsed?.note === "string" && parsed.note.trim()) ||
+        `${multi.length} fichiers proposés.`;
+      return Response.json({
+        ok: true,
+        multi: true,
+        note,
+        files: multi,
+        // Compat single-field consumers
+        fileId: multi[0]!.fileId,
+        content: multi[0]!.content,
+        usedContext: {
+          siblings: workspace.filter(
+            (f) => f.fileId !== fileId && f.content?.trim(),
+          ).length,
+          historyTurns: history.length,
+        },
+      });
+    }
+
+    // Single-file path (or JSON with exactly 1 file)
+    if (multi.length === 1) {
+      return Response.json({
+        ok: true,
+        multi: false,
+        fileId: multi[0]!.fileId,
+        content: multi[0]!.content,
+        note:
+          (typeof parsed?.note === "string" && parsed.note.trim()) ||
+          `Fichier ${multi[0]!.fileId} mis à jour.`,
+        files: multi,
+        usedContext: {
+          siblings: workspace.filter(
+            (f) => f.fileId !== fileId && f.content?.trim(),
+          ).length,
+          historyTurns: history.length,
+        },
+      });
+    }
+
     const next = stripFences(raw);
-    if (!next) {
+    if (!next || next.startsWith("{")) {
       return Response.json(
-        { error: "L’IA n’a renvoyé aucun code. Réessaie." },
+        { error: "L’IA n’a renvoyé aucun code exploitable. Réessaie." },
         { status: 502 },
       );
     }
+
     return Response.json({
       ok: true,
+      multi: false,
       fileId,
       content: next,
       note: `Fichier ${fileLabel} mis à jour.`,
+      files: [{ fileId, content: next }],
+      agentId: agent.id,
+      agentLabel: agent.label,
+      usedContext: {
+        siblings: workspace.filter(
+          (f) => f.fileId !== fileId && f.content?.trim(),
+        ).length,
+        historyTurns: history.length,
+      },
     });
   } catch (err) {
     return Response.json({ error: friendlyLlmError(err) }, { status: 502 });

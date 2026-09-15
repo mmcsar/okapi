@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPlan } from "@/lib/billing";
+import { safeEqualString } from "@/lib/crypto-aes";
 import { getSupabaseAdmin, isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import { assertBodySize } from "@/lib/security";
 
@@ -20,13 +21,13 @@ export async function POST(request: Request) {
     status?: "paid" | "failed";
   } | null;
 
-  const secret = process.env.OKAPI_BILLING_WEBHOOK_SECRET?.trim();
-  const headerSecret = request.headers.get("x-okapi-billing-secret")?.trim();
-  const adminCode = process.env.OKAPI_ADMIN_CODE?.trim();
-  const okSecret = Boolean(secret && headerSecret && headerSecret === secret);
-  const okAdmin = Boolean(
-    adminCode && body?.adminCode && body.adminCode === adminCode,
-  );
+  const secret = process.env.OKAPI_BILLING_WEBHOOK_SECRET?.trim() || "";
+  const headerSecret = request.headers.get("x-okapi-billing-secret")?.trim() || "";
+  const adminCode = process.env.OKAPI_ADMIN_CODE?.trim() || "";
+  const bodyAdmin = body?.adminCode?.trim() || "";
+
+  const okSecret = Boolean(secret && headerSecret && safeEqualString(headerSecret, secret));
+  const okAdmin = Boolean(adminCode && bodyAdmin && safeEqualString(bodyAdmin, adminCode));
 
   if (!okSecret && !okAdmin) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });

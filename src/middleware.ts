@@ -25,7 +25,8 @@ export function middleware(request: NextRequest) {
       pathname.startsWith("/api/admin") ||
       pathname.startsWith("/api/projects") ||
       pathname.startsWith("/api/billing") ||
-      pathname.startsWith("/api/kyc");
+      pathname.startsWith("/api/kyc") ||
+      pathname.startsWith("/api/apps");
 
     const limit = isLlm ? 40 : isAuthHeavy ? 120 : 200;
     const windowMs = 60_000;

@@ -1,11 +1,15 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { verifyAdminSessionToken } from "@/lib/crypto-aes";
 
-const COOKIE = "okapi_admin_session";
+export const ADMIN_COOKIE = "okapi_admin_session";
 
 export async function requireAdmin() {
   const jar = await cookies();
-  if (jar.get(COOKIE)?.value !== "1") {
+  const token = jar.get(ADMIN_COOKIE)?.value;
+  const session = verifyAdminSessionToken(token);
+
+  if (!session) {
     return {
       error: NextResponse.json(
         { error: "Accès admin requis." },
@@ -13,5 +17,5 @@ export async function requireAdmin() {
       ),
     } as const;
   }
-  return { ok: true as const };
+  return { ok: true as const, session };
 }
