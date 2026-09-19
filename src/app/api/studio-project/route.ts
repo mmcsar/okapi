@@ -4,6 +4,7 @@ import {
   checkAndConsumeQuota,
   quotaExceededResponse,
   quotaKeyFromRequest,
+  releaseGenerateSlot,
 } from "@/lib/llm-quota";
 import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
@@ -23,6 +24,11 @@ import {
   agentSystemBlock,
   resolveOkapiAgent,
 } from "@/lib/studio-agents";
+import {
+  intelligenceSystemBlock,
+  loadUserIntelligenceContext,
+} from "@/lib/okapi-intelligence";
+import { getUserFromAuthHeader } from "@/lib/supabase";
 import {
   STUDIO_FILE_IDS,
   type StudioFileId,
@@ -80,6 +86,7 @@ async function complete(opts: {
   user: string;
   engine: ReturnType<typeof resolveEngine>;
   maxTokens: number;
+  onChunk?: (text: string) => void;
 }) {
   const provider = pickLlmProvider();
   if (!provider) throw new Error(missingLlmMessage());
@@ -90,6 +97,7 @@ async function complete(opts: {
       user: opts.user,
       maxTokens: opts.maxTokens,
       engine: opts.engine,
+      onChunk: opts.onChunk,
     });
   }
   if (provider === "openrouter") {
@@ -98,24 +106,64 @@ async function complete(opts: {
       user: opts.user,
       maxTokens: opts.maxTokens,
       engine: opts.engine,
+      onChunk: opts.onChunk,
     });
   }
   throw new Error(missingLlmMessage());
 }
 
+/** Batch token deltas so NDJSON stays light (~12 flush/s). */
+function makeDeltaBatcher(onDelta: (text: string) => void) {
+  let buf = "";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (!buf) return;
+    const piece = buf;
+    buf = "";
+    onDelta(piece);
+  };
+  return {
+    push(text: string) {
+      buf += text;
+      if (buf.length >= 120) {
+        flush();
+        return;
+      }
+      if (!timer) {
+        timer = setTimeout(flush, 80);
+      }
+    },
+    flush,
+  };
+}
+
 function buildSystem(large: boolean, engine: string, agentBlock: string) {
-  const scale = large
-    ? `SCALE — GRAND PROJET (engine=${engine}):
+  const leanFlash = large && engine === "flash";
+  const scale = leanFlash
+    ? `SCALE — PROJET MÉTIER COMPLET mais COMPACT (engine=flash):
+- Priorité: app.html utilisable en Preview (3–5 écrans max), Tailwind CDN, mobile-first RDC.
+- Inclure aussi: App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md — versions courtes mais cohérentes.
+- WhatsApp + Mobile Money + prix CDF quand c’est une boutique / vente.
+- window.Okapi.list/create pour listes/formulaires.
+- PAS de Flutter / Python / React Native sauf demande explicite.
+- Garde chaque fichier raisonnablement court pour finir le JSON sans coupure.`
+    : large
+      ? `SCALE — GRAND PROJET (engine=${engine}):
 - Ship a real product skeleton for RDC businesses (CRM, boutique, école, clinique, flotte…).
 - app.html: multi-screen SPA (nav + at least 4–6 views/modules), Tailwind CDN, mobile-first.
-- App.tsx + app/page.tsx: mirror the same product structure (usable stubs, not placeholders).
+- App.tsx + app/page.tsx + package.json: mirror the same product (Next/React runnable locally).
 - schema.sql: several related tables, indexes, RLS policies, seed comments.
 - api.ts: several route stubs (CRUD + auth/session where relevant).
-- README.md: architecture modules + how to run in Okapi Studio.
-- Optional App.native.tsx / main.py / main.dart only if they clearly help.
+- README.md: architecture + how to run Preview Okapi AND local Next/Flutter/Python.
+- When Flutter is useful: ALWAYS include both main.dart AND pubspec.yaml (real Flutter project).
+- When Python backend is useful: ALWAYS include main.py AND requirements.txt.
 - Think end-to-end: list → detail → form → empty states → WhatsApp / Mobile Money hooks when useful.`
-    : `SCALE — projet standard:
-- Complete, lean product: solid HTML + React + SQL + API + README.
+      : `SCALE — projet standard:
+- Complete, lean product: solid HTML + React + SQL + API + README + package.json.
 - At least 2–3 screens in HTML. Code must run in Preview.`;
 
   return `You are Okapi Studio (MMC SARL) — senior product engineer and coding coach for builders in DR Congo.
@@ -132,14 +180,18 @@ Return ONLY valid JSON (no markdown outside JSON):
     "app.html": "<!DOCTYPE html>...",
     "App.tsx": "...",
     "app/page.tsx": "...",
+    "package.json": "{ ... }",
     "schema.sql": "...",
     "api.ts": "...",
     "README.md": "..."
   }
 }
 
-Mandatory files for a complete app: app.html, App.tsx, app/page.tsx, schema.sql, api.ts, README.md.
-Optional: App.native.tsx, main.py, main.dart when relevant.
+Mandatory files for a complete app: app.html, App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md.
+Optional stacks (when relevant — always ship companion manifests):
+- Flutter: main.dart + pubspec.yaml (never main.dart alone)
+- Python: main.py + requirements.txt (never main.py alone)
+- React Native: App.native.tsx
 
 Rules:
 1. ${scale}
@@ -150,13 +202,17 @@ Rules:
 6. UI copy in the user's language (French if they write French).
 7. Every file must be substantial and coherent with the others — no empty stubs, no lorem-only pages.
 8. Prefer REAL Okapi data via window.Okapi (not localStorage demos) when building interactive lists/forms:
-   - await Okapi.list('products'|'orders'|'patients'|…)
-   - await Okapi.create(collection, data)
+   - await Okapi.list('products'|'orders'|'patients'|…) → flat rows [{ id, ...fields }] (never row.data)
+   - await Okapi.create(collection, data) → same flat shape
    - await Okapi.update(id, data) / Okapi.remove(id)
-   The Preview injects window.Okapi automatically when the project is saved & user is logged in.
+   - If list is empty: show empty state AND seed 1–2 demo rows with create on first load
+   Preview injects window.Okapi always (local memory if not saved; cloud after Sauver).
 9. Always finish JSON completely — never truncate mid-string.
 10. Follow the AGENT MÉTIER product rules above strictly (screens, SQL, API, RDC payments).
-11. In README explain: données réelles = API Okapi / base Okapi (pas localStorage).`;
+11. In README explain: Preview = base Okapi ; Next = npm i && npm run dev ; Flutter = flutter pub get ; Python = pip install -r requirements.txt.
+12. package.json must be valid JSON with name, scripts (dev/build), and dependencies for the React/Next stubs.
+13. pubspec.yaml must be valid YAML with name, environment sdk, and flutter dependencies when Flutter is included.
+14. requirements.txt must list real pip packages (one per line) when Python is included.`;
 }
 
 function parseProjectFiles(
@@ -194,6 +250,7 @@ async function runStudioProject(opts: {
   workspace: ReturnType<typeof sanitizeStudioWorkspace>;
   history: ReturnType<typeof sanitizeStudioHistory>;
   onStatus?: (event: Extract<StudioStreamEvent, { type: "status" }>) => void;
+  onDelta?: (text: string) => void;
 }): Promise<ProjectResult> {
   const {
     instruction,
@@ -205,10 +262,17 @@ async function runStudioProject(opts: {
     workspace,
     history,
     onStatus,
+    onDelta,
   } = opts;
-  const maxTokens = large ? 16000 : 12000;
+  const maxTokens =
+    large && engine === "pro"
+      ? 12000
+      : large
+        ? 6000
+        : 5000;
   const system = buildSystem(large, engine, agentBlock);
   const total = 4;
+  const delta = onDelta ? makeDeltaBatcher(onDelta) : null;
 
   const user = `Build a COMPLETE Okapi Studio project from this brief.
 Aim for coach-level quality: coherent modules, real UI, SQL + API aligned with the product.
@@ -242,7 +306,7 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
 
   onStatus?.({
     type: "status",
-    message: "Génération des fichiers (HTML, React, SQL, API)…",
+    message: "Écriture du code en direct…",
     step: 2,
     total,
     large,
@@ -254,7 +318,9 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
     user,
     engine,
     maxTokens,
+    onChunk: delta ? (t) => delta.push(t) : undefined,
   });
+  delta?.flush();
   let repaired = false;
 
   onStatus?.({
@@ -270,10 +336,13 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
   let files = parsed ? parseProjectFiles(parsed) : [];
   let issues = assessStudioProjectFiles(files, { large });
 
-  if (
-    (!parsed || files.length === 0 || shouldRepairStudioProject(issues)) &&
-    raw.trim()
-  ) {
+  const needsRepair =
+    !parsed ||
+    files.length === 0 ||
+    !files.some((f) => f.fileId === "app.html") ||
+    (shouldRepairStudioProject(issues) && engine === "pro");
+
+  if (needsRepair && raw.trim()) {
     if (!parsed || files.length === 0) {
       issues = [
         {
@@ -305,7 +374,13 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
       }),
       engine,
       maxTokens,
+      onChunk: delta
+        ? (t) => {
+            delta.push(t);
+          }
+        : undefined,
     });
+    delta?.flush();
     repaired = true;
     parsed = extractJsonObject(raw);
     files = parsed ? parseProjectFiles(parsed) : [];
@@ -316,7 +391,7 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
     throw new Error("Réponse projet invalide. Réessaie.");
   }
 
-  if (files.length === 0) {
+  if (files.length === 0 || !files.some((f) => f.fileId === "app.html")) {
     throw new Error("Projet vide. Reformule ta demande.");
   }
 
@@ -357,9 +432,6 @@ export async function POST(request: Request) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate");
-  if (!quota.ok) return quotaExceededResponse(quota);
-
   const body = (await request.json().catch(() => null)) as Body | null;
   const instruction = body?.instruction?.trim();
   if (!instruction) {
@@ -372,6 +444,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "Instruction trop longue." }, { status: 400 });
   }
 
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate");
+  if (!quota.ok) return quotaExceededResponse(quota);
+
   const engine = resolveEngine(body?.engine);
   const large = wantsLargeProject(instruction) || engine === "pro";
   const hintTitle = body?.title?.trim();
@@ -383,7 +458,19 @@ export async function POST(request: Request) {
     sector: body?.sector,
     instruction,
   });
-  const agentBlock = agentSystemBlock(agent);
+  let agentBlock = agentSystemBlock(agent);
+  try {
+    const session = await getUserFromAuthHeader(request);
+    if (session) {
+      const memory = await loadUserIntelligenceContext(
+        session.supabase,
+        session.user.id,
+      );
+      agentBlock += intelligenceSystemBlock(memory);
+    }
+  } catch {
+    // invité OK
+  }
 
   if (!wantStream) {
     try {
@@ -409,6 +496,8 @@ export async function POST(request: Request) {
       });
     } catch (err) {
       return Response.json({ error: friendlyLlmError(err) }, { status: 502 });
+    } finally {
+      releaseGenerateSlot();
     }
   }
 
@@ -429,7 +518,11 @@ export async function POST(request: Request) {
           workspace,
           history,
           onStatus: (s) => send(s),
+          onDelta: (text) => send({ type: "delta", text }),
         });
+        for (const f of result.files) {
+          send({ type: "file", fileId: f.fileId, content: f.content });
+        }
         send({
           type: "done",
           title: result.title,
@@ -442,6 +535,7 @@ export async function POST(request: Request) {
       } catch (err) {
         send({ type: "error", error: friendlyLlmError(err) });
       } finally {
+        releaseGenerateSlot();
         controller.close();
       }
     },

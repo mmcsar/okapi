@@ -22,7 +22,10 @@ const LARGE_PROJECT_RE =
   /\b(grand projet|gros projet|projet complet|plateforme|saas|crm|erp|dashboard|tableau de bord|marketplace|ecommerce|e-commerce|multi[- ]?page|plusieurs pages|module|modules|admin panel|back[- ]?office|gestion (des |de |d')?(clients|stocks|ventes|rh|employ[eé]s|ecole|[eé]cole|hopital|h[oô]pital|clinique|flotte|boutique|restaurant|pharmacie)|systeme de|syst[eè]me de|mini[- ]?erp|pos|caisse)\b/i;
 
 const STUDIO_SCAFFOLD_RE =
-  /\b(projet complet|grand projet|gros projet|scaffold|g[eé]n[eè]re(r)? (tout|le projet|une? app|un site)|cr[eé]e(r)? (un |une )?(projet|app|application|site|plateforme|crm|saas|dashboard|boutique)|build (a |an |the )?full|fais[- ]moi (un |une )?(projet|crm|saas|dashboard|plateforme|boutique|app))\b/i;
+  /\b(projet complet|grand projet|gros projet|scaffold|g[eé]n[eè]re(r)? (tout|le projet|une? app|un site)|cr[eé]e(r)? (un |une )?(projet|app|application|site|plateforme|crm|saas|dashboard|boutique)|build (a |an |the )?full|fais[- ]moi (un |une )?(projet|crm|saas|dashboard|plateforme|boutique|app)|nouveau projet|from scratch|parti de z[eé]ro)\b/i;
+
+const STUDIO_EDIT_ONLY_RE =
+  /\b(change|modifie|corrige|renomme|ajoute (un |une )?(bouton|couleur|titre|texte|style)|fixe|fix|supprime (la |le |l')?ligne|refactor (ce|cette)|dans ce fichier|seulement (le |la |l')?)\b/i;
 
 /** User clearly asks for backend / DB. */
 export function wantsFullstack(message: string): boolean {
@@ -38,7 +41,7 @@ export function wantsLargeProject(message: string): boolean {
 
 /**
  * Studio Agent should scaffold a multi-file project (not a single-file tweak).
- * If the workspace is empty, broader “crée une app…” intents also scaffold.
+ * Empty workspace → almost always full project, unless clearly an edit.
  */
 export function wantsStudioScaffold(
   message: string,
@@ -48,9 +51,21 @@ export function wantsStudioScaffold(
   if (wantsLargeProject(message)) return true;
   if (STUDIO_SCAFFOLD_RE.test(m)) return true;
   if (!opts?.hasExistingFiles) {
-    return /\b(cr[eé]e|creer|fais|g[eé]n[eè]re|build|construire).{0,48}\b(app|site|projet|crm|saas|boutique|[eé]cole|clinique|dashboard|plateforme)\b/i.test(
-      m,
-    );
+    // Workspace vide : toute demande substantielle = projet complet
+    if (STUDIO_EDIT_ONLY_RE.test(m) && m.length < 80) return false;
+    if (
+      /\b(cr[eé]e|creer|fais|g[eé]n[eè]re|build|construire|lance|d[eé]marre).{0,64}\b(app|site|projet|crm|saas|boutique|[eé]cole|clinique|dashboard|plateforme|page|landing)\b/i.test(
+        m,
+      )
+    ) {
+      return true;
+    }
+    // Ex: « boutique mode Kinshasa avec panier » sans verbe explicite
+    if (m.trim().length >= 18 && !STUDIO_EDIT_ONLY_RE.test(m)) {
+      return /\b(app|site|projet|crm|saas|boutique|[eé]cole|clinique|dashboard|plateforme|landing|vitrine|portfolio|restaurant|pharmacie|flotte)\b/i.test(
+        m,
+      );
+    }
   }
   return false;
 }

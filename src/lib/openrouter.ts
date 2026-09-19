@@ -29,6 +29,12 @@ export function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
 }
 
+function requireOpenRouterKey(): string {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) throw new Error("OPENROUTER_API_KEY manquante");
+  return key;
+}
+
 export function openRouterModel(
   engine: OkapiEngine = "flash",
   opts?: { vision?: boolean },
@@ -95,61 +101,165 @@ async function openRouterFetch(opts: {
   });
 }
 
-/** Non-streaming completion (good for HTML generate). */
+/** Read OpenRouter SSE body → full text, optional per-delta callback. */
+async function consumeOpenRouterSse(
+  body: ReadableStream<Uint8Array>,
+  onChunk?: (text: string) => void,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  const reader = body.getReader();
+  let buffer = "";
+  let assembled = "";
+  /** Dernier snapshot cumulatif (certains modèles renvoient le texte entier à chaque chunk). */
+  let lastSnapshot = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload) as {
+          choices?: {
+            delta?: { content?: string | null; text?: string | null };
+            message?: { content?: string | null };
+            text?: string;
+          }[];
+          error?: { message?: string };
+        };
+        if (json.error?.message) {
+          throw new Error(json.error.message);
+        }
+        const piece =
+          json.choices?.[0]?.delta?.content ??
+          json.choices?.[0]?.delta?.text ??
+          json.choices?.[0]?.message?.content ??
+          json.choices?.[0]?.text ??
+          "";
+        if (!piece || typeof piece !== "string") continue;
+
+        let neu = piece;
+        // Snapshot cumulatif : n’émettre que le suffixe nouveau
+        if (lastSnapshot && piece.startsWith(lastSnapshot) && piece.length > lastSnapshot.length) {
+          neu = piece.slice(lastSnapshot.length);
+          lastSnapshot = piece;
+        } else if (lastSnapshot && lastSnapshot.startsWith(piece) && piece.length < lastSnapshot.length) {
+          // Chunk plus court que le snapshot = bruit, ignorer
+          neu = "";
+        } else {
+          // Delta classique
+          lastSnapshot += piece;
+        }
+        if (neu) {
+          assembled += neu;
+          onChunk?.(neu);
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message && !err.message.includes("JSON")) {
+          throw err;
+        }
+        /* skip bad chunk */
+      }
+    }
+  }
+
+  return assembled.trim();
+}
+
+/** Completion — stream tokens via onChunk when provided (Agent live code). */
 export async function openRouterComplete(opts: {
   system: string;
   user: string;
   maxTokens?: number;
   engine?: OkapiEngine;
+  onChunk?: (text: string) => void;
 }) {
-  const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) throw new Error("OPENROUTER_API_KEY manquante");
+  const key = requireOpenRouterKey();
 
   const primary = openRouterModel(opts.engine ?? "flash");
   const messages: ChatMessage[] = [
     { role: "system", content: opts.system },
     { role: "user", content: opts.user },
   ];
-  const maxTokens = opts.maxTokens ?? 8192;
+  // Free models: plafonner — trop de tokens → refus / réponse vide fréquente
+  const rawMax = opts.maxTokens ?? 8192;
+  const maxTokens =
+    /:free$/i.test(primary) || primary === FREE_FALLBACK_MODEL
+      ? Math.min(rawMax, 6000)
+      : rawMax;
+  const wantStream = Boolean(opts.onChunk);
 
-  let res = await openRouterFetch({
-    key,
-    model: primary,
-    messages,
-    maxTokens,
-  });
-
-  let data = (await res.json().catch(() => null)) as {
-    error?: { message?: string };
-    choices?: { message?: { content?: string } }[];
-  } | null;
-
-  if (
-    !res.ok &&
-    isPaymentBlocked(res.status, data?.error?.message) &&
-    primary !== FREE_FALLBACK_MODEL
-  ) {
-    res = await openRouterFetch({
+  async function once(model: string, stream: boolean): Promise<string> {
+    let res = await openRouterFetch({
       key,
-      model: FREE_FALLBACK_MODEL,
+      model,
       messages,
       maxTokens,
+      stream,
     });
-    data = (await res.json().catch(() => null)) as typeof data;
-  }
 
-  if (!res.ok) {
-    throw new Error(
-      data?.error?.message ||
-        (res.status === 402
-          ? "Le crédit IA Okapi est épuisé."
-          : res.status === 429
-            ? "Okapi reçoit beaucoup de demandes. Réessaie dans un instant."
+    if (!res.ok) {
+      const failBody = (await res.json().catch(() => null)) as {
+        error?: { message?: string };
+      } | null;
+      const msg = failBody?.error?.message || "";
+      if (
+        isPaymentBlocked(res.status, msg) &&
+        model !== FREE_FALLBACK_MODEL
+      ) {
+        return once(FREE_FALLBACK_MODEL, stream);
+      }
+      throw new Error(
+        msg ||
+          (res.status === 402
+            ? "Le crédit IA Okapi est épuisé."
+            : res.status === 429
+              ? "Okapi reçoit beaucoup de demandes. Réessaie dans un instant."
+              : `Erreur IA Okapi (${res.status})`),
+      );
+    }
+
+    if (stream) {
+      if (!res.body) throw new Error("Okapi a renvoyé une réponse vide.");
+      return consumeOpenRouterSse(res.body, opts.onChunk);
+    }
+
+    const data = (await res.json().catch(() => null)) as {
+      error?: { message?: string };
+      choices?: { message?: { content?: string } }[];
+    } | null;
+    if (!res.ok) {
+      throw new Error(
+        data?.error?.message ||
+          (res.status === 402
+            ? "Le crédit IA Okapi est épuisé."
             : `Erreur IA Okapi (${res.status})`),
-    );
+      );
+    }
+    return data?.choices?.[0]?.message?.content?.trim() || "";
   }
 
-  const text = data?.choices?.[0]?.message?.content?.trim() || "";
+  let text = await once(primary, wantStream);
+
+  // Stream vide → 1 retry non-stream (souvent plus fiable sur :free)
+  if (!text && wantStream) {
+    text = await once(primary, false);
+    if (text && opts.onChunk) opts.onChunk(text);
+  }
+
+  // Toujours vide → autre modèle free
+  if (!text && primary !== FREE_FALLBACK_MODEL) {
+    text = await once(FREE_FALLBACK_MODEL, false);
+    if (text && opts.onChunk) opts.onChunk(text);
+  }
+
   if (!text) throw new Error("Okapi a renvoyé une réponse vide.");
   return text;
 }
@@ -161,8 +271,7 @@ export async function streamOpenRouterChat(opts: {
   messages: ChatMessage[];
   vision?: boolean;
 }): Promise<Response> {
-  const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) throw new Error("OPENROUTER_API_KEY manquante");
+  const key = requireOpenRouterKey();
 
   const vision = Boolean(opts.vision);
   const primary = openRouterModel(opts.engine ?? "flash", { vision });
@@ -258,13 +367,11 @@ export async function streamOpenRouterChat(opts: {
                 json.choices?.[0]?.message?.content;
               if (!piece) continue;
 
-              // Certains modèles envoient le texte cumulatif à chaque chunk
-              // (pas un delta) → on n’émet que la partie nouvelle.
               let neu = piece;
-              if (assembled && piece.startsWith(assembled)) {
+              if (assembled && piece.startsWith(assembled) && piece.length > assembled.length) {
                 neu = piece.slice(assembled.length);
                 assembled = piece;
-              } else if (assembled && assembled.endsWith(piece)) {
+              } else if (assembled && assembled.startsWith(piece) && piece.length < assembled.length) {
                 neu = "";
               } else {
                 assembled += piece;

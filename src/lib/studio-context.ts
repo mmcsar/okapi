@@ -20,6 +20,7 @@ const MANDATORY: StudioFileId[] = [
   "app.html",
   "App.tsx",
   "app/page.tsx",
+  "package.json",
   "schema.sql",
   "api.ts",
   "README.md",
@@ -168,6 +169,16 @@ export function assessStudioProjectFiles(
           detail: "app.html has unclosed <script> tags.",
         });
       }
+      const usesOkapi =
+        /window\.Okapi|Okapi\.(list|create|update|remove)\s*\(/i.test(html);
+      const usesLocalStorage = /\blocalStorage\b/i.test(html);
+      if (usesLocalStorage && !usesOkapi) {
+        issues.push({
+          code: "localstorage_without_okapi",
+          detail:
+            "app.html uses localStorage — prefer window.Okapi.list/create for live Preview cloud.",
+        });
+      }
       if (opts?.large && (html.match(/\b(nav|tab|view|écran|section)/gi) || []).length < 2) {
         // soft signal only — don't block alone; skip for repair unless paired
       }
@@ -182,6 +193,42 @@ export function assessStudioProjectFiles(
     });
   }
 
+  const pkg = byId.get("package.json")?.trim() || "";
+  if (pkg) {
+    try {
+      const parsed = JSON.parse(pkg) as { name?: string; scripts?: unknown };
+      if (!parsed || typeof parsed !== "object") {
+        issues.push({
+          code: "package_json_invalid",
+          detail: "package.json is not valid JSON object.",
+        });
+      }
+    } catch {
+      issues.push({
+        code: "package_json_invalid",
+        detail: "package.json is not valid JSON.",
+      });
+    }
+  }
+
+  const hasFlutter = Boolean(byId.get("main.dart")?.trim());
+  const hasPubspec = Boolean(byId.get("pubspec.yaml")?.trim());
+  if (hasFlutter && !hasPubspec) {
+    issues.push({
+      code: "missing_pubspec_yaml",
+      detail: "Flutter main.dart requires pubspec.yaml for a real project.",
+    });
+  }
+
+  const hasPython = Boolean(byId.get("main.py")?.trim());
+  const hasReqs = Boolean(byId.get("requirements.txt")?.trim());
+  if (hasPython && !hasReqs) {
+    issues.push({
+      code: "missing_requirements_txt",
+      detail: "Python main.py requires requirements.txt for a real project.",
+    });
+  }
+
   return issues;
 }
 
@@ -193,6 +240,10 @@ export function shouldRepairStudioProject(issues: StudioQualityIssue[]) {
       "html_too_short",
       "html_unclosed_script",
       "sql_too_short",
+      "package_json_invalid",
+      "missing_pubspec_yaml",
+      "missing_requirements_txt",
+      "localstorage_without_okapi",
     ].includes(i.code) || i.code.startsWith("missing_"),
   );
 }
@@ -214,9 +265,12 @@ ${list}
 
 Rules:
 1. Return ONLY valid JSON with title, note, files (same schema as before).
-2. Include ALL mandatory files: app.html, App.tsx, app/page.tsx, schema.sql, api.ts, README.md.
-3. Fix truncation / missing sections. Prefer completing previous content over rewriting from scratch.
-4. app.html must be a full document ending with </html>.
+2. Include ALL mandatory files: app.html, App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md.
+3. If main.dart exists, also include pubspec.yaml. If main.py exists, also include requirements.txt.
+4. Fix truncation / missing sections. Prefer completing previous content over rewriting from scratch.
+5. app.html must be a full document ending with </html>.
+6. package.json must be valid JSON.
+7. Prefer window.Okapi.list/create over localStorage for interactive lists/forms.
 ${opts.titleHint ? `Suggested title: ${opts.titleHint}` : ""}
 
 Previous incomplete JSON / output:

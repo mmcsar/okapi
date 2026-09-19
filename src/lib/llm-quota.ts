@@ -12,9 +12,14 @@ type DayBucket = {
   generate: number;
 };
 
+type InFlightSlot = {
+  startedAt: number;
+};
+
 type GlobalQuotaState = {
   byKey: Map<string, DayBucket>;
-  inFlightGenerate: number;
+  /** Slots generate en cours — libérés via releaseGenerateSlot ou TTL. */
+  inFlight: InFlightSlot[];
 };
 
 declare global {
@@ -26,10 +31,18 @@ function state(): GlobalQuotaState {
   if (!globalThis.__okapiLlmQuota) {
     globalThis.__okapiLlmQuota = {
       byKey: new Map(),
-      inFlightGenerate: 0,
+      inFlight: [],
     };
   }
-  return globalThis.__okapiLlmQuota;
+  const s = globalThis.__okapiLlmQuota as GlobalQuotaState & {
+    inFlightGenerate?: number;
+  };
+  // Compat hot-reload : ancienne forme inFlightGenerate
+  if (!Array.isArray(s.inFlight)) {
+    s.inFlight = [];
+    delete s.inFlightGenerate;
+  }
+  return s;
 }
 
 function todayUtc() {
@@ -49,7 +62,18 @@ function limit(kind: Kind) {
 function maxConcurrentGenerate() {
   const n = Number(process.env.OKAPI_MAX_CONCURRENT_GENERATE);
   if (Number.isFinite(n) && n > 0) return Math.floor(n);
-  return 3;
+  // Dev local : plus large (évite faux « très sollicité » après quelques essais)
+  if (process.env.NODE_ENV !== "production") return 8;
+  return 4;
+}
+
+/** Expire les slots jamais libérés (crash stream / oubli release). */
+const SLOT_TTL_MS = 4 * 60_000;
+
+function pruneStaleSlots() {
+  const s = state();
+  const now = Date.now();
+  s.inFlight = s.inFlight.filter((slot) => now - slot.startedAt < SLOT_TTL_MS);
 }
 
 function bucketFor(key: string): DayBucket {
@@ -72,7 +96,8 @@ export function quotaKeyFromRequest(request: Request) {
     return `u:${bearer.slice(0, 16)}…${bearer.slice(-8)}`;
   }
   const fwd = request.headers.get("x-forwarded-for") || "";
-  const ip = fwd.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "anon";
+  const ip =
+    fwd.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "anon";
   return `ip:${ip}`;
 }
 
@@ -106,8 +131,9 @@ export function checkAndConsumeQuota(
   }
 
   if (kind === "generate") {
+    pruneStaleSlots();
     const s = state();
-    if (s.inFlightGenerate >= maxConcurrentGenerate()) {
+    if (s.inFlight.length >= maxConcurrentGenerate()) {
       return {
         ok: false,
         reason: "busy",
@@ -115,7 +141,7 @@ export function checkAndConsumeQuota(
           "Okapi est très sollicité. Réessaie dans quelques secondes.",
       };
     }
-    s.inFlightGenerate += 1;
+    s.inFlight.push({ startedAt: Date.now() });
     b.generate += 1;
   } else {
     b.chat += 1;
@@ -127,10 +153,14 @@ export function checkAndConsumeQuota(
 
 export function releaseGenerateSlot() {
   const s = state();
-  s.inFlightGenerate = Math.max(0, s.inFlightGenerate - 1);
+  if (s.inFlight.length > 0) {
+    s.inFlight.shift();
+  }
 }
 
-export function quotaExceededResponse(decision: Extract<QuotaDecision, { ok: false }>) {
+export function quotaExceededResponse(
+  decision: Extract<QuotaDecision, { ok: false }>,
+) {
   return Response.json(
     {
       error: decision.message,

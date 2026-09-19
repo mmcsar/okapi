@@ -45,13 +45,31 @@ create policy "app_records_insert_own"
 drop policy if exists "app_records_update_own" on public.app_records;
 create policy "app_records_update_own"
   on public.app_records for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.projects p
+      where p.id = app_records.project_id and p.user_id = auth.uid()
+    )
+  )
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.projects p
+      where p.id = project_id and p.user_id = auth.uid()
+    )
+  );
 
 drop policy if exists "app_records_delete_own" on public.app_records;
 create policy "app_records_delete_own"
   on public.app_records for delete
-  using (auth.uid() = user_id);
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.projects p
+      where p.id = app_records.project_id and p.user_id = auth.uid()
+    )
+  );
 
 grant select, insert, update, delete on public.app_records to authenticated;
 grant select on public.app_records to anon;

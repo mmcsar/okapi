@@ -14,6 +14,7 @@ const createItems: NavItem[] = [
   {
     id: "home",
     label: "Agent",
+    hint: "2 modes",
     icon: (
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="8" r="3.2" />
@@ -24,7 +25,7 @@ const createItems: NavItem[] = [
   {
     id: "studio",
     label: "Studio",
-    hint: "Code",
+    hint: "Builders",
     icon: (
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M4 5h7v14H4zM13 5h7v6h-7zM13 13h7v6h-7z" />
@@ -38,6 +39,17 @@ const createItems: NavItem[] = [
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M4 7h16v12H4z" />
         <path d="M8 7V5h8v2" />
+      </svg>
+    ),
+  },
+  {
+    id: "automations",
+    label: "Automatisations",
+    hint: "Tâches",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 8v4l2.5 1.5" />
       </svg>
     ),
   },
@@ -72,6 +84,8 @@ type SidebarProps = {
   onNewProject?: () => void;
   userLabel?: string;
   loggedIn?: boolean;
+  /** Mode Studio — rail plus étroit, coins moins soft. */
+  compact?: boolean;
 };
 
 export function Sidebar({
@@ -80,6 +94,7 @@ export function Sidebar({
   onNewProject,
   userLabel = "Invité",
   loggedIn = false,
+  compact = false,
 }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -136,8 +151,12 @@ export function Sidebar({
 
   const content = (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-3 px-1">
-        <div className="relative h-11 w-11 overflow-hidden rounded-2xl ring-1 ring-[var(--okapi-stroke)]">
+      <div className={`flex items-center gap-3 px-1 ${compact ? "px-0.5" : ""}`}>
+        <div
+          className={`relative overflow-hidden ring-1 ring-[var(--okapi-stroke)] ${
+            compact ? "h-9 w-9 rounded-xl" : "h-11 w-11 rounded-2xl"
+          }`}
+        >
           <Image
             src="/okapi-logo.png"
             alt="Logo Okapi"
@@ -147,41 +166,65 @@ export function Sidebar({
             priority
           />
         </div>
-        <div>
-          <p className="font-[family-name:var(--font-syne)] text-xl font-bold leading-none tracking-tight">
+        <div className={compact ? "min-w-0" : undefined}>
+          <p
+            className={`font-[family-name:var(--font-syne)] font-bold leading-none tracking-tight ${
+              compact ? "text-base" : "text-xl"
+            }`}
+          >
             Okapi
           </p>
-          <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.12em] text-okapi-ink/40">
-            MMC SARL
-          </p>
+          {!compact ? (
+            <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.12em] text-okapi-ink/40">
+              MMC SARL
+            </p>
+          ) : (
+            <p className="mt-0.5 truncate text-[10px] text-okapi-ink/40">Studio</p>
+          )}
         </div>
       </div>
 
       <button
         type="button"
         onClick={newChat}
-        className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-okapi-amber px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-okapi-amber-deep"
+        className={`mt-4 flex w-full items-center justify-center gap-2 bg-okapi-amber text-sm font-semibold text-white transition hover:bg-okapi-amber-deep ${
+          compact
+            ? "rounded-xl px-3 py-2.5"
+            : "mt-5 rounded-2xl px-4 py-3 shadow-sm"
+        }`}
       >
         <span className="text-base leading-none">+</span>
-        Nouvelle conversation
+        {compact ? "Nouveau" : "Nouvelle conversation"}
       </button>
 
-      <nav className="mt-5 flex-1 space-y-4" aria-label="Navigation Okapi">
-        <div className="space-y-1">
-          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-okapi-ink/35">
-            Créer
-          </p>
+      <nav
+        className={`flex-1 space-y-3 ${compact ? "mt-3" : "mt-5 space-y-4"}`}
+        aria-label="Navigation Okapi"
+      >
+        <div className="space-y-0.5">
+          {!compact ? (
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-okapi-ink/35">
+              Créer
+            </p>
+          ) : null}
           {renderNav(createItems)}
         </div>
-        <div className="space-y-1">
-          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-okapi-ink/35">
-            Compte
-          </p>
+        <div className="space-y-0.5">
+          {!compact ? (
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-okapi-ink/35">
+              Compte
+            </p>
+          ) : null}
           {renderNav(accountItems)}
         </div>
       </nav>
 
-      <div className="mt-auto rounded-2xl border border-[var(--okapi-stroke)] bg-white/55 p-1.5">
+      <div
+        className={`mt-auto border border-[var(--okapi-stroke)] bg-white/55 ${
+          compact ? "rounded-xl p-1" : "rounded-2xl p-1.5"
+        }`}
+      >
+        {!compact ? (
         <div className="flex items-center gap-2 rounded-xl bg-okapi-amber/15 px-2 py-2">
           <div className="relative h-8 w-8 overflow-hidden rounded-full">
             <Image
@@ -199,6 +242,7 @@ export function Sidebar({
             </p>
           </div>
         </div>
+        ) : null}
         <button
           type="button"
           onClick={() => go("login")}
@@ -222,7 +266,9 @@ export function Sidebar({
     <>
       <button
         type="button"
-        className="fixed left-4 top-4 z-[80] rounded-xl border border-[var(--okapi-stroke)] bg-white px-3 py-2 text-sm font-semibold shadow-md md:hidden"
+        className={`fixed z-[80] rounded-xl border border-[var(--okapi-stroke)] bg-white px-3 py-2 text-sm font-semibold shadow-md md:hidden ${
+          compact ? "left-3 top-3" : "left-4 top-4"
+        }`}
         onClick={() => setMobileOpen(true)}
       >
         Menu
@@ -237,7 +283,13 @@ export function Sidebar({
         />
       ) : null}
 
-      <aside className="relative z-[40] hidden w-[260px] shrink-0 md:flex md:flex-col md:rounded-[28px] md:border md:border-[var(--okapi-stroke)] md:bg-[var(--okapi-glass)] md:p-3.5 md:backdrop-blur-xl">
+      <aside
+        className={`relative z-[40] hidden shrink-0 md:flex md:flex-col ${
+          compact
+            ? "w-[200px] border-r border-[var(--okapi-stroke)] bg-[rgba(243,246,243,0.92)] p-2.5 backdrop-blur-md"
+            : "w-[260px] md:rounded-[28px] md:border md:border-[var(--okapi-stroke)] md:bg-[var(--okapi-glass)] md:p-3.5 md:backdrop-blur-xl"
+        }`}
+      >
         {content}
       </aside>
 

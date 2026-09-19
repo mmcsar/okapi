@@ -6,17 +6,34 @@ import { BillingPanel } from "@/components/billing-panel";
 import { HomeDashboard } from "@/components/home-dashboard";
 import { LoginPanel } from "@/components/login-panel";
 import { ProjectsPanel } from "@/components/projects-panel";
+import { ScheduledTasksPanel } from "@/components/scheduled-tasks-panel";
 import { SettingsPanel } from "@/components/settings-panel";
 import { Sidebar } from "@/components/sidebar";
 import type { OkapiProject } from "@/lib/supabase";
 
-type NavId = "home" | "studio" | "projects" | "settings" | "login" | "billing";
+type NavId =
+  | "home"
+  | "studio"
+  | "projects"
+  | "automations"
+  | "settings"
+  | "login"
+  | "billing";
 
 function parseHash(): NavId {
   if (typeof window === "undefined") return "home";
   const raw = window.location.hash.replace(/^#/, "").trim().toLowerCase();
   if (raw === "studio" || raw === "dev") return "studio";
   if (raw === "projects" || raw === "projets") return "projects";
+  if (
+    raw === "automations" ||
+    raw === "automatisations" ||
+    raw === "tasks" ||
+    raw === "taches" ||
+    raw === "tâches"
+  ) {
+    return "automations";
+  }
   if (raw === "settings" || raw === "parametres" || raw === "paramètres")
     return "settings";
   if (raw === "billing" || raw === "abonnement" || raw === "pay")
@@ -28,6 +45,7 @@ function parseHash(): NavId {
 function hashFor(id: NavId) {
   if (id === "studio") return "#studio";
   if (id === "projects") return "#projects";
+  if (id === "automations") return "#automations";
   if (id === "settings") return "#settings";
   if (id === "billing") return "#billing";
   if (id === "login") return "#login";
@@ -90,6 +108,15 @@ function HomeApp() {
         setNav("projects");
         return;
       }
+      if (
+        id === "automations" ||
+        id === "automatisations" ||
+        id === "tasks" ||
+        id === "taches"
+      ) {
+        setNav("automations");
+        return;
+      }
       if (id === "settings") {
         setNav("settings");
         return;
@@ -130,6 +157,7 @@ function HomeApp() {
 
   const sidebarActive =
     activeNav === "projects" ||
+    activeNav === "automations" ||
     activeNav === "settings" ||
     activeNav === "billing" ||
     activeNav === "studio"
@@ -138,18 +166,31 @@ function HomeApp() {
 
   const showAgentWorkspace =
     activeNav === "home" || activeNav === "studio";
+  const studioLayout = activeNav === "studio";
 
   return (
-    <div className="relative z-10 flex min-h-screen w-full flex-col gap-3 p-3 md:flex-row md:gap-2 md:p-4">
+    <div
+      className={`relative z-10 flex min-h-screen w-full flex-col md:flex-row ${
+        studioLayout
+          ? "h-dvh max-h-dvh gap-0 overflow-hidden p-0"
+          : "gap-3 p-3 md:gap-2 md:p-4"
+      }`}
+    >
       <Sidebar
         activeNav={sidebarActive}
         onNavChange={navigate}
         onNewProject={startNewProject}
         userLabel={user ? displayName : "Invité"}
         loggedIn={Boolean(user)}
+        compact={studioLayout}
       />
 
-      <div className="relative z-0 flex min-h-0 min-w-0 flex-1 flex-col gap-2 pt-12 md:pt-0">
+      <div
+        className={`relative z-0 flex min-h-0 min-w-0 flex-1 flex-col ${
+          studioLayout ? "gap-0 pt-0" : "gap-2 pt-12 md:pt-0"
+        }`}
+      >
+        {!studioLayout ? (
         <div className="flex flex-wrap items-center gap-2 md:hidden">
           <button
             type="button"
@@ -172,11 +213,7 @@ function HomeApp() {
           <button
             type="button"
             onClick={() => navigate("studio")}
-            className={`rounded-xl px-3 py-2 text-xs font-semibold ${
-              activeNav === "studio"
-                ? "bg-okapi-forest text-white"
-                : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
-            }`}
+            className="rounded-xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-xs font-semibold text-okapi-ink/70"
           >
             Studio
           </button>
@@ -191,7 +228,19 @@ function HomeApp() {
           >
             Projets
           </button>
+          <button
+            type="button"
+            onClick={() => navigate("automations")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+              activeNav === "automations"
+                ? "bg-okapi-forest text-white"
+                : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
+            }`}
+          >
+            Auto
+          </button>
         </div>
+        ) : null}
 
         {activeNav === "settings" ? (
           <SettingsPanel
@@ -207,6 +256,11 @@ function HomeApp() {
           <LoginPanel
             onBack={() => navigate("home")}
             onSuccess={() => navigate("home")}
+          />
+        ) : activeNav === "automations" ? (
+          <ScheduledTasksPanel
+            onBack={() => navigate("home")}
+            onNeedLogin={() => navigate("login")}
           />
         ) : activeNav === "projects" ? (
           <ProjectsPanel

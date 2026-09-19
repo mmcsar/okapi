@@ -40,6 +40,18 @@ export function friendlyLlmError(err: unknown) {
     return "Le crédit IA Okapi est épuisé. Recharge le compte, puis réessaie.";
   }
 
+  if (/empty_response|empty response|réponse vide/i.test(msg)) {
+    return "Le moteur IA a renvoyé une réponse vide (souvent modèle gratuit saturé). Réessaie dans 10 s, ou raccourcis le brief — Agent Accueil est plus léger.";
+  }
+
+  if (/projet vide|réponse projet invalide|invalid_json|not valid project/i.test(msg)) {
+    return "Le projet généré est incomplet. Réessaie avec un brief un peu plus court, ou depuis Agent Accueil.";
+  }
+
+  if (/timeout|ETIMEDOUT|aborted|fetch failed|network|ECONNRESET/i.test(msg)) {
+    return "La génération a pris trop de temps ou le réseau a coupé. Réessaie dans quelques secondes.";
+  }
+
   if (/429|rate limit|too many requests|okapi_quota|limite du jour/i.test(msg)) {
     return "Okapi reçoit beaucoup de demandes. Recharge la page et réessaie dans un instant.";
   }

@@ -5,10 +5,13 @@ export type StudioFileId =
   | "App.tsx"
   | "App.native.tsx"
   | "app/page.tsx"
+  | "package.json"
   | "schema.sql"
   | "api.ts"
   | "main.py"
+  | "requirements.txt"
   | "main.dart"
+  | "pubspec.yaml"
   | "README.md";
 
 export type StudioArtifactKey =
@@ -16,10 +19,13 @@ export type StudioArtifactKey =
   | "react"
   | "reactNative"
   | "nextjs"
+  | "packageJson"
   | "sql"
   | "api"
   | "python"
+  | "requirements"
   | "flutter"
+  | "pubspec"
   | "readme";
 
 export type StudioFileGroup = "web" | "mobile" | "data" | "docs";
@@ -60,7 +66,7 @@ export const STUDIO_FILES: readonly StudioFileDef[] = [
     language: "typescript",
     badge: "React",
     group: "web",
-    zipPath: "App.tsx",
+    zipPath: "src/App.tsx",
     emptyHint: "React web — « crée un composant login ».",
   },
   {
@@ -72,6 +78,16 @@ export const STUDIO_FILES: readonly StudioFileDef[] = [
     group: "web",
     zipPath: "app/page.tsx",
     emptyHint: "Next.js — page App Router.",
+  },
+  {
+    id: "package.json",
+    artifactKey: "packageJson",
+    label: "package.json",
+    language: "json",
+    badge: "NPM",
+    group: "web",
+    zipPath: "package.json",
+    emptyHint: "Dépendances Next/React — généré avec le scaffold.",
   },
   {
     id: "App.native.tsx",
@@ -86,12 +102,22 @@ export const STUDIO_FILES: readonly StudioFileDef[] = [
   {
     id: "main.dart",
     artifactKey: "flutter",
-    label: "main.dart",
+    label: "lib/main.dart",
     language: "dart",
     badge: "Flutter",
     group: "mobile",
-    zipPath: "main.dart",
-    emptyHint: "Flutter — widget principal.",
+    zipPath: "lib/main.dart",
+    emptyHint: "Flutter — point d’entrée (lib/main.dart).",
+  },
+  {
+    id: "pubspec.yaml",
+    artifactKey: "pubspec",
+    label: "pubspec.yaml",
+    language: "yaml",
+    badge: "Pub",
+    group: "mobile",
+    zipPath: "pubspec.yaml",
+    emptyHint: "Manifest Flutter — obligatoire pour un vrai projet.",
   },
   {
     id: "schema.sql",
@@ -122,6 +148,16 @@ export const STUDIO_FILES: readonly StudioFileDef[] = [
     group: "data",
     zipPath: "main.py",
     emptyHint: "Backend Python / FastAPI.",
+  },
+  {
+    id: "requirements.txt",
+    artifactKey: "requirements",
+    label: "requirements.txt",
+    language: "plaintext",
+    badge: "Pip",
+    group: "data",
+    zipPath: "requirements.txt",
+    emptyHint: "Dépendances Python — généré avec le scaffold.",
   },
   {
     id: "README.md",

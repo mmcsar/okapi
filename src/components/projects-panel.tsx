@@ -146,6 +146,11 @@ export function ProjectsPanel({
           {user && !loading && !error && projects.length === 0 ? (
             <div className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-6 text-center">
               <p className="text-sm text-okapi-ink/60">Aucun projet encore.</p>
+              <p className="mt-2 text-xs text-okapi-ink/40">
+                Tu peux générer dans Studio sans compte. Pour que le projet
+                apparaisse ici : Connexion → Accepte →{" "}
+                <strong>Sauver</strong> (Ctrl+S).
+              </p>
               <button
                 type="button"
                 onClick={onCreateNew}

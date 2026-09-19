@@ -20,9 +20,18 @@ import {
   resolveOkapiAgent,
 } from "@/lib/studio-agents";
 import {
+  intelligenceSystemBlock,
+  loadUserIntelligenceContext,
+} from "@/lib/okapi-intelligence";
+import { getUserFromAuthHeader } from "@/lib/supabase";
+import {
   STUDIO_FILE_IDS,
   type StudioFileId,
 } from "@/lib/studio-files";
+import {
+  encodeStudioStreamEvent,
+  type StudioStreamEvent,
+} from "@/lib/studio-stream";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -38,9 +47,15 @@ const FILE_HINTS: Record<string, string> = {
     "PostgreSQL schema: tables, constraints, indexes, optional RLS policies. SQL only. Comments in French OK.",
   "api.ts":
     "Backend API stubs in TypeScript (REST handlers or Next.js route.ts style). No markdown fences.",
+  "package.json":
+    "Valid package.json for Next/React (name, scripts, dependencies). JSON only, no markdown.",
+  "pubspec.yaml":
+    "Valid Flutter pubspec.yaml (name, environment, dependencies). YAML only, no markdown.",
+  "requirements.txt":
+    "Python pip requirements, one package per line. No markdown fences.",
   "README.md": "Markdown documentation in French.",
   "main.py": "Python 3 script or FastAPI-style stubs. No markdown fences.",
-  "main.dart": "Flutter / Dart widget code. No markdown fences.",
+  "main.dart": "Flutter / Dart lib/main.dart entry. No markdown fences.",
 };
 
 type Body = {
@@ -54,6 +69,7 @@ type Body = {
   sector?: string;
   workspace?: unknown;
   history?: unknown;
+  stream?: boolean;
 };
 
 function stripFences(text: string) {
@@ -135,6 +151,7 @@ async function complete(opts: {
   user: string;
   engine: ReturnType<typeof resolveEngine>;
   maxTokens: number;
+  onChunk?: (text: string) => void;
 }) {
   const provider = pickLlmProvider();
   if (!provider) throw new Error(missingLlmMessage());
@@ -145,6 +162,7 @@ async function complete(opts: {
       user: opts.user,
       maxTokens: opts.maxTokens,
       engine: opts.engine,
+      onChunk: opts.onChunk,
     });
   }
   if (provider === "openrouter") {
@@ -153,9 +171,36 @@ async function complete(opts: {
       user: opts.user,
       maxTokens: opts.maxTokens,
       engine: opts.engine,
+      onChunk: opts.onChunk,
     });
   }
   throw new Error(missingLlmMessage());
+}
+
+function makeDeltaBatcher(onDelta: (text: string) => void) {
+  let buf = "";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (!buf) return;
+    const piece = buf;
+    buf = "";
+    onDelta(piece);
+  };
+  return {
+    push(text: string) {
+      buf += text;
+      if (buf.length >= 120) {
+        flush();
+        return;
+      }
+      if (!timer) timer = setTimeout(flush, 80);
+    },
+    flush,
+  };
 }
 
 function parseMultiFiles(
@@ -214,11 +259,24 @@ export async function POST(request: Request) {
     sector: body?.sector,
     instruction,
   });
+  let agentBlock = agentSystemBlock(agent);
+  try {
+    const session = await getUserFromAuthHeader(request);
+    if (session) {
+      const memory = await loadUserIntelligenceContext(
+        session.supabase,
+        session.user.id,
+      );
+      agentBlock += intelligenceSystemBlock(memory);
+    }
+  } catch {
+    // invité OK
+  }
   const system = buildSystem(
     fileId,
     language,
     multiBias,
-    agentSystemBlock(agent),
+    agentBlock,
   );
   const user = `Active file: ${fileLabel} (${language})
 Instruction: ${instruction}
@@ -236,8 +294,39 @@ ${content || "(empty file — create from scratch)"}
 
 Return format A (single file body) OR format B (JSON multi-file).`;
 
-  try {
-    const raw = await complete({ system, user, engine, maxTokens });
+  const wantStream = body?.stream !== false;
+  const usedContext = {
+    siblings: workspace.filter(
+      (f) => f.fileId !== fileId && f.content?.trim(),
+    ).length,
+    historyTurns: history.length,
+  };
+
+  type EditResult = {
+    ok: true;
+    multi: boolean;
+    note: string;
+    fileId: string;
+    content: string;
+    files: { fileId: StudioFileId; content: string }[];
+    agentId: string;
+    agentLabel: string;
+    usedContext: typeof usedContext;
+  };
+
+  async function runEdit(
+    onDelta?: (text: string) => void,
+  ): Promise<EditResult> {
+    const batcher = onDelta ? makeDeltaBatcher(onDelta) : null;
+    const raw = await complete({
+      system,
+      user,
+      engine,
+      maxTokens,
+      onChunk: batcher ? (t) => batcher.push(t) : undefined,
+    });
+    batcher?.flush();
+
     const parsed = extractJsonObject(raw);
     const multi =
       parsed &&
@@ -251,68 +340,104 @@ Return format A (single file body) OR format B (JSON multi-file).`;
       const note =
         (typeof parsed?.note === "string" && parsed.note.trim()) ||
         `${multi.length} fichiers proposés.`;
-      return Response.json({
+      return {
         ok: true,
         multi: true,
         note,
-        files: multi,
-        // Compat single-field consumers
         fileId: multi[0]!.fileId,
         content: multi[0]!.content,
-        usedContext: {
-          siblings: workspace.filter(
-            (f) => f.fileId !== fileId && f.content?.trim(),
-          ).length,
-          historyTurns: history.length,
-        },
-      });
+        files: multi,
+        agentId: agent.id,
+        agentLabel: agent.label,
+        usedContext,
+      };
     }
 
-    // Single-file path (or JSON with exactly 1 file)
     if (multi.length === 1) {
-      return Response.json({
+      return {
         ok: true,
         multi: false,
-        fileId: multi[0]!.fileId,
-        content: multi[0]!.content,
         note:
           (typeof parsed?.note === "string" && parsed.note.trim()) ||
           `Fichier ${multi[0]!.fileId} mis à jour.`,
+        fileId: multi[0]!.fileId,
+        content: multi[0]!.content,
         files: multi,
-        usedContext: {
-          siblings: workspace.filter(
-            (f) => f.fileId !== fileId && f.content?.trim(),
-          ).length,
-          historyTurns: history.length,
-        },
-      });
+        agentId: agent.id,
+        agentLabel: agent.label,
+        usedContext,
+      };
     }
 
     const next = stripFences(raw);
     if (!next || next.startsWith("{")) {
-      return Response.json(
-        { error: "L’IA n’a renvoyé aucun code exploitable. Réessaie." },
-        { status: 502 },
-      );
+      throw new Error("L’IA n’a renvoyé aucun code exploitable. Réessaie.");
     }
 
-    return Response.json({
+    return {
       ok: true,
       multi: false,
+      note: `Fichier ${fileLabel} mis à jour.`,
       fileId,
       content: next,
-      note: `Fichier ${fileLabel} mis à jour.`,
-      files: [{ fileId, content: next }],
+      files: [{ fileId: fileId as StudioFileId, content: next }],
       agentId: agent.id,
       agentLabel: agent.label,
-      usedContext: {
-        siblings: workspace.filter(
-          (f) => f.fileId !== fileId && f.content?.trim(),
-        ).length,
-        historyTurns: history.length,
-      },
-    });
-  } catch (err) {
-    return Response.json({ error: friendlyLlmError(err) }, { status: 502 });
+      usedContext,
+    };
   }
+
+  if (!wantStream) {
+    try {
+      const result = await runEdit();
+      return Response.json(result);
+    } catch (err) {
+      return Response.json({ error: friendlyLlmError(err) }, { status: 502 });
+    }
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: StudioStreamEvent) => {
+        controller.enqueue(encoder.encode(encodeStudioStreamEvent(event)));
+      };
+      try {
+        send({
+          type: "status",
+          message: `Écriture de ${fileLabel}…`,
+          step: 1,
+          total: 2,
+          engine,
+        });
+        const result = await runEdit((text) => send({ type: "delta", text }));
+        send({
+          type: "status",
+          message: "Préparation des diffs…",
+          step: 2,
+          total: 2,
+        });
+        for (const f of result.files) {
+          send({ type: "file", fileId: f.fileId, content: f.content });
+        }
+        send({
+          type: "done",
+          note: result.note,
+          multi: result.multi,
+          files: result.files,
+        });
+      } catch (err) {
+        send({ type: "error", error: friendlyLlmError(err) });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+    },
+  });
 }

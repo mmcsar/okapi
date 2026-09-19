@@ -16,10 +16,15 @@ import {
 import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
 import { normalizeImageMime } from "@/lib/image";
 import { assertBodySize } from "@/lib/security";
+import type { OkapiAgentLane } from "@/lib/intent";
 
 export const runtime = "nodejs";
 
-function buildSystem(language?: string | null, debug = false) {
+function buildSystem(
+  language?: string | null,
+  debug = false,
+  lane: OkapiAgentLane = "conseil",
+) {
   const debugBlock = debug
     ? `
 DEBUG MODE:
@@ -30,12 +35,28 @@ DEBUG MODE:
 `
     : "";
 
+  const laneBlock =
+    lane === "creer"
+      ? `
+LANE = CRÉATEUR (builders / apps):
+- Ask to build/modify an app or site → give a short plan (3–5 bullets) THEN tell the user to send the same brief again starting with « Crée… » so Okapi Preview builds it automatically. NEVER say the builder/constructor is unavailable, missing, or “not in this interface”. The builder IS available on Accueil when the user asks to create an app.
+- If the user already described catalogue/stock/panier/Mobile Money: confirm in one short sentence and ask them to type: « Crée une app boutique: catalogue, stock, panier, WhatsApp, Mobile Money CDF ».
+- You may mention Studio only as optional next step after a preview exists — never as the first destination.
+`
+      : `
+LANE = CONSEILLER (savoir / contenu / recherche):
+- Answer questions, research, advice, drafts (articles, posts, scripts, letters). Stay helpful in this chat.
+- Do NOT push Studio, code editors, or “ouvre Studio”. Do NOT invent that a constructor is missing.
+- Only if the user explicitly asks to create an app/site: say they can switch to mode « Créateur » on Accueil, or type « Crée une app… » — do not open Studio for them.
+- Never pitch apps/templates unsolicited.
+`;
+
   return `You are Okapi, the AI platform of MMC SARL (Democratic Republic of Congo).
 You are a single autonomous AI agent for users of Okapi.
 
 Core rule: act ONLY on request. Do what is necessary, nothing more.
 - Question → answer clearly, no useless digressions.
-- Ask to build/modify an app or site → concrete help (plan, tips). Live HTML / fullstack (HTML + SQL + API) generation is handled by Okapi builder when the user asks to create or modify an app.
+${laneBlock}
 - If asked who hosts data: say Okapi / MMC SARL cloud. Never name third-party database vendors.
 - Do not spontaneously pitch apps, templates, or marketing menus.
 - If asked who you are / who built you: you are Okapi, plateforme IA de MMC SARL. Never mention third-party model vendors.
@@ -43,6 +64,7 @@ ${debugBlock}
 ${languageInstruction(language)}
 
 Style: clear, concise, useful. You can be wrong — invite verification.
+In French UI context: remind gently when giving advice/facts that « Okapi peut se tromper — vérifie les infos importantes » (once per reply max, not every sentence).
 You are not a doctor or lawyer.`;
 }
 
@@ -54,6 +76,8 @@ type ChatBody = {
   image?: { mimeType?: string; base64?: string; name?: string };
   debug?: boolean;
   engine?: string;
+  /** conseil = savoir/contenu · creer = apps */
+  lane?: string;
 };
 
 type ImagePart = { mimeType: string; base64: string };
@@ -98,14 +122,18 @@ export async function POST(request: Request) {
   const sector = body?.sector?.trim();
   const language = body?.language?.trim() || "auto";
   const engine = resolveEngine(body?.engine);
+  const lane: OkapiAgentLane =
+    body?.lane === "creer" ? "creer" : "conseil";
   const system =
-    buildSystem(language, Boolean(body?.debug)) +
+    buildSystem(language, Boolean(body?.debug), lane) +
     (hasImage
       ? `\n\nVISION: An image is attached. You CAN see it. Describe what you see and answer the user in their language. Never say you cannot view images.`
       : "");
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const userContent = sector
-    ? `[Builder context (optional): ${sector}]\n\n${message}`
+    ? lane === "creer"
+      ? `[Builder context (optional): ${sector}]\n\n${message}`
+      : `[Contexte métier (optionnel): ${sector}]\n\n${message}`
     : message;
   const image: ImagePart | null = hasImage
     ? { mimeType: imageMime, base64: imageBase64! }

@@ -40,7 +40,7 @@ Product rules:
 - WhatsApp pour confirmer la commande ; Mobile Money (Orange/Airtel/M-Pesa) au checkout.
 - Écrans: Accueil · Menu · Panier · Suivi commande · Contact.
 - SQL: dishes, categories, orders, order_items, tables (si salle).
-- API: window.Okapi.list/create('dishes'|'orders') — données réelles Okapi.
+- API: window.Okapi.list/create('dishes'|'orders') — lignes plates {id,...} (jamais .data).
 - Ton: appétissant, rapide, mobile-first Kinshasa/Gombe.`,
   },
   {
@@ -54,7 +54,7 @@ Product rules:
 - Panier + checkout Mobile Money + bouton WhatsApp vendeur.
 - Écrans: Accueil · Catalogue · Fiche produit · Panier · Commandes.
 - SQL: products, categories, stock_movements, customers, orders, order_items.
-- API: window.Okapi.list/create('products'|'orders') — vraies données cloud Okapi.
+- API: window.Okapi.list/create('products'|'orders') — lignes plates {id, name, price…}.
 - UX: confiance, clarté prix, pas de checkout carte bancaire obligatoire.`,
   },
   {
@@ -68,7 +68,7 @@ Product rules:
 - Respect vie privée — pas de données médicales sensibles inventées.
 - Écrans: Accueil · Patients · RDV · Agenda · Contact.
 - SQL: patients, appointments, staff (léger), RLS-friendly.
-- API: window.Okapi.list/create('patients'|'appointments') — persistance réelle.
+- API: window.Okapi.list/create('patients'|'appointments') — lignes plates {id,…}.
 - UX: calme, lisible, mobile pour réceptionnistes.`,
   },
   {

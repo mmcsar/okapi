@@ -99,6 +99,23 @@ export function assessGenerateQuality(
     }
   }
 
+  const usesOkapi = /window\.Okapi|Okapi\.(list|create|update|remove)\s*\(/i.test(
+    html,
+  );
+  const usesLocalStorage = /\blocalStorage\b/i.test(html);
+  const looksInteractive =
+    usesLocalStorage ||
+    /<form\b/i.test(html) ||
+    /\.addEventListener\s*\(\s*['"]submit['"]/i.test(html);
+
+  if (looksInteractive && usesLocalStorage && !usesOkapi) {
+    issues.push({
+      code: "localstorage_without_okapi",
+      detail:
+        "Interactive HTML uses localStorage instead of window.Okapi.list/create (real Okapi cloud).",
+    });
+  }
+
   return issues;
 }
 
@@ -114,6 +131,7 @@ export function shouldRepairGenerate(issues: GenerateQualityIssue[]) {
       "missing_api",
       "missing_react",
       "missing_next",
+      "localstorage_without_okapi",
     ].includes(i.code),
   );
 }
@@ -157,7 +175,8 @@ Rules for this repair:
 2. Keep the same product intent and language as the request.
 3. Prefer completing / closing truncated content over rewriting everything.
 4. Always finish completely — never cut off mid-tag.
-5. ${formatHint}
+5. If localStorage was used for lists/forms: replace with window.Okapi.list/create/update/remove. list returns flat rows [{id,...fields}] — never row.data. Empty list → empty state + optional seed create.
+6. ${formatHint}
 
 Previous (incomplete) output to repair:
 ${opts.previousRaw.slice(0, 24000)}`;

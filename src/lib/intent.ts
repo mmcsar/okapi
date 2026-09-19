@@ -1,11 +1,76 @@
 /** Detect if the user wants a live HTML app build / preview update. */
-export function wantsAppBuild(message: string, hasPreview: boolean): boolean {
+
+/** Deux lanes produit : Conseiller (savoir/contenu) vs Créateur (apps → Studio). */
+export type OkapiAgentLane = "conseil" | "creer";
+
+const LANE_STORAGE_KEY = "okapi_agent_lane";
+
+export function getStoredAgentLane(): OkapiAgentLane {
+  if (typeof window === "undefined") return "conseil";
+  try {
+    const v = localStorage.getItem(LANE_STORAGE_KEY);
+    if (v === "creer" || v === "conseil") return v;
+  } catch {
+    /* ignore */
+  }
+  return "conseil";
+}
+
+export function setStoredAgentLane(lane: OkapiAgentLane) {
+  try {
+    localStorage.setItem(LANE_STORAGE_KEY, lane);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Recherche / contenu / conseils — pas Studio. */
+export function wantsKnowledgeOrContent(message: string): boolean {
   const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  return /\b(explique|recherche|renseigne|inform|conseil|avise|idee de contenu|redige|ecris (un |une )?(article|post|script|discours|lettre|message)|traduis|resume|resumer|c[' ]est quoi|qu[' ]est[- ]ce|comment (faire|marche|fonctionne)|pourquoi|difference|formation|apprendre|cours|marketing|strategie|business plan|etude de marche)\b/i.test(
+    m,
+  );
+}
+
+/** Métiers / écrans RDC — même sans le verbe « crée ». */
+const METIER_BUILD_RE =
+  /\b(boutique|catalogue|stock|panier|checkout|commande|mobile\s*money|m[- ]?pesa|airtel\s*money|orange\s*money|whatsapp|restaurant|menu|clinique|patient|rendez[- ]?vous|ecole|eleve|crm|clients?|dashboard|marketplace|facture|caisse|flotte|livraison)\b/i;
+
+export function wantsAppBuild(
+  message: string,
+  hasPreview: boolean,
+  lane: OkapiAgentLane = "creer",
+): boolean {
+  const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+
+  // Lane Conseiller : uniquement un « crée une app… » explicite (jamais Studio forcé)
+  if (lane === "conseil") {
+    if (hasPreview && wantsDebug(message)) return true;
+    return /\b(cree|creer|genere|construire|fabrique|build|fais[- ]moi).{0,40}\b(app|application|site|page|boutique|projet|dashboard|crm)\b/i.test(
+      m,
+    );
+  }
 
   if (hasPreview && wantsDebug(message)) return true;
 
+  // Priorité savoir : si la demande est clairement informative, pas de builder
+  if (
+    wantsKnowledgeOrContent(message) &&
+    !/\b(cree|creer|genere|construire)\b.{0,30}\b(app|site|boutique)\b/i.test(m)
+  ) {
+    return false;
+  }
+
   const explicitBuild =
-    /\b(cree|creer|gener[eè]e?|construire|fabrique|build|genere moi|fais[- ]moi (un|une|le|la)|site web|landing|mini[- ]?app|application web|page web|boutique en ligne|menu restaurant|fullstack|full[- ]?stack|supabase|backend|back[- ]?end|avec (une )?base|api rest|grand projet|gros projet|plateforme|crm|saas|dashboard|marketplace)\b/.test(
+    /\b(cree|creer|gener[eè]e?|construire|fabrique|build|genere moi|fais[- ]moi (un|une|le|la)|lance|demarre|demarrer|site web|landing|mini[- ]?app|application web|page web|boutique en ligne|menu restaurant|fullstack|full[- ]?stack|supabase|backend|back[- ]?end|avec (une )?base|api rest|grand projet|gros projet|plateforme|crm|saas|dashboard|marketplace|app (pour|de|web)|une app|un site|le projet)\b/.test(
+      m,
+    );
+
+  /** Brief métier assez long = générer, pas bavarder. */
+  const metierBrief =
+    METIER_BUILD_RE.test(m) &&
+    m.length >= 40 &&
+    /\b(avec|pour|prix|cdf|kinshasa|gombe|rdc|ecran|module|paiement|produit)\b/.test(
       m,
     );
 
@@ -23,12 +88,14 @@ export function wantsAppBuild(message: string, hasPreview: boolean): boolean {
       m,
     );
 
-  if (pureQuestion && !explicitBuild && !previewEdit) return false;
-  if (explicitBuild || previewEdit) return true;
+  if (pureQuestion && !explicitBuild && !previewEdit && !metierBrief) {
+    return false;
+  }
+  if (explicitBuild || previewEdit || metierBrief) return true;
   return false;
 }
 
-/** Detect bugfix / debug requests (error paste, "ça marche pas", etc.). */
+/** Detect bug fix / debug requests (error paste, "ça marche pas", etc.). */
 export function wantsDebug(message: string): boolean {
   const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 
@@ -61,4 +128,15 @@ export function wantsDebug(message: string): boolean {
   if (/^\s*Error:/m.test(message) || /^\s*\w*Error:/m.test(message)) return true;
 
   return false;
+}
+
+/** Chat a inventé que le builder est absent — à renvoyer vers generate. */
+export function chatDeniedBuilder(answer: string): boolean {
+  const a = answer.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  return (
+    /\b(constructeur|builder|generateur)\b/.test(a) &&
+    /\b(pas (encore )?disponible|ne (peux|peut) pas (encore )?(lancer|generer|creer|construire)|n[' ]est pas disponible|dans cette interface|je ne peux pas encore)\b/.test(
+      a,
+    )
+  );
 }

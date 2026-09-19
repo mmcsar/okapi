@@ -16,7 +16,14 @@ import {
   speechLocaleFor,
   type OkapiLangCode,
 } from "@/lib/i18n";
-import { wantsAppBuild, wantsDebug } from "@/lib/intent";
+import {
+  wantsAppBuild,
+  wantsDebug,
+  chatDeniedBuilder,
+  getStoredAgentLane,
+  setStoredAgentLane,
+  type OkapiAgentLane,
+} from "@/lib/intent";
 import { resolveGenerateMode, wantsLargeProject } from "@/lib/fullstack";
 import {
   getStoredEngine,
@@ -40,6 +47,7 @@ import {
   studioZipEntries,
   type StudioFileId,
 } from "@/lib/studio-files";
+import { coachNextStep } from "@/lib/okapi-intelligence";
 
 type HomeDashboardProps = {
   section: string;
@@ -82,10 +90,17 @@ export function HomeDashboard({
     null,
   );
   const [previewNext, setPreviewNext] = useState<string | null>(null);
+  const [previewPackageJson, setPreviewPackageJson] = useState<string | null>(
+    null,
+  );
   const [previewSql, setPreviewSql] = useState<string | null>(null);
   const [previewApi, setPreviewApi] = useState<string | null>(null);
   const [previewPython, setPreviewPython] = useState<string | null>(null);
+  const [previewRequirements, setPreviewRequirements] = useState<string | null>(
+    null,
+  );
   const [previewFlutter, setPreviewFlutter] = useState<string | null>(null);
+  const [previewPubspec, setPreviewPubspec] = useState<string | null>(null);
   const [previewReadme, setPreviewReadme] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState("Preview");
   const [workspaceFocusKey, setWorkspaceFocusKey] = useState(0);
@@ -97,9 +112,10 @@ export function HomeDashboard({
   const [studioHandoffReady, setStudioHandoffReady] = useState(false);
   const [debugArmed, setDebugArmed] = useState(false);
   const [devMode, setDevMode] = useState(false);
-  const [studioChatOpen, setStudioChatOpen] = useState(false);
   const [engine, setEngine] = useState<OkapiEngine>("flash");
   const [engineOpen, setEngineOpen] = useState(false);
+  /** conseil = savoir/contenu (pas Studio) · creer = apps + handoff Studio */
+  const [agentLane, setAgentLane] = useState<OkapiAgentLane>("conseil");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [device, setDevice] = useState<"mobile" | "desktop">("mobile");
   // Stable on SSR + first paint to avoid hydration mismatch (Date differs server/client).
@@ -121,10 +137,13 @@ export function HomeDashboard({
     react: null as string | null,
     reactNative: null as string | null,
     nextjs: null as string | null,
+    packageJson: null as string | null,
     sql: null as string | null,
     api: null as string | null,
     python: null as string | null,
+    requirements: null as string | null,
     flutter: null as string | null,
+    pubspec: null as string | null,
     readme: null as string | null,
     title: "Preview",
     sector: "Général",
@@ -139,10 +158,13 @@ export function HomeDashboard({
       react: previewReact,
       reactNative: previewReactNative,
       nextjs: previewNext,
+      packageJson: previewPackageJson,
       sql: previewSql,
       api: previewApi,
       python: previewPython,
+      requirements: previewRequirements,
       flutter: previewFlutter,
+      pubspec: previewPubspec,
       readme: previewReadme,
       title: previewTitle,
       sector,
@@ -152,10 +174,13 @@ export function HomeDashboard({
     previewReact,
     previewReactNative,
     previewNext,
+    previewPackageJson,
     previewSql,
     previewApi,
     previewPython,
+    previewRequirements,
     previewFlutter,
+    previewPubspec,
     previewReadme,
     previewTitle,
     sector,
@@ -206,6 +231,7 @@ export function HomeDashboard({
 
   useEffect(() => {
     setEngine(getStoredEngine());
+    setAgentLane(getStoredAgentLane());
   }, []);
 
   useEffect(() => {
@@ -240,6 +266,7 @@ export function HomeDashboard({
       setPreviewReact(initialProject.artifacts?.react ?? null);
       setPreviewReactNative(initialProject.artifacts?.reactNative ?? null);
       setPreviewNext(initialProject.artifacts?.nextjs ?? null);
+      setPreviewPackageJson(initialProject.artifacts?.packageJson ?? null);
       setPreviewSql(
         initialProject.artifacts?.sql ??
           initialProject.backend_sql ??
@@ -251,7 +278,9 @@ export function HomeDashboard({
           null,
       );
       setPreviewPython(initialProject.artifacts?.python ?? null);
+      setPreviewRequirements(initialProject.artifacts?.requirements ?? null);
       setPreviewFlutter(initialProject.artifacts?.flutter ?? null);
+      setPreviewPubspec(initialProject.artifacts?.pubspec ?? null);
       setPreviewReadme(
         initialProject.artifacts?.readme ??
           initialProject.backend_readme ??
@@ -291,10 +320,13 @@ export function HomeDashboard({
       setPreviewReact(null);
       setPreviewReactNative(null);
       setPreviewNext(null);
+      setPreviewPackageJson(null);
       setPreviewSql(null);
       setPreviewApi(null);
       setPreviewPython(null);
+      setPreviewRequirements(null);
       setPreviewFlutter(null);
+      setPreviewPubspec(null);
       setPreviewReadme(null);
       setPreviewTitle("Preview");
       setProjectId(null);
@@ -308,7 +340,7 @@ export function HomeDashboard({
           {
             role: "assistant",
             content:
-              "Studio Okapi ouvert. Génère une app dans le chat, ou édite les fichiers ici — Accepter pour appliquer.",
+              "Studio Okapi ouvert — tu peux générer sans compte. Connexion + Sauver pour garder le projet. Accepte pour appliquer les fichiers.",
           },
         ]);
       }
@@ -316,12 +348,14 @@ export function HomeDashboard({
     // openInStudio lu via ref : ne pas le mettre en deps (sinon ça efface la preview au clic Studio)
   }, [resetKey, initialProject, stopListen, stopSpeak]);
 
-  // Clic sidebar Studio / #studio → ouvre l’onglet sans reset du projet
+  // Accueil Agent = jamais Studio immersif. Studio uniquement si openInStudio (#studio).
   useEffect(() => {
-    if (studioKick <= 0 && !openInStudio) return;
+    if (!openInStudio) {
+      setDevMode(false);
+      return;
+    }
     setDevMode(true);
     setDebugArmed(false);
-    setStudioChatOpen(false);
     setStudioFocusKey((k) => k + 1);
   }, [openInStudio, studioKick]);
 
@@ -337,10 +371,13 @@ export function HomeDashboard({
         previewReact ||
         previewReactNative ||
         previewNext ||
+        previewPackageJson ||
         previewSql ||
         previewApi ||
         previewPython ||
+        previewRequirements ||
         previewFlutter ||
+        previewPubspec ||
         previewReadme,
     ) ||
     sending ||
@@ -348,14 +385,57 @@ export function HomeDashboard({
 
   function leaveStudio() {
     setDevMode(false);
-    setStudioChatOpen(false);
     onNavigate?.("home");
+  }
+
+  /** Efface workspace + conversation ; reste en Studio si déjà ouvert. */
+  function startFreshProject(opts?: { stayInStudio?: boolean }) {
+    const stay = opts?.stayInStudio ?? immersiveStudio;
+    stopSpeak();
+    stopListen();
+    setPreviewHtml(null);
+    setPreviewReact(null);
+    setPreviewReactNative(null);
+    setPreviewNext(null);
+    setPreviewPackageJson(null);
+    setPreviewSql(null);
+    setPreviewApi(null);
+    setPreviewPython(null);
+    setPreviewRequirements(null);
+    setPreviewFlutter(null);
+    setPreviewPubspec(null);
+    setPreviewReadme(null);
+    setPreviewTitle("Preview");
+    setProjectId(null);
+    projectIdRef.current = null;
+    setCloudStatus(null);
+    setDebugArmed(false);
+    setStatus(null);
+    setPrompt("");
+    setSector("Général");
+    setDevMode(stay);
+    if (stay) {
+      setStudioFocusKey((k) => k + 1);
+      const welcome = {
+        role: "assistant" as const,
+        content:
+          "Nouveau projet. Décris l’app à créer — Okapi génère les fichiers ici.",
+      };
+      setMessages([welcome]);
+      setStudioSeedMessages([welcome]);
+      setStudioSeedKey((k) => k + 1);
+      onNavigate?.("studio");
+    } else {
+      setMessages([]);
+      setStudioSeedMessages([]);
+      setStudioSeedKey((k) => k + 1);
+      onNavigate?.("home");
+    }
   }
 
   function continueInStudio() {
     setDevMode(true);
     setDebugArmed(false);
-    setStudioChatOpen(false);
     setStudioFocusKey((k) => k + 1);
     setStudioHandoffReady(false);
     onNavigate?.("studio");
@@ -382,10 +462,19 @@ export function HomeDashboard({
             snap.reactNative,
           ),
           nextjs: keepOrReplace(payload.artifacts?.nextjs, snap.nextjs),
+          packageJson: keepOrReplace(
+            payload.artifacts?.packageJson,
+            snap.packageJson,
+          ),
           sql: keepOrReplace(payload.artifacts?.sql, snap.sql),
           api: keepOrReplace(payload.artifacts?.api, snap.api),
           python: keepOrReplace(payload.artifacts?.python, snap.python),
+          requirements: keepOrReplace(
+            payload.artifacts?.requirements,
+            snap.requirements,
+          ),
           flutter: keepOrReplace(payload.artifacts?.flutter, snap.flutter),
+          pubspec: keepOrReplace(payload.artifacts?.pubspec, snap.pubspec),
           readme: keepOrReplace(payload.artifacts?.readme, snap.readme),
           images: payload.artifacts?.images,
         }),
@@ -408,10 +497,13 @@ export function HomeDashboard({
           react: artifacts.react ?? null,
           reactNative: artifacts.reactNative ?? null,
           nextjs: artifacts.nextjs ?? null,
+          packageJson: artifacts.packageJson ?? null,
           sql: artifacts.sql ?? null,
           api: artifacts.api ?? null,
           python: artifacts.python ?? null,
+          requirements: artifacts.requirements ?? null,
           flutter: artifacts.flutter ?? null,
+          pubspec: artifacts.pubspec ?? null,
           readme: artifacts.readme ?? null,
           ...(artifacts.images?.length ? { images: artifacts.images } : {}),
         },
@@ -474,28 +566,37 @@ export function HomeDashboard({
       !snap.react &&
       !snap.reactNative &&
       !snap.nextjs &&
+      !snap.packageJson &&
       !snap.sql &&
       !snap.api &&
       !snap.python &&
+      !snap.requirements &&
       !snap.flutter &&
+      !snap.pubspec &&
       !snap.readme
     ) {
+      setCloudStatus("Rien à sauver");
       if (!opts?.silent) {
         setStatus("Rien à sauvegarder — génère ou édite d’abord.");
       }
       return false;
     }
     if (!user) {
-      setCloudStatus("Connexion requise");
+      setCloudStatus("Invité · non sauvé");
       if (!opts?.silent) {
-        setStatus("Connecte-toi pour sauvegarder en cloud.");
+        setStatus(
+          "Tu peux générer sans compte. Connecte-toi pour sauvegarder en cloud.",
+        );
         onNavigate?.("login");
       }
       return false;
     }
     if (saveBusyRef.current) {
       saveQueuedRef.current = true;
-      return false;
+      // Ne pas renvoyer false trop tôt : la file va relancer. Attendre un peu.
+      await new Promise((r) => window.setTimeout(r, 400));
+      if (saveBusyRef.current) return false;
+      return saveCloudNow({ silent: true });
     }
     saveBusyRef.current = true;
     setSaveBusy(true);
@@ -611,10 +712,13 @@ export function HomeDashboard({
         react: previewReact,
         reactNative: previewReactNative,
         nextjs: previewNext,
+        packageJson: previewPackageJson,
         sql: previewSql,
         api: previewApi,
         python: previewPython,
+        requirements: previewRequirements,
         flutter: previewFlutter,
+        pubspec: previewPubspec,
         readme: previewReadme,
       }),
       `${slug}-okapi`,
@@ -639,10 +743,13 @@ export function HomeDashboard({
     else if (key === "react") setPreviewReact(next);
     else if (key === "reactNative") setPreviewReactNative(next);
     else if (key === "nextjs") setPreviewNext(next);
+    else if (key === "packageJson") setPreviewPackageJson(next);
     else if (key === "sql") setPreviewSql(next);
     else if (key === "api") setPreviewApi(next);
     else if (key === "python") setPreviewPython(next);
+    else if (key === "requirements") setPreviewRequirements(next);
     else if (key === "flutter") setPreviewFlutter(next);
+    else if (key === "pubspec") setPreviewPubspec(next);
     else if (key === "readme") setPreviewReadme(next);
   }
 
@@ -721,9 +828,10 @@ export function HomeDashboard({
     const largeAsk = !imagePayload && wantsLargeProject(trimmed);
     const debug =
       debugArmed || (!imagePayload && wantsDebug(trimmed));
+    // Debug + Preview = corriger l’app (les 2 lanes) ; sinon build selon lane
     const build =
       !imagePayload &&
-      (wantsAppBuild(trimmed, Boolean(previewHtml)) ||
+      (wantsAppBuild(trimmed, Boolean(previewHtml), agentLane) ||
         (debug && Boolean(previewHtml)));
     const mode = build
       ? resolveGenerateMode(
@@ -798,6 +906,7 @@ export function HomeDashboard({
             history: historyForChat,
             debug,
             engine,
+            lane: agentLane,
             image: imagePayload
               ? {
                   mimeType: imagePayload.mimeType,
@@ -853,6 +962,201 @@ export function HomeDashboard({
           finalAnswer =
             "Okapi est temporairement indisponible. Recharge la page et réessaie dans quelques minutes.";
         }
+
+        // Le chat a parfois inventé « constructeur indisponible » → relance le vrai builder (lane Créateur seulement).
+        if (
+          agentLane === "creer" &&
+          chatDeniedBuilder(finalAnswer) &&
+          trimmed.length >= 12
+        ) {
+          setAssistant(
+            "Okapi lance le constructeur… (catalogue / stock / panier).",
+          );
+          const buildMessage = /^\s*cr[eé]e/i.test(trimmed)
+            ? trimmed
+            : `Crée une app : ${trimmed}`;
+          const genRes = await authFetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: buildMessage,
+              sector,
+              language: activeLang,
+              mode: resolveGenerateMode(
+                buildMessage,
+                previewSql || previewApi || wantsLargeProject(buildMessage)
+                  ? "fullstack"
+                  : "auto",
+              ),
+              engine,
+              currentHtml: previewHtml ?? undefined,
+              currentSql: previewSql ?? undefined,
+              currentApi: previewApi ?? undefined,
+              stream: true,
+            }),
+          });
+          if (genRes.ok && genRes.body) {
+            // Réutilise le flux generate ci-dessous via jump : on laisse tomber le chat
+            // et on traite le stream comme un build normal.
+            const reader2 = genRes.body.getReader();
+            const decoder2 = new TextDecoder();
+            let buffer2 = "";
+            let chars2 = 0;
+            let gotDone2 = false;
+            const started2 = Date.now();
+
+            const handleEv = async (line: string) => {
+              if (!line.trim()) return;
+              const event = parseGenerateStreamLine(line);
+              if (event.type === "status" && event.message) {
+                setAssistant(event.message);
+              } else if (event.type === "delta" && event.text) {
+                chars2 += event.text.length;
+                const sec = Math.round((Date.now() - started2) / 1000);
+                setAssistant(
+                  `Écriture… ${chars2.toLocaleString("fr-FR")} car. · ${sec}s`,
+                );
+              } else if (event.type === "done" && event.html) {
+                gotDone2 = true;
+                const sec = Math.round((Date.now() - started2) / 1000);
+                const title = event.title || "Preview Okapi";
+                const nextReact = keepOrReplace(
+                  event.react,
+                  snapRef.current.react,
+                );
+                const nextRn = keepOrReplace(
+                  event.reactNative,
+                  snapRef.current.reactNative,
+                );
+                const nextNext = keepOrReplace(
+                  event.nextjs,
+                  snapRef.current.nextjs,
+                );
+                const nextSql = keepOrReplace(event.sql, snapRef.current.sql);
+                const nextApi = keepOrReplace(event.api, snapRef.current.api);
+                const nextReadme = keepOrReplace(
+                  event.readme,
+                  snapRef.current.readme,
+                );
+                setPreviewHtml(event.html);
+                setPreviewReact(nextReact);
+                setPreviewReactNative(nextRn);
+                setPreviewNext(nextNext);
+                setPreviewSql(nextSql);
+                setPreviewApi(nextApi);
+                setPreviewReadme(nextReadme);
+                setPreviewTitle(title);
+                setWorkspaceFocusKey((k) => k + 1);
+                const offerStudio = agentLane === "creer";
+                setStudioHandoffReady(offerStudio);
+                setStudioSeedMessages([
+                  { role: "user", content: buildMessage },
+                  {
+                    role: "assistant",
+                    content: [
+                      event.summary ?? `Preview « ${title} » prête.`,
+                      offerStudio
+                        ? "Projet prêt. Clique Continuer dans Studio pour éditer."
+                        : "Preview prête — teste ici. Studio reste optionnel.",
+                    ].join(" "),
+                  },
+                ]);
+                setStudioSeedKey((k) => k + 1);
+                snapRef.current = {
+                  ...snapRef.current,
+                  html: event.html,
+                  react: nextReact,
+                  reactNative: nextRn,
+                  nextjs: nextNext,
+                  sql: nextSql,
+                  api: nextApi,
+                  readme: nextReadme,
+                  title,
+                  sector,
+                };
+                const bundle = ensureReadmeArtifact(
+                  artifactsFromSnap(snapRef.current),
+                  { title, hasHtml: true },
+                );
+                if (bundle.readme && bundle.readme !== nextReadme) {
+                  setPreviewReadme(bundle.readme);
+                  snapRef.current = {
+                    ...snapRef.current,
+                    readme: bundle.readme,
+                  };
+                }
+                const saveNote = await persistProject({
+                  title,
+                  sector,
+                  html: event.html,
+                  summary: event.summary,
+                  artifacts: bundle,
+                });
+                const labels = listFilledArtifactLabels(bundle, event.html);
+                if (!saveNote && user) {
+                  setCloudStatus(
+                    labels.length
+                      ? `Cloud · ${labels.length} fichier${labels.length > 1 ? "s" : ""}`
+                      : "Cloud · à jour",
+                  );
+                } else if (saveNote) setCloudStatus("Cloud · à connecter");
+                setAssistant(
+                  [
+                    event.summary ?? "Preview prête.",
+                    labels.length
+                      ? `· Livrables : ${labels.join(" + ")}`
+                      : "",
+                    `(${sec}s)`,
+                    saveNote
+                      ? `· ${saveNote}`
+                      : user
+                        ? "· Sauvegardé cloud"
+                        : "",
+                    offerStudio
+                      ? "· Studio prêt — continue l’édition là-bas."
+                      : "· Preview prête — reste ici pour tester.",
+                    `\n\n${coachNextStep({
+                      hasHtml: Boolean(event.html),
+                      hasSql: Boolean(nextSql || event.sql),
+                      loggedIn: Boolean(user),
+                      projectSaved: Boolean(user && !saveNote),
+                      sector,
+                      offerStudio,
+                    })}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                );
+                setStatus("Preview prête");
+                if (voiceOutRef.current) {
+                  speak(event.summary ?? "Preview prête.");
+                }
+              } else if (event.type === "error") {
+                throw new Error(event.error || "Génération impossible.");
+              }
+            };
+
+            while (true) {
+              const { done, value } = await reader2.read();
+              if (done) break;
+              buffer2 += decoder2.decode(value, { stream: true });
+              const lines = buffer2.split("\n");
+              buffer2 = lines.pop() ?? "";
+              for (const line of lines) await handleEv(line);
+            }
+            if (buffer2.trim()) await handleEv(buffer2);
+            if (!gotDone2) {
+              throw new Error(
+                "Okapi n’a pas terminé la génération. Réessaie dans quelques secondes.",
+              );
+            }
+            return;
+          }
+          // Si generate échoue, on montre un message clair au lieu du faux « indisponible »
+          finalAnswer =
+            "Le constructeur Okapi est prêt. Envoie : « Crée une app boutique Kinshasa : catalogue, stock, panier, WhatsApp + Mobile Money, prix CDF. »";
+        }
+
         setAssistant(finalAnswer);
         setStatus(
           /indisponible|saturé|recharge/i.test(finalAnswer)
@@ -863,7 +1167,7 @@ export function HomeDashboard({
         return;
       }
 
-      const res = await fetch("/api/generate", {
+      const res = await authFetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -930,16 +1234,19 @@ export function HomeDashboard({
           setPreviewApi(nextApi);
           setPreviewReadme(nextReadme);
           setPreviewTitle(title);
-          // Preview d’abord (visible) — Studio via bouton « Continuer »
+          // Preview d’abord — Studio seulement en lane Créateur
           setWorkspaceFocusKey((k) => k + 1);
-          setStudioHandoffReady(true);
+          const offerStudio = agentLane === "creer";
+          setStudioHandoffReady(offerStudio);
           setStudioSeedMessages([
             { role: "user", content: trimmed },
             {
               role: "assistant",
               content: [
                 event.summary ?? `Preview « ${title} » prête.`,
-                "Projet prêt. Clique Continuer dans Studio pour éditer, ou demande une modif ici.",
+                offerStudio
+                  ? "Projet prêt. Clique Continuer dans Studio pour éditer, ou demande une modif ici."
+                  : "Preview prête — teste ici. Passe en mode Créateur si tu veux Studio.",
               ].join(" "),
             },
           ]);
@@ -993,7 +1300,17 @@ export function HomeDashboard({
                 : user
                   ? "· Sauvegardé cloud"
                   : "",
-              "· Studio prêt — continue l’édition là-bas.",
+              offerStudio
+                ? "· Studio prêt — continue l’édition là-bas."
+                : "· Preview prête — reste ici pour tester.",
+              `\n\n${coachNextStep({
+                hasHtml: Boolean(event.html),
+                hasSql: Boolean(nextSql || event.sql),
+                loggedIn: Boolean(user),
+                projectSaved: Boolean(user && !saveNote),
+                sector,
+                offerStudio,
+              })}`,
             ]
               .filter(Boolean)
               .join(" "),
@@ -1070,10 +1387,13 @@ export function HomeDashboard({
     react: previewReact,
     reactNative: previewReactNative,
     nextjs: previewNext,
+    packageJson: previewPackageJson,
     sql: previewSql,
     api: previewApi,
     python: previewPython,
+    requirements: previewRequirements,
     flutter: previewFlutter,
+    pubspec: previewPubspec,
     readme: previewReadme,
     sending,
     device,
@@ -1087,7 +1407,7 @@ export function HomeDashboard({
     onExportReadme: exportReadme,
     onExportZip: exportZip,
     onChangeArtifact,
-    onSaveCloud: () => saveCloudNow(),
+    onSaveCloud: (opts?: { silent?: boolean }) => saveCloudNow(opts),
     onStudioCommitted: applyStudioCommit,
     cloudStatus: saveBusy ? "Sauvegarde…" : cloudStatus,
     engine,
@@ -1098,11 +1418,12 @@ export function HomeDashboard({
     focusStudioKey: studioFocusKey,
     studioSeedKey,
     studioSeedMessages,
+    onNewProject: () => startFreshProject({ stayInStudio: true }),
   };
 
   const messageListBlock =
     messages.length > 0 ? (
-      <div className={`w-full space-y-3 text-left ${split ? "" : "max-w-3xl"}`}>
+      <div className={`w-full space-y-2 text-left ${split ? "" : "max-w-2xl"}`}>
         {messages.map((msg, i) => {
           const isStreamingAssistant =
             sending &&
@@ -1119,10 +1440,10 @@ export function HomeDashboard({
           return (
             <div
               key={`${msg.role}-${i}`}
-              className={`rounded-[22px] border px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+              className={`rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed whitespace-pre-wrap ${
                 msg.role === "user"
-                  ? "ml-8 border-okapi-forest/15 bg-okapi-forest text-white"
-                  : "mr-8 border-[var(--okapi-stroke)] bg-white/85 text-okapi-ink"
+                  ? "ml-6 bg-okapi-forest text-white"
+                  : "mr-4 border border-[var(--okapi-stroke)] bg-white/90 text-okapi-ink"
               }`}
             >
               {msg.imageUrl ? (
@@ -1131,7 +1452,7 @@ export function HomeDashboard({
                   <img
                     src={msg.imageUrl}
                     alt="Pièce jointe"
-                    className="max-h-40 rounded-xl border border-white/20 object-cover"
+                    className="max-h-36 rounded-lg border border-white/20 object-cover"
                   />
                   <button
                     type="button"
@@ -1169,7 +1490,7 @@ export function HomeDashboard({
               !/réfléchit|analyse|debug|en cours|Écriture/i.test(
                 msg.content,
               ) ? (
-                <span className="mt-2 block text-[10px] text-okapi-ink/35">
+                <span className="mt-1.5 block text-[10px] text-okapi-ink/35">
                   …
                 </span>
               ) : null}
@@ -1177,7 +1498,7 @@ export function HomeDashboard({
                 <button
                   type="button"
                   onClick={() => toggleSpeak(msg.content)}
-                  className="mt-2 block text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
+                  className="mt-1.5 block text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
                 >
                   {speaking ? "Stop audio" : "Écouter"}
                 </button>
@@ -1185,13 +1506,14 @@ export function HomeDashboard({
               {msg.role === "assistant" &&
               !isStreamingAssistant &&
               studioHandoffReady &&
+              agentLane === "creer" &&
               i === messages.length - 1 &&
               previewHtml &&
               !immersiveStudio ? (
                 <button
                   type="button"
                   onClick={continueInStudio}
-                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-okapi-forest px-3.5 py-2 text-[12px] font-semibold text-white transition hover:bg-okapi-forest/90"
+                  className="mt-2.5 inline-flex items-center gap-2 rounded-lg bg-okapi-forest px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-okapi-forest/90"
                 >
                   Continuer dans Studio
                 </button>
@@ -1209,20 +1531,20 @@ export function HomeDashboard({
   ) => (
     <form
       onSubmit={onSubmit}
-      className={`prompt-glow w-full pt-4 ${extraClass} ${
+      className={`okapi-composer w-full ${extraClass} ${
         formSplit
-          ? "mt-auto sticky bottom-0 bg-[rgba(248,250,248,0.92)] pb-1 backdrop-blur-xl"
-          : "mt-8 max-w-3xl"
+          ? "mt-auto sticky bottom-0 z-20 bg-[rgba(248,250,248,0.96)] pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md"
+          : "mt-6 max-w-2xl"
       }`}
     >
-      <div className="rounded-[26px] border border-white/90 bg-white/90 p-3">
+      <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-white/95 p-2.5 shadow-sm">
         {attachedImage ? (
-          <div className="mb-2 flex items-center gap-3 rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-3 py-2">
+          <div className="mb-2 flex items-center gap-3 rounded-xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-3 py-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={attachedImage.dataUrl}
               alt=""
-              className="h-14 w-14 rounded-xl object-cover"
+              className="h-12 w-12 rounded-lg object-cover"
             />
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold text-okapi-ink/70">
@@ -1264,21 +1586,72 @@ export function HomeDashboard({
               ? "Écoute… parle maintenant"
               : debugArmed
                 ? "Colle l’erreur ou décris le bug…"
-                : devMode
-                  ? "Demande un conseil — le code s’édite dans Studio…"
-                  : attachedImage
+                : agentLane === "conseil"
+                  ? attachedImage
                     ? "Que faire avec cette image ?"
-                    : previewHtml
-                      ? "Modifie, debug, ou dis ce qu’il faut changer…"
-                      : "Écris, parle ou ajoute une image…"
+                    : "Pose une question, demande un conseil ou un contenu…"
+                  : devMode
+                    ? "Demande un conseil — le code s’édite dans Studio…"
+                    : attachedImage
+                      ? "Que faire avec cette image ?"
+                      : previewHtml
+                        ? "Modifie, debug, ou dis ce qu’il faut changer…"
+                        : "Décris l’app ou le site à créer…"
           }
-          className="min-h-[64px] w-full resize-none bg-transparent px-2 py-2 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
+          className="min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
         />
         {draftVoice ? (
           <p className="px-2 text-xs italic text-okapi-ink/45">{draftVoice}</p>
         ) : null}
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-1 flex flex-col gap-1.5">
+          <div
+            className="inline-flex h-9 w-full items-stretch rounded-lg border border-[var(--okapi-stroke)] bg-okapi-mist p-0.5 sm:w-auto sm:self-start"
+            role="group"
+            aria-label="Mode agent"
+          >
+            <button
+              type="button"
+              disabled={sending}
+              onClick={() => {
+                setAgentLane("conseil");
+                setStoredAgentLane("conseil");
+                setStudioHandoffReady(false);
+                setDevMode(false);
+                onNavigate?.("home");
+              }}
+              className={`min-w-0 flex-1 rounded-md px-2 text-[11px] font-semibold transition disabled:opacity-60 sm:flex-none sm:px-2.5 ${
+                agentLane === "conseil"
+                  ? "bg-white text-okapi-forest shadow-sm"
+                  : "text-okapi-ink/50"
+              }`}
+              title="Questions, recherche, contenus — sans Studio"
+              aria-pressed={agentLane === "conseil"}
+            >
+              <span className="sm:hidden">Conseil</span>
+              <span className="hidden sm:inline">Conseiller</span>
+            </button>
+            <button
+              type="button"
+              disabled={sending}
+              onClick={() => {
+                setAgentLane("creer");
+                setStoredAgentLane("creer");
+              }}
+              className={`min-w-0 flex-1 rounded-md px-2 text-[11px] font-semibold transition disabled:opacity-60 sm:flex-none sm:px-2.5 ${
+                agentLane === "creer"
+                  ? "bg-white text-okapi-forest shadow-sm"
+                  : "text-okapi-ink/50"
+              }`}
+              title="Créer des apps + ouvrir Studio"
+              aria-pressed={agentLane === "creer"}
+            >
+              <span className="sm:hidden">Créer</span>
+              <span className="hidden sm:inline">Créateur</span>
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <input
               ref={fileInputRef}
               type="file"
@@ -1294,18 +1667,18 @@ export function HomeDashboard({
                 type="button"
                 onClick={() => setEngineOpen((o) => !o)}
                 disabled={sending}
-                className="inline-flex h-11 items-center gap-1.5 rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist px-3 text-xs font-semibold text-okapi-ink/75 transition hover:bg-white disabled:opacity-60"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--okapi-stroke)] bg-okapi-mist px-2.5 text-xs font-semibold text-okapi-ink/75 transition hover:bg-white disabled:opacity-60"
                 aria-expanded={engineOpen}
                 aria-haspopup="listbox"
               >
-                {engine === "pro" ? "Okapi Pro" : "Okapi Flash"}
+                {engine === "pro" ? "Pro" : "Flash"}
                 <span className="text-[10px] font-medium text-okapi-ink/35">
                   ▾
                 </span>
               </button>
               {engineOpen ? (
                 <div
-                  className="absolute bottom-[calc(100%+6px)] left-0 z-30 w-64 overflow-hidden rounded-2xl border border-[var(--okapi-stroke)] bg-white/95 shadow-lg backdrop-blur-md"
+                  className="absolute bottom-[calc(100%+6px)] left-0 z-30 w-[min(16rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-[var(--okapi-stroke)] bg-white/95 shadow-lg backdrop-blur-md"
                   role="listbox"
                 >
                   {OKAPI_ENGINES.map((item) => {
@@ -1330,7 +1703,7 @@ export function HomeDashboard({
                         <span className="flex items-center gap-2 text-xs font-semibold text-okapi-ink">
                           {item.label}
                           {item.badge ? (
-                            <span className="rounded-full bg-okapi-amber/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-okapi-amber-deep">
+                            <span className="rounded-md bg-okapi-amber/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-okapi-amber-deep">
                               {item.badge}
                             </span>
                           ) : null}
@@ -1354,7 +1727,7 @@ export function HomeDashboard({
                 });
               }}
               disabled={sending}
-              className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
+              className={`inline-flex h-9 items-center justify-center rounded-lg border px-2.5 text-xs font-semibold transition disabled:opacity-60 ${
                 debugArmed
                   ? "border-okapi-amber/40 bg-okapi-amber text-white"
                   : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
@@ -1362,51 +1735,42 @@ export function HomeDashboard({
               title={
                 previewHtml
                   ? "Mode Debug — corrige la Preview"
-                  : "Mode Debug — analyse une erreur"
+                  : "Mode Debug — analyse une erreur (sans Preview = conseil chat)"
               }
               aria-label="Mode Debug"
               aria-pressed={debugArmed}
             >
               Debug
             </button>
-            {!(openInStudio || immersiveStudio) ? (
+            {/* Studio : sidebar / Continuer — pas de 2e bouton sur mobile */}
+            {!(openInStudio || immersiveStudio) && agentLane === "creer" ? (
               <button
                 type="button"
                 onClick={() => {
-                  setDevMode((v) => {
-                    const next = !v;
-                    if (next) {
-                      setDebugArmed(false);
-                      setStudioFocusKey((k) => k + 1);
-                      onNavigate?.("studio");
-                    }
-                    return next;
-                  });
+                  setDebugArmed(false);
+                  setDevMode(true);
+                  setStudioFocusKey((k) => k + 1);
+                  onNavigate?.("studio");
                 }}
                 disabled={sending}
-                className={`inline-flex h-11 items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition disabled:opacity-60 ${
-                  devMode
-                    ? "border-okapi-forest/60 bg-okapi-forest text-white"
-                    : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
-                }`}
-                title="Mode Dev — ouvre Studio pour coder ; le chat reste pour les conseils"
-                aria-label="Mode Dev"
-                aria-pressed={devMode}
+                className="hidden h-9 items-center justify-center rounded-lg border border-[var(--okapi-stroke)] bg-okapi-mist px-2.5 text-xs font-semibold text-okapi-ink/70 transition hover:bg-white disabled:opacity-60 sm:inline-flex"
+                title="Ouvre Studio pour coder"
+                aria-label="Studio"
               >
-                Dev
+                Studio
               </button>
             ) : null}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={sending}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 transition hover:bg-white disabled:opacity-60"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 transition hover:bg-white disabled:opacity-60"
               title="Ajouter une image"
               aria-label="Ajouter une image"
             >
               <svg
                 viewBox="0 0 24 24"
-                className="h-5 w-5"
+                className="h-4 w-4"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.8"
@@ -1421,7 +1785,7 @@ export function HomeDashboard({
                 type="button"
                 onClick={toggleListen}
                 disabled={sending}
-                className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border transition ${
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border transition ${
                   listening
                     ? "border-okapi-amber/40 bg-okapi-amber text-white"
                     : "border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 hover:bg-white"
@@ -1431,7 +1795,7 @@ export function HomeDashboard({
               >
                 <svg
                   viewBox="0 0 24 24"
-                  className="h-5 w-5"
+                  className="h-4 w-4"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="1.8"
@@ -1443,112 +1807,92 @@ export function HomeDashboard({
             ) : null}
             {listening ? (
               <span className="text-[11px] font-medium text-okapi-amber-deep">
-                Micro actif
+                Micro
               </span>
             ) : null}
           </div>
           <button
             type="submit"
             disabled={sending}
-            className="inline-flex items-center gap-2 rounded-2xl bg-okapi-amber px-5 py-3 text-sm font-semibold text-white transition hover:bg-okapi-amber-deep disabled:opacity-60"
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-okapi-amber px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-okapi-amber-deep disabled:opacity-60 sm:px-4"
           >
             {sending ? "…" : "Envoyer"}
           </button>
+          </div>
         </div>
       </div>
       {audioError ? (
-        <p className="mt-2 text-sm text-okapi-amber-deep">{audioError}</p>
+        <p className="mt-1.5 text-xs text-okapi-amber-deep">{audioError}</p>
       ) : status ? (
-        <p className="mt-2 text-sm text-okapi-amber-deep">{status}</p>
+        <p className="mt-1.5 text-xs text-okapi-amber-deep">{status}</p>
       ) : (
-        <p className="mt-2 text-[11px] text-okapi-ink/35">
-          {debugArmed
-            ? "Mode Debug actif — colle l’erreur puis Envoyer"
-            : devMode
-              ? "Mode Dev — Studio pour le code · chat pour conseils"
-              : "Image · micro · Debug · Dev — l’agent agit sur demande"}
+        <p className="mt-1.5 text-[10px] leading-snug text-okapi-ink/35">
+          Okapi peut se tromper — vérifie les infos importantes.
+          <span className="hidden sm:inline">
+            {" "}
+            {debugArmed
+              ? "· Debug : colle l’erreur puis Envoyer."
+              : agentLane === "creer"
+                ? "· Créateur : Preview ici · Studio via menu."
+                : "· Conseiller : chat & contenus — pas Studio."}
+          </span>
         </p>
       )}
     </form>
   );
 
   return (
-    <main className="app-shell ml-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] lg:ml-3">
+    <main
+      className={`ml-0 flex min-h-0 flex-1 flex-col overflow-hidden ${
+        immersiveStudio
+          ? "okapi-studio-shell rounded-none border-0 lg:ml-0"
+          : "app-shell rounded-[22px] lg:ml-2"
+      }`}
+    >
+      {immersiveStudio ? null : (
       <header
-        className={`flex items-center justify-between gap-3 border-b px-4 py-3.5 lg:px-6 ${
-          immersiveStudio
-            ? "okapi-studio-chrome border-b"
-            : "border-[var(--okapi-stroke)]"
-        }`}
+        className="flex items-center justify-between gap-3 border-b border-[var(--okapi-stroke)] px-3 py-2.5 lg:px-4"
       >
-        <div className="flex min-w-0 items-center gap-3">
-          <div
-            className={`relative h-10 w-10 shrink-0 overflow-hidden rounded-2xl ring-1 ${
-              immersiveStudio ? "ring-white/15" : "ring-[var(--okapi-stroke)]"
-            }`}
-          >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-xl ring-1 ring-[var(--okapi-stroke)]">
             <Image
               src="/okapi-logo.png"
               alt=""
               fill
-              sizes="40px"
+              sizes="32px"
               className="object-cover object-[48%_26%]"
             />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p
-                className={`truncate font-[family-name:var(--font-syne)] text-base font-bold leading-none ${
-                  immersiveStudio ? "text-white" : ""
-                }`}
-              >
-                {immersiveStudio
-                  ? previewHtml
-                    ? previewTitle
-                    : "Okapi Studio"
-                  : previewHtml
-                    ? previewTitle
-                    : `${greeting}, ${displayName}`}
+              <p className="truncate font-[family-name:var(--font-syne)] text-sm font-bold leading-none">
+                {previewHtml
+                  ? previewTitle
+                  : `${greeting}, ${displayName}`}
               </p>
-              {immersiveStudio ? (
-                <span className="hidden rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/80 sm:inline">
-                  Studio
-                </span>
-              ) : sending ? (
-                <span className="hidden rounded-full bg-okapi-amber/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-okapi-amber-deep sm:inline">
+              {sending ? (
+                <span className="hidden rounded-md bg-okapi-amber/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-okapi-amber-deep sm:inline">
                   Génération
                 </span>
               ) : previewHtml ? (
-                <span className="hidden rounded-full bg-okapi-forest/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-okapi-forest sm:inline">
+                <span className="hidden rounded-md bg-okapi-forest/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-okapi-forest sm:inline">
                   Live
                 </span>
               ) : null}
             </div>
-            <p
-              className={`mt-1.5 truncate text-[11px] ${
-                immersiveStudio ? "text-white/45" : "text-okapi-ink/45"
-              }`}
-            >
-              {immersiveStudio
-                ? "Édite le code · Agent pour conseils"
-                : previewHtml
-                  ? "Agent · preview sur demande"
-                  : "Un agent · répond et construit sur demande"}
+            <p className="mt-1 truncate text-[10px] text-okapi-ink/40">
+              {previewHtml
+                ? agentLane === "creer"
+                  ? "Créateur · preview"
+                  : "Conseiller · preview"
+                : agentLane === "creer"
+                  ? "Créateur · apps"
+                  : "Conseiller · savoir & contenu"}
             </p>
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          {immersiveStudio ? (
-            <button
-              type="button"
-              onClick={leaveStudio}
-              className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white/90 transition hover:bg-white/15"
-            >
-              Retour Agent
-            </button>
-          ) : (
-            <>
+        <div className="flex shrink-0 items-center gap-1.5">
               {supportedSpeak ? (
                 <button
                   type="button"
@@ -1559,7 +1903,7 @@ export function HomeDashboard({
                       return next;
                     });
                   }}
-                  className={`rounded-2xl border px-3 py-2 text-xs font-semibold transition ${
+                  className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
                     voiceOut
                       ? "border-okapi-forest/30 bg-okapi-forest/10 text-okapi-forest"
                       : "border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70 hover:bg-white"
@@ -1570,57 +1914,40 @@ export function HomeDashboard({
                 </button>
               ) : null}
               {split ? (
-                <>
-                  <div className="hidden rounded-full border border-[var(--okapi-stroke)] bg-white/80 p-1 sm:flex">
-                    <button
-                      type="button"
-                      onClick={() => setDevice("mobile")}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-                        device === "mobile"
-                          ? "bg-okapi-forest text-white"
-                          : "text-okapi-ink/55 hover:text-okapi-ink"
-                      }`}
-                    >
-                      Mobile
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDevice("desktop")}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-                        device === "desktop"
-                          ? "bg-okapi-forest text-white"
-                          : "text-okapi-ink/55 hover:text-okapi-ink"
-                      }`}
-                    >
-                      Desktop
-                    </button>
-                  </div>
+                <div className="hidden rounded-lg border border-[var(--okapi-stroke)] bg-white/80 p-0.5 sm:flex">
                   <button
                     type="button"
-                    onClick={() => {
-                      setPreviewHtml(null);
-                      setPreviewReact(null);
-                      setPreviewReactNative(null);
-                      setPreviewNext(null);
-                      setPreviewSql(null);
-                      setPreviewApi(null);
-                      setPreviewPython(null);
-                      setPreviewFlutter(null);
-                      setPreviewReadme(null);
-                      setDebugArmed(false);
-                      setDevMode(false);
-                      setMessages([]);
-                      setStatus(null);
-                      stopSpeak();
-                    }}
-                    className="rounded-2xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-xs font-semibold text-okapi-ink/70 transition hover:bg-white"
+                    onClick={() => setDevice("mobile")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      device === "mobile"
+                        ? "bg-okapi-forest text-white"
+                        : "text-okapi-ink/55 hover:text-okapi-ink"
+                    }`}
                   >
-                    Nouveau
+                    Mobile
                   </button>
-                </>
+                  <button
+                    type="button"
+                    onClick={() => setDevice("desktop")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      device === "desktop"
+                        ? "bg-okapi-forest text-white"
+                        : "text-okapi-ink/55 hover:text-okapi-ink"
+                    }`}
+                  >
+                    Desktop
+                  </button>
+                </div>
               ) : null}
-            </>
-          )}
+              <button
+                type="button"
+                onClick={() => startFreshProject({ stayInStudio: false })}
+                className="rounded-lg border border-[var(--okapi-stroke)] bg-white/80 px-2.5 py-1.5 text-xs font-semibold text-okapi-ink/70 transition hover:bg-white"
+                title="Effacer la conversation et démarrer un projet vide"
+              >
+                <span className="sm:hidden">Nouveau</span>
+                <span className="hidden sm:inline">Nouveau projet</span>
+              </button>
           <UserMenu
             onNavigate={(id) => onNavigate?.(id)}
             loggedIn={Boolean(user)}
@@ -1632,102 +1959,67 @@ export function HomeDashboard({
           />
         </div>
       </header>
+      )}
 
       {immersiveStudio ? (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1">
-            <WorkspacePanel
-              {...workspacePanelProps}
-              immersive
-            />
-          </div>
-          <div
-            className={`okapi-studio-chrome shrink-0 border-t transition-[height] ${
-              studioChatOpen ? "h-[min(40vh,280px)]" : "h-14"
-            }`}
-          >
-            {!studioChatOpen ? (
-              <button
-                type="button"
-                onClick={() => setStudioChatOpen(true)}
-                className="flex h-full w-full items-center justify-center gap-2 text-sm font-medium text-white/70 transition hover:text-white/90"
-              >
-                Agent · conseils (hors code)
-              </button>
-            ) : (
-              <div className="flex h-full min-h-0 flex-col">
-                <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2">
-                  <span className="text-xs font-medium text-white/55">
-                    Agent · conseils (hors code)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setStudioChatOpen(false)}
-                    className="text-xs font-semibold text-white/75 transition hover:text-white"
-                  >
-                    Réduire
-                  </button>
-                </div>
-                <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-2 pt-2">
-                  {messageListBlock ? (
-                    <div className="mb-2">{messageListBlock}</div>
-                  ) : null}
-                  {renderPromptForm(true, "px-0 pb-0")}
-                </div>
-              </div>
-            )}
-          </div>
+          <WorkspacePanel
+            {...workspacePanelProps}
+            immersive
+            onLeaveStudio={leaveStudio}
+          />
         </div>
       ) : (
       <div className={`flex min-h-0 flex-1 ${split ? "flex-col lg:flex-row" : ""}`}>
         <section
           className={`relative flex min-h-0 flex-col ${
             split
-              ? "lg:w-[40%] lg:border-r lg:border-[var(--okapi-stroke)]"
+              ? "order-2 min-h-[38vh] flex-1 lg:order-1 lg:min-h-0 lg:w-[38%] lg:border-r lg:border-[var(--okapi-stroke)]"
               : "w-full"
           }`}
         >
           <div
             className={`scrollbar-thin mx-auto flex w-full flex-1 flex-col overflow-y-auto ${
               split
-                ? "max-w-xl px-4 pb-4 pt-4"
-                : "max-w-3xl items-center px-4 py-10 text-center lg:px-10"
+                ? "max-w-xl px-3 pb-3 pt-3"
+                : "max-w-2xl items-stretch px-4 py-8 text-left lg:px-8"
             }`}
           >
             {!split ? (
-              <div className="fade-up flex w-full flex-col items-center">
-                <div className="okapi-orb relative mb-6 flex h-28 w-28 items-center justify-center">
-                  <span className="absolute inset-0 rounded-full bg-okapi-amber/30 blur-2xl" />
-                  <span className="absolute inset-3 rounded-full bg-okapi-leaf/20 blur-lg" />
-                  <span className="relative h-24 w-24 overflow-hidden rounded-full ring-[7px] ring-white/85">
+              <div className="fade-up mb-2 flex w-full flex-col items-start">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="relative h-12 w-12 overflow-hidden rounded-2xl ring-1 ring-[var(--okapi-stroke)]">
                     <Image
                       src="/okapi-logo.png"
                       alt="Okapi"
                       fill
-                      sizes="96px"
+                      sizes="48px"
                       className="object-cover object-[48%_26%]"
                       priority
                     />
-                  </span>
+                  </div>
+                  <div>
+                    <h1 className="font-[family-name:var(--font-syne)] text-2xl font-bold tracking-tight sm:text-3xl">
+                      {greeting}, {displayName}
+                    </h1>
+                    <p className="mt-1 text-sm text-okapi-ink/50">
+                      {agentLane === "creer"
+                        ? "Décris l’app à créer — Preview ici, Studio seulement si tu l’ouvres."
+                        : "Questions, conseils, contenus — Okapi peut se tromper."}
+                    </p>
+                  </div>
                 </div>
-                <h1 className="font-[family-name:var(--font-syne)] text-4xl font-bold tracking-tight sm:text-5xl">
-                  {greeting}, {displayName}
-                </h1>
-                <p className="mt-3 max-w-md text-base text-okapi-ink/55">
-                  Okapi, plateforme IA de MMC SARL — dis ce dont tu as besoin,
-                  dans n’importe quelle langue.
-                </p>
               </div>
             ) : (
-              <div className="mb-3">
-                <span className="text-[11px] font-semibold text-okapi-ink/40">
-                  Okapi · MMC SARL
+              <div className="mb-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-okapi-ink/35">
+                  Conversation
                 </span>
               </div>
             )}
 
             {messageListBlock ? (
-              <div className={`mt-5 w-full ${split ? "" : "max-w-3xl"}`}>
+              <div className={`w-full ${split ? "" : "max-w-2xl"}`}>
                 {messageListBlock}
               </div>
             ) : null}
@@ -1736,7 +2028,11 @@ export function HomeDashboard({
           </div>
         </section>
 
-        {split ? <WorkspacePanel {...workspacePanelProps} /> : null}
+        {split ? (
+          <div className="order-1 flex min-h-[42vh] min-w-0 flex-col border-b border-[var(--okapi-stroke)] lg:order-2 lg:min-h-0 lg:flex-1 lg:border-b-0">
+            <WorkspacePanel {...workspacePanelProps} />
+          </div>
+        ) : null}
       </div>
       )}
     </main>

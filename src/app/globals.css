@@ -242,6 +242,11 @@ body::before {
   animation: glow-pulse 4s ease-in-out infinite;
 }
 
+/* Composer Agent — dense, sans glow marketing */
+.okapi-composer {
+  position: relative;
+}
+
 .fade-up {
   animation: fade-up 0.55s ease-out both;
 }

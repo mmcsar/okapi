@@ -31,24 +31,60 @@ function client() {
   return new OpenAI({ apiKey: key });
 }
 
-/** Non-streaming completion (HTML generate). */
+/** Completion — stream tokens via onChunk when provided (Agent live code). */
 export async function openAiComplete(opts: {
   system: string;
   user: string;
   maxTokens?: number;
   engine?: OkapiEngine;
+  onChunk?: (text: string) => void;
 }) {
   const openai = client();
-  const res = await openai.chat.completions.create({
-    model: openAiModel(opts.engine ?? "flash"),
-    messages: [
-      { role: "system", content: opts.system },
-      { role: "user", content: opts.user },
-    ],
-    max_completion_tokens: opts.maxTokens ?? 8192,
+  const model = openAiModel(opts.engine ?? "flash");
+  const messages = [
+    { role: "system" as const, content: opts.system },
+    { role: "user" as const, content: opts.user },
+  ];
+  const maxTokens = opts.maxTokens ?? 8192;
+
+  if (!opts.onChunk) {
+    const res = await openai.chat.completions.create({
+      model,
+      messages,
+      max_completion_tokens: maxTokens,
+    });
+    const text = res.choices[0]?.message?.content?.trim() || "";
+    if (!text) throw new Error("empty_response");
+    return text;
+  }
+
+  const stream = await openai.chat.completions.create({
+    model,
+    messages,
+    max_completion_tokens: maxTokens,
+    stream: true,
   });
 
-  const text = res.choices[0]?.message?.content?.trim() || "";
+  let assembled = "";
+  for await (const chunk of stream) {
+    const piece = chunk.choices[0]?.delta?.content;
+    if (!piece) continue;
+    assembled += piece;
+    opts.onChunk(piece);
+  }
+  let text = assembled.trim();
+
+  // Stream vide → 1 shot non-stream (raisonnement / modèles sensibles)
+  if (!text) {
+    const res = await openai.chat.completions.create({
+      model,
+      messages,
+      max_completion_tokens: maxTokens,
+    });
+    text = res.choices[0]?.message?.content?.trim() || "";
+    if (text) opts.onChunk(text);
+  }
+
   if (!text) throw new Error("empty_response");
   return text;
 }

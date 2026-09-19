@@ -39,6 +39,11 @@ import {
   agentSystemBlock,
   resolveOkapiAgent,
 } from "@/lib/studio-agents";
+import {
+  intelligenceSystemBlock,
+  loadUserIntelligenceContext,
+} from "@/lib/okapi-intelligence";
+import { getUserFromAuthHeader } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 /** Generate + 1 repair pass can need the full window. */
@@ -73,7 +78,8 @@ Rules:
 7. On edit: return the FULL updated HTML, always closed with </html>.
 8. Never mention third-party AI vendors in the generated UI.
 9. Keep Flash pages compact enough to finish: hero + 1–2 sections + footer is enough unless asked for more.
-10. For interactive lists/forms prefer window.Okapi.list/create/update/remove (real Okapi cloud). Avoid localStorage demos when Okapi is available; fallback message if !Okapi.ready.
+10. For interactive lists/forms prefer window.Okapi.list/create/update/remove (real Okapi cloud). Avoid localStorage demos when Okapi is available.
+    Shape: list returns flat rows [{ id, name, price, ... }] — NEVER read row.data. On empty list show « Aucun élément — ajoute le premier ». Seed 0–2 demo rows via Okapi.create on first load if list is empty.
 ${scale}
 
 ${languageInstruction(language)}
@@ -135,7 +141,7 @@ Rules:
 8. Never mention third-party AI or database vendor brand names in user-facing text.
 9. On edit: return ALL sections updated (never omit a section that existed).
 10. Follow AGENT MÉTIER rules when present (screens, schema, payments).
-11. Interactive HTML should use window.Okapi.list/create (real persistence) when possible — not localStorage-only demos.
+11. Interactive HTML should use window.Okapi.list/create (real persistence) when possible — not localStorage-only demos. list = flat rows [{id,...fields}]; empty → message + seed via create.
 ${scale}
 
 ${languageInstruction(language)}
@@ -448,11 +454,25 @@ export async function POST(request: Request) {
   const agent = resolveOkapiAgent({ sector, instruction: message });
   const agentBlock = agentSystemBlock(agent);
 
+  let memoryBlock = "";
+  try {
+    const session = await getUserFromAuthHeader(request);
+    if (session) {
+      const memory = await loadUserIntelligenceContext(
+        session.supabase,
+        session.user.id,
+      );
+      memoryBlock = intelligenceSystemBlock(memory);
+    }
+  } catch {
+    // Invité / auth optionnelle — generate reste ouvert
+  }
+
   const system = debug
     ? buildSystemDebug(language, mode === "fullstack")
     : mode === "fullstack"
-      ? buildSystemFullstack(language, engine, large, agentBlock)
-      : buildSystemHtml(language, engine, large, agentBlock);
+      ? buildSystemFullstack(language, engine, large, agentBlock + memoryBlock)
+      : buildSystemHtml(language, engine, large, agentBlock + memoryBlock);
 
   const prompt = buildPrompt(
     sector,

@@ -4,10 +4,13 @@ export type OkapiArtifacts = {
   react?: string | null;
   reactNative?: string | null;
   nextjs?: string | null;
+  packageJson?: string | null;
   sql?: string | null;
   api?: string | null;
   python?: string | null;
+  requirements?: string | null;
   flutter?: string | null;
+  pubspec?: string | null;
   readme?: string | null;
   images?: { url: string; prompt?: string; createdAt?: string }[];
 };
@@ -16,10 +19,13 @@ const ARTIFACT_KEYS = [
   "react",
   "reactNative",
   "nextjs",
+  "packageJson",
   "sql",
   "api",
   "python",
+  "requirements",
   "flutter",
+  "pubspec",
   "readme",
 ] as const;
 
@@ -56,10 +62,13 @@ export function normalizeArtifacts(input: unknown): OkapiArtifacts {
     react: asNonEmptyString(a.react),
     reactNative: asNonEmptyString(a.reactNative),
     nextjs: asNonEmptyString(a.nextjs),
+    packageJson: asNonEmptyString(a.packageJson),
     sql: asNonEmptyString(a.sql),
     api: asNonEmptyString(a.api),
     python: asNonEmptyString(a.python),
+    requirements: asNonEmptyString(a.requirements),
     flutter: asNonEmptyString(a.flutter),
+    pubspec: asNonEmptyString(a.pubspec),
     readme: asNonEmptyString(a.readme),
     images,
   };
@@ -124,10 +133,13 @@ export function artifactsFromSnap(snap: {
   react?: string | null;
   reactNative?: string | null;
   nextjs?: string | null;
+  packageJson?: string | null;
   sql?: string | null;
   api?: string | null;
   python?: string | null;
+  requirements?: string | null;
   flutter?: string | null;
+  pubspec?: string | null;
   readme?: string | null;
   images?: OkapiArtifacts["images"];
 }): OkapiArtifacts {
@@ -135,10 +147,13 @@ export function artifactsFromSnap(snap: {
     react: snap.react,
     reactNative: snap.reactNative,
     nextjs: snap.nextjs,
+    packageJson: snap.packageJson,
     sql: snap.sql,
     api: snap.api,
     python: snap.python,
+    requirements: snap.requirements,
     flutter: snap.flutter,
+    pubspec: snap.pubspec,
     readme: snap.readme,
     images: snap.images,
   });
@@ -176,10 +191,13 @@ export function listFilledArtifactLabels(
   if (a.react) labels.push("React");
   if (a.reactNative) labels.push("React Native");
   if (a.nextjs) labels.push("Next.js");
+  if (a.packageJson) labels.push("package.json");
   if (a.sql) labels.push("SQL");
   if (a.api) labels.push("API");
   if (a.python) labels.push("Python");
+  if (a.requirements) labels.push("requirements");
   if (a.flutter) labels.push("Flutter");
+  if (a.pubspec) labels.push("pubspec");
   if (a.readme) labels.push("README");
   return labels;
 }
@@ -196,9 +214,12 @@ export function ensureReadmeArtifact(
     "Projet généré avec Okapi (MMC SARL).",
     "",
     opts.hasHtml
-      ? "- Ouvre `app.html` en Preview, ou le Studio pour éditer tous les fichiers."
+      ? "- Ouvre `app.html` en Preview Okapi (données cloud via window.Okapi)."
       : "- Ouvre le Studio Okapi pour compléter les fichiers.",
-    "- Schéma SQL / API : onglets Code ou Studio si présents.",
+    "- Next/React : `package.json` + `npm install` puis `npm run dev` en local.",
+    "- Flutter : `pubspec.yaml` + `lib/main.dart` → ouvre dans Android Studio / VS Code.",
+    "- Python : `requirements.txt` + `pip install -r requirements.txt`.",
+    "- Schéma SQL / api.ts : contrats backend ; le runtime Preview = base Okapi.",
     "",
   ];
   return { ...artifacts, readme: lines.join("\n") };

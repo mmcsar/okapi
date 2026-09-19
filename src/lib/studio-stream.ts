@@ -12,6 +12,19 @@ export type StudioStreamStatus = {
   repairing?: boolean;
 };
 
+/** Live token / text chunk — Agent shows code evolving (Cursor-like). */
+export type StudioStreamDelta = {
+  type: "delta";
+  text: string;
+};
+
+/** A file finished parsing (optional progressive apply). */
+export type StudioStreamFile = {
+  type: "file";
+  fileId: StudioFileId;
+  content: string;
+};
+
 export type StudioStreamDone = {
   type: "done";
   title?: string;
@@ -30,6 +43,8 @@ export type StudioStreamError = {
 
 export type StudioStreamEvent =
   | StudioStreamStatus
+  | StudioStreamDelta
+  | StudioStreamFile
   | StudioStreamDone
   | StudioStreamError;
 
@@ -54,7 +69,13 @@ export function parseStudioStreamLine(line: string): StudioStreamEvent {
     throw new Error("Réponse Studio invalide.");
   }
   const type = (raw as { type: unknown }).type;
-  if (type !== "status" && type !== "done" && type !== "error") {
+  if (
+    type !== "status" &&
+    type !== "delta" &&
+    type !== "file" &&
+    type !== "done" &&
+    type !== "error"
+  ) {
     throw new Error(`Événement Studio inconnu: ${String(type)}`);
   }
   return raw as StudioStreamEvent;

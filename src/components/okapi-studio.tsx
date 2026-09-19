@@ -14,6 +14,8 @@ import { useOkapiPreviewBridge } from "@/hooks/use-okapi-preview-bridge";
 import {
   OKAPI_PREVIEW_SANDBOX,
   injectOkapiRuntime,
+  resolveOkapiCloudStatus,
+  studioStackHints,
 } from "@/lib/okapi-runtime";
 import {
   OKAPI_AGENTS,
@@ -27,7 +29,13 @@ import {
   countStudioProblemBadge,
   type StudioProblem,
 } from "@/lib/studio-problems";
+import {
+  configureMonacoStudio,
+  monacoMarkersToProblems,
+  studioFilePath,
+} from "@/lib/monaco-studio";
 import { readStudioStream } from "@/lib/studio-stream";
+import type { OnMount } from "@monaco-editor/react";
 
 export type { StudioFileId } from "@/lib/studio-files";
 
@@ -57,10 +65,13 @@ type OkapiStudioProps = {
   react: string | null;
   reactNative: string | null;
   nextjs: string | null;
+  packageJson: string | null;
   sql: string | null;
   api: string | null;
   python: string | null;
+  requirements: string | null;
   flutter: string | null;
+  pubspec: string | null;
   readme: string | null;
   showPreview: boolean;
   engine?: string;
@@ -73,7 +84,9 @@ type OkapiStudioProps = {
   seedMessages?: { role: "user" | "assistant"; content: string }[];
   onChangeFile: (id: StudioFileId, value: string) => void;
   onCommitted?: (fileId: StudioFileId, content: string) => void;
-  onSaveCloud?: () => void | Promise<boolean>;
+  onSaveCloud?: (opts?: { silent?: boolean }) => void | Promise<boolean>;
+  /** Nouveau projet vide (parent efface les artefacts) */
+  onNewProject?: () => void;
 };
 
 type AiMsg = { role: "user" | "assistant"; content: string };
@@ -234,10 +247,13 @@ export function OkapiStudio({
   react,
   reactNative,
   nextjs,
+  packageJson,
   sql,
   api,
   python,
+  requirements,
   flutter,
+  pubspec,
   readme,
   showPreview: _showPreview,
   engine = "flash",
@@ -249,6 +265,7 @@ export function OkapiStudio({
   onChangeFile,
   onCommitted,
   onSaveCloud,
+  onNewProject,
 }: OkapiStudioProps) {
   const files = useMemo<StudioFile[]>(
     () =>
@@ -257,13 +274,29 @@ export function OkapiStudio({
         react,
         reactNative,
         nextjs,
+        packageJson,
         sql,
         api,
         python,
+        requirements,
         flutter,
+        pubspec,
         readme,
       }),
-    [html, react, reactNative, nextjs, sql, api, python, flutter, readme],
+    [
+      html,
+      react,
+      reactNative,
+      nextjs,
+      packageJson,
+      sql,
+      api,
+      python,
+      requirements,
+      flutter,
+      pubspec,
+      readme,
+    ],
   );
 
   const [activeId, setActiveId] = useState<StudioFileId>(DEFAULT_STUDIO_FILE_ID);
@@ -282,15 +315,20 @@ export function OkapiStudio({
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [aiOpen, setAiOpen] = useState(true);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(true);
   const [termCmd, setTermCmd] = useState("");
-  const [termHeight, setTermHeight] = useState(220);
+  const [termHeight, setTermHeight] = useState(200);
   const termInputRef = useRef<HTMLInputElement>(null);
   const [previewKey, setPreviewKey] = useState(0);
   const [termTab, setTermTab] = useState<TermTab>("terminal");
+  const [serverRunning, setServerRunning] = useState(false);
   const [termLines, setTermLines] = useState<TermLine[]>([
     {
-      t: "Okapi Terminal — Ctrl+` pour ouvrir/fermer · tape help",
+      t: "Windows PowerShell · Okapi Studio",
+      kind: "info",
+    },
+    {
+      t: "Copyright (c) MMC SARL. Tape help · npm run dev pour lancer le serveur.",
       kind: "info",
     },
   ]);
@@ -303,6 +341,10 @@ export function OkapiStudio({
     step: number;
     total: number;
   } | null>(null);
+  /** Code en train d’être écrit — visible dans l’Agent (comme Cursor). */
+  const [aiLiveCode, setAiLiveCode] = useState("");
+  const [aiLiveLabel, setAiLiveLabel] = useState("Code");
+  const liveCodeEndRef = useRef<HTMLPreElement>(null);
   const [pendingList, setPendingList] = useState<PendingEdit[]>([]);
   const pending =
     pendingList.find((p) => p.fileId === activeId) ?? pendingList[0] ?? null;
@@ -311,11 +353,12 @@ export function OkapiStudio({
   const [helpOpen, setHelpOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const termEndRef = useRef<HTMLDivElement>(null);
+  const serverTimersRef = useRef<number[]>([]);
   const [aiMessages, setAiMessages] = useState<AiMsg[]>([
     {
       role: "assistant",
       content:
-        "Coach Okapi prêt. Décris ton projet ou une modif — je réponds à la demande.",
+        "Coach Okapi prêt. Décris le projet — je génère tous les fichiers, ouvre le terminal PowerShell et lance le serveur Preview.",
     },
   ]);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
@@ -325,6 +368,28 @@ export function OkapiStudio({
   const previewUrl = `okapi://preview/${previewSlug(title)}`;
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   useOkapiPreviewBridge(previewIframeRef, projectId);
+
+  const cloudStatus = useMemo(
+    () =>
+      resolveOkapiCloudStatus({
+        projectId,
+        accessToken,
+      }),
+    [projectId, accessToken],
+  );
+
+  const stackHints = useMemo(
+    () =>
+      studioStackHints({
+        nextjs,
+        packageJson,
+        flutter,
+        pubspec,
+        python,
+        requirements,
+      }),
+    [nextjs, packageJson, flutter, pubspec, python, requirements],
+  );
 
   const liveHtml = useMemo(() => {
     if (!html) return html;
@@ -336,15 +401,92 @@ export function OkapiStudio({
     });
   }, [html, projectId]);
 
+  // Quand le cloud ID arrive après Sauver, recharger la Preview (tableaux cloud).
+  const prevProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    const prev = prevProjectIdRef.current;
+    prevProjectIdRef.current = projectId;
+    if (projectId && projectId !== prev) {
+      setPreviewKey((k) => k + 1);
+    }
+  }, [projectId]);
+
   const logTerm = useCallback((text: string, kind: TermLine["kind"] = "info") => {
     const stamp = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     setTermLines((prev) => [...prev, { t: `[${stamp}] ${text}`, kind }]);
   }, []);
 
+  /** Après Accept : sauver pour brancher le cloud (Preview locale marche déjà). */
+  const ensureCloudAfterAccept = useCallback(
+    async (hadHtml: boolean) => {
+      if (!onSaveCloud) return;
+      if (!accessToken) {
+        logTerm(
+          "Mode invité · tableaux Preview en mémoire locale — Connexion + Sauver pour le cloud",
+          "info",
+        );
+        setAiMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "✓ Preview active (mémoire locale) — ajoute un produit pour le voir dans le tableau.\nPour garder le projet et les données → Connexion, puis Sauver (Ctrl+S).",
+          },
+        ]);
+        return;
+      }
+      if (projectId) {
+        if (hadHtml) setPreviewKey((k) => k + 1);
+        return;
+      }
+      // Laisse le debounce onCommitted finir d’écrire snapRef, puis force une save
+      logTerm("Cloud · sauvegarde du projet…", "cmd");
+      await new Promise((r) => window.setTimeout(r, 350));
+      const ok = await onSaveCloud({ silent: true });
+      if (ok) {
+        logTerm("Cloud · projet sauvé — visible dans Mes projets", "ok");
+        setAiMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "✓ Projet sauvegardé. Retrouve-le dans Mes projets. Tableaux Preview → cloud Okapi.",
+          },
+        ]);
+        if (hadHtml) setPreviewKey((k) => k + 1);
+      } else {
+        logTerm(
+          "Cloud · échec — clique Sauver ou Ctrl+S (vérifie la connexion)",
+          "err",
+        );
+        setAiMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "Sauvegarde cloud échouée. Vérifie que tu es connecté, puis Sauver / Ctrl+S. La Preview locale reste utilisable.",
+          },
+        ]);
+      }
+    },
+    [onSaveCloud, accessToken, projectId, logTerm],
+  );
+
   useEffect(() => {
     if (!seedKey || seedKey === lastSeedKeyRef.current) return;
-    if (!seedMessages?.length) return;
     lastSeedKeyRef.current = seedKey;
+    setPendingList([]);
+    setDirtyIds(new Set());
+    if (!seedMessages?.length) {
+      setAiMessages([
+        {
+          role: "assistant",
+          content:
+            "Nouveau projet. Décris l’app — Okapi génère les fichiers ici.",
+        },
+      ]);
+      return;
+    }
     const brief = seedMessages.find((m) => m.role === "user")?.content || "";
     const detected = resolveOkapiAgent({
       sector,
@@ -358,7 +500,8 @@ export function OkapiStudio({
       })),
     );
     setAiOpen(true);
-    setPreviewOpen(Boolean(html?.trim()));
+    // Preview reste fermé : Agent prioritaire ; ouvrir via activity bar
+    setPreviewOpen(false);
     const stamp = new Date().toLocaleTimeString("fr-FR", {
       hour: "2-digit",
       minute: "2-digit",
@@ -392,18 +535,85 @@ export function OkapiStudio({
     [files, isFileVisible],
   );
 
-  const studioProblems = useMemo(
-    () =>
-      analyzeStudioProblems({
-        html,
-        react,
-        nextjs,
-        sql,
-        api,
-        pendingFileIds: pendingList.map((p) => p.fileId),
-      }),
-    [html, react, nextjs, sql, api, pendingList],
+  const [monacoProblems, setMonacoProblems] = useState<StudioProblem[]>([]);
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  const syncMonacoProblems = useCallback(() => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    if (!monaco || !editor) return;
+    const model = editor.getModel();
+    if (!model) {
+      setMonacoProblems([]);
+      return;
+    }
+    const fileId = activeIdRef.current;
+    const lang = model.getLanguageId();
+    if (
+      lang !== "typescript" &&
+      lang !== "javascript" &&
+      lang !== "json"
+    ) {
+      setMonacoProblems([]);
+      return;
+    }
+    const markers = monaco.editor.getModelMarkers({ resource: model.uri });
+    setMonacoProblems(monacoMarkersToProblems(fileId, markers));
+  }, []);
+
+  const handleMonacoBeforeMount = useCallback((monaco: Parameters<OnMount>[1]) => {
+    configureMonacoStudio(monaco);
+  }, []);
+
+  const handleMonacoMount = useCallback<OnMount>(
+    (editor, monaco) => {
+      editorRef.current = editor;
+      monacoRef.current = monaco;
+      configureMonacoStudio(monaco);
+      syncMonacoProblems();
+      const sub = monaco.editor.onDidChangeMarkers(() => {
+        syncMonacoProblems();
+      });
+      const sub2 = editor.onDidChangeModelContent(() => {
+        // Worker updates markers async; light debounce via rAF
+        requestAnimationFrame(() => syncMonacoProblems());
+      });
+      editor.onDidDispose(() => {
+        sub.dispose();
+        sub2.dispose();
+        if (editorRef.current === editor) editorRef.current = null;
+      });
+    },
+    [syncMonacoProblems],
   );
+
+  useEffect(() => {
+    // Re-read markers when switching files
+    const t = window.setTimeout(() => syncMonacoProblems(), 120);
+    return () => window.clearTimeout(t);
+  }, [activeId, syncMonacoProblems]);
+
+  const studioProblems = useMemo(() => {
+    const heuristic = analyzeStudioProblems({
+      html,
+      react,
+      nextjs,
+      sql,
+      api,
+      pendingFileIds: pendingList.map((p) => p.fileId),
+    });
+    // Monaco covers TS/JS/JSON for the active buffer; keep heuristics for HTML/SQL/etc.
+    const monacoFileIds = new Set(monacoProblems.map((p) => p.fileId));
+    const filtered = heuristic.filter((h) => {
+      if (!monacoFileIds.has(h.fileId)) return true;
+      // Drop weak heuristic dupes on files Monaco already types
+      return h.id.startsWith("pending-");
+    });
+    return [...filtered, ...monacoProblems];
+  }, [html, react, nextjs, sql, api, pendingList, monacoProblems]);
 
   const problemsBadge = useMemo(
     () => countStudioProblemBadge(studioProblems),
@@ -478,7 +688,7 @@ export function OkapiStudio({
       },
       {
         id: "terminal",
-        label: "Basculer Terminal",
+        label: "Basculer Terminal PowerShell",
         hint: "Ctrl+`",
         run: () =>
           setTerminalOpen((v) => {
@@ -486,6 +696,12 @@ export function OkapiStudio({
             if (next) setTermTab("terminal");
             return next;
           }),
+      },
+      {
+        id: "dev-server",
+        label: "Lancer le serveur (npm run dev)",
+        hint: "serve",
+        run: () => bootOkapiDevServer({ force: true }),
       },
       {
         id: "preview",
@@ -569,10 +785,18 @@ export function OkapiStudio({
         },
       });
     }
+    if (onNewProject) {
+      list.push({
+        id: "new-project",
+        label: "Nouveau projet",
+        hint: "vider workspace",
+        run: () => onNewProject(),
+      });
+    }
     return list;
     // acceptPending/rejectPending via closure at click time
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending, pendingList.length, onSaveCloud, logTerm]);
+  }, [pending, pendingList.length, onSaveCloud, onNewProject, logTerm, html, title]);
 
   const cmdMatches = useMemo(() => {
     const q = cmdQuery.trim().toLowerCase();
@@ -621,7 +845,11 @@ export function OkapiStudio({
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [aiMessages, aiBusy, aiProgressKey]);
+  }, [aiMessages, aiBusy, aiProgressKey, aiLiveCode]);
+
+  useEffect(() => {
+    liveCodeEndRef.current?.scrollIntoView({ block: "nearest" });
+  }, [aiLiveCode]);
 
   useEffect(() => {
     termEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -639,51 +867,177 @@ export function OkapiStudio({
     setTerminalOpen(true);
   }
 
+  function clearServerTimers() {
+    for (const id of serverTimersRef.current) window.clearTimeout(id);
+    serverTimersRef.current = [];
+  }
+
+  function scheduleTerm(delay: number, text: string, kind: TermLine["kind"] = "info") {
+    const id = window.setTimeout(() => logTerm(text, kind), delay);
+    serverTimersRef.current.push(id);
+  }
+
+  /** Lance le « serveur » Okapi (Preview) — UX type npm run dev / PowerShell. */
+  function bootOkapiDevServer(opts?: { force?: boolean }) {
+    const hasHtml = Boolean(html?.trim());
+    openTerminal("terminal");
+    clearServerTimers();
+
+    const projectName = (title || "okapi-app")
+      .replace(/[^\w\-]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 32) || "okapi-app";
+    const cwd = `C:\\Users\\Okapi\\projects\\${projectName}`;
+
+    logTerm(`PS ${cwd}> npm run dev`, "cmd");
+
+    if (!hasHtml && !opts?.force) {
+      scheduleTerm(200, "error: aucun app.html — demande un projet à l’Agent d’abord", "err");
+      setServerRunning(false);
+      return;
+    }
+
+    setServerRunning(true);
+    scheduleTerm(280, "", "info");
+    scheduleTerm(320, "> okapi-preview@1.0.0 dev", "info");
+    scheduleTerm(480, "> okapi serve --preview", "info");
+    scheduleTerm(720, "", "info");
+    scheduleTerm(900, "▲ Okapi Preview 16.x (Turbopack)", "ok");
+    scheduleTerm(1100, `- Local:        ${previewUrl}`, "ok");
+    scheduleTerm(1280, `- Network:      http://127.0.0.1:3000`, "info");
+    scheduleTerm(1450, "✓ Ready in 1.2s", "ok");
+    scheduleTerm(1600, "○ Compiling / …", "info");
+
+    const openId = window.setTimeout(() => {
+      setPreviewOpen(true);
+      setPreviewKey((k) => k + 1);
+      logTerm("✓ Preview ouverte — serveur Okapi actif", "ok");
+      logTerm(`PS ${cwd}>`, "cmd");
+    }, 1750);
+    serverTimersRef.current.push(openId);
+  }
+
+  function stopOkapiDevServer() {
+    clearServerTimers();
+    setServerRunning(false);
+    logTerm("^C", "cmd");
+    logTerm("Serveur Okapi arrêté.", "info");
+  }
+
   function runTermCommand(raw: string) {
     const line = raw.trim();
     if (!line) return;
-    logTerm(`okapi › ${line}`, "cmd");
+    const projectName = (title || "okapi-app")
+      .replace(/[^\w\-]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 32) || "okapi-app";
+    const cwd = `C:\\Users\\Okapi\\projects\\${projectName}`;
+    logTerm(`PS ${cwd}> ${line}`, "cmd");
     setTermCmd("");
-    const [cmd, ...rest] = line.split(/\s+/);
-    const arg = rest.join(" ").trim().toLowerCase();
-    const c = cmd.toLowerCase();
 
-    if (c === "help" || c === "?") {
+    const lower = line.toLowerCase();
+    const parts = line.split(/\s+/);
+    const c0 = (parts[0] || "").toLowerCase();
+    const c1 = (parts[1] || "").toLowerCase();
+    const c2 = (parts[2] || "").toLowerCase();
+
+    // PowerShell / shell basics
+    if (c0 === "help" || c0 === "?" || lower === "get-help") {
       logTerm(
-        "Commandes : help · clear · status · preview · agent · open <fichier> · accept · reject · (Ctrl+P = quick open)",
+        "PowerShell Okapi : npm run dev · npm start · npx serve · preview · stop · agent · open <fichier> · dir · pwd · clear · accept · reject",
         "info",
       );
       return;
     }
-    if (c === "clear" || c === "cls") {
+    if (c0 === "clear" || c0 === "cls" || lower === "clear-host") {
       setTermLines([
         {
-          t: "Terminal vidé. Ctrl+` pour masquer · help pour les commandes.",
+          t: "Windows PowerShell · Okapi Studio — écran effacé.",
           kind: "info",
         },
       ]);
       return;
     }
-    if (c === "status") {
+    if (c0 === "pwd" || lower === "get-location") {
+      logTerm(cwd, "ok");
+      return;
+    }
+    if (c0 === "dir" || c0 === "ls" || lower === "get-childitem") {
+      const listed = files.filter((f) => f.value.trim() || pinnedIds.has(f.id));
+      if (listed.length === 0) {
+        logTerm("(vide) — génère un projet avec l’Agent", "info");
+        return;
+      }
+      for (const f of listed) {
+        logTerm(
+          `${String(countLines(f.value)).padStart(6)}  ${f.label}`,
+          "info",
+        );
+      }
+      return;
+    }
+    if (c0 === "cd") {
+      logTerm(`Set-Location : reste dans ${cwd} (sandbox Okapi)`, "info");
+      return;
+    }
+    if (c0 === "echo" || c0 === "write-host") {
+      logTerm(parts.slice(1).join(" ") || "", "info");
+      return;
+    }
+    if (c0 === "powershell" || c0 === "pwsh" || c0 === "cmd") {
+      logTerm("Shell Okapi déjà actif (PowerShell).", "ok");
+      logTerm("Lance le serveur : npm run dev", "info");
+      return;
+    }
+
+    // Dev server
+    if (
+      lower === "npm run dev" ||
+      lower === "npm start" ||
+      lower === "npm run start" ||
+      lower === "yarn dev" ||
+      lower === "pnpm dev" ||
+      lower === "npx serve" ||
+      lower === "npx vite" ||
+      lower === "node server" ||
+      c0 === "serve" ||
+      (c0 === "npx" && (c1 === "serve" || c1 === "vite")) ||
+      (c0 === "npm" && c1 === "run" && (c2 === "dev" || c2 === "start"))
+    ) {
+      bootOkapiDevServer({ force: true });
+      return;
+    }
+    if (
+      lower === "stop" ||
+      lower === "npm run stop" ||
+      lower === "kill" ||
+      lower === "exit"
+    ) {
+      if (serverRunning) stopOkapiDevServer();
+      else logTerm("Aucun serveur en cours.", "info");
+      return;
+    }
+
+    if (c0 === "status") {
       logTerm(
-        `Projet « ${title || "Okapi"} » · fichier @${active.label} · ${lineCount} lignes · agent ${aiOpen ? "ouvert" : "fermé"} · pending ${pending ? "oui" : "non"}`,
+        `Projet « ${title || "Okapi"} » · @${active.label} · ${lineCount} ln · serveur ${serverRunning ? "ON" : "OFF"} · agent ${aiOpen ? "ouvert" : "fermé"}`,
         "ok",
       );
       return;
     }
-    if (c === "preview") {
+    if (c0 === "preview") {
       setPreviewOpen(true);
       setPreviewKey((k) => k + 1);
       logTerm("Preview ouverte / actualisée", "ok");
       return;
     }
-    if (c === "agent") {
+    if (c0 === "agent") {
       setAiOpen(true);
       logTerm("Agent Okapi focus (Ctrl+L)", "ok");
       window.setTimeout(() => aiInputRef.current?.focus(), 80);
       return;
     }
-    if (c === "accept") {
+    if (c0 === "accept") {
       if (!pending) {
         logTerm("Aucun diff en attente", "info");
         return;
@@ -691,7 +1045,7 @@ export function OkapiStudio({
       acceptPending();
       return;
     }
-    if (c === "reject") {
+    if (c0 === "reject") {
       if (!pending) {
         logTerm("Aucun diff en attente", "info");
         return;
@@ -699,7 +1053,8 @@ export function OkapiStudio({
       rejectPending();
       return;
     }
-    if (c === "open") {
+    if (c0 === "open" || c0 === "code") {
+      const arg = parts.slice(1).join(" ").trim().toLowerCase();
       const match = files.find(
         (f) =>
           f.id.toLowerCase() === arg ||
@@ -717,7 +1072,17 @@ export function OkapiStudio({
       logTerm(`Ouvert ${match.label}`, "ok");
       return;
     }
-    logTerm(`Commande inconnue : ${cmd}. Tape help`, "err");
+    if (c0 === "node" || c0 === "npm" || c0 === "npx" || c0 === "yarn") {
+      logTerm(
+        `okapi: '${line}' — pour le serveur Preview utilise : npm run dev`,
+        "err",
+      );
+      return;
+    }
+    logTerm(
+      `okapi: La commande « ${c0} » n’est pas reconnue. Tape help`,
+      "err",
+    );
   }
 
   const editorValue =
@@ -729,6 +1094,13 @@ export function OkapiStudio({
 
   const lineCount = countLines(editorValue);
   const hasPendingHere = Boolean(pending && pending.fileId === active.id);
+
+  useEffect(() => {
+    return () => {
+      for (const id of serverTimersRef.current) window.clearTimeout(id);
+      serverTimersRef.current = [];
+    };
+  }, []);
 
   useEffect(() => {
     if (!quickOpen) return;
@@ -859,6 +1231,7 @@ export function OkapiStudio({
     setAiBusy(true);
     setAiError(null);
     setAiProgress(null);
+    setAiLiveCode("");
     if (!opts?.instruction) setAiPrompt("");
     setAiMessages((prev) => [...prev, { role: "user", content: instruction }]);
     logTerm(`Agent ${activeAgent.label} · ${activeAgent.short}`, "cmd");
@@ -868,6 +1241,7 @@ export function OkapiStudio({
       wantsStudioScaffold(instruction, {
         hasExistingFiles: visibleFiles.some((f) => f.value.trim()),
       });
+    setAiLiveLabel(asProject ? "Projet · stream" : `Édit · ${target.label}`);
 
     // Contexte multi-fichiers + historique Agent (envoyé aux APIs Studio)
     const workspacePayload = files
@@ -901,13 +1275,18 @@ export function OkapiStudio({
           {
             role: "assistant",
             content:
-              "Je construis le projet complet — tu verras la progression en direct.",
+              "Je construis le projet — le code défile ici en direct (comme Cursor).",
           },
         ]);
 
         const res = await fetch("/api/studio-project", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(accessToken
+              ? { Authorization: `Bearer ${accessToken}` }
+              : {}),
+          },
           body: JSON.stringify({
             instruction,
             engine,
@@ -945,6 +1324,10 @@ export function OkapiStudio({
                 total: event.total ?? 4,
               });
               logTerm(event.message, event.repairing ? "ok" : "cmd");
+            } else if (event.type === "delta") {
+              setAiLiveCode((prev) => (prev + event.text).slice(-14_000));
+            } else if (event.type === "file") {
+              setAiLiveLabel(`Fichier · ${event.fileId}`);
             }
           });
           data = done;
@@ -977,6 +1360,7 @@ export function OkapiStudio({
         }
 
         setAiProgress(null);
+        setAiLiveCode("");
         deliverProjectBatch(batch, {
           note: data.note,
           large: Boolean(data.large),
@@ -986,13 +1370,18 @@ export function OkapiStudio({
 
       logTerm(`IA · édition demandée sur ${target.label}…`, "cmd");
       setAiProgress({
-        message: `Édition de ${target.label}…`,
+        message: `Écriture de ${target.label}…`,
         step: 1,
         total: 2,
       });
       const res = await fetch("/api/studio-edit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : {}),
+        },
         body: JSON.stringify({
           instruction,
           fileId: target.id,
@@ -1004,14 +1393,19 @@ export function OkapiStudio({
           sector,
           workspace: workspacePayload,
           history: historyPayload,
+          stream: true,
         }),
       });
-      setAiProgress({
-        message: "Préparation des diffs…",
-        step: 2,
-        total: 2,
-      });
-      const data = (await res.json().catch(() => null)) as {
+
+      if (!res.ok) {
+        const fail = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(fail?.error || "Édition impossible.");
+      }
+
+      const editCt = res.headers.get("content-type") || "";
+      let data: {
         content?: string;
         note?: string;
         multi?: boolean;
@@ -1019,9 +1413,40 @@ export function OkapiStudio({
         error?: string;
       } | null;
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Édition impossible.");
+      if (editCt.includes("ndjson") || editCt.includes("x-ndjson")) {
+        const done = await readStudioStream(res, (event) => {
+          if (event.type === "status") {
+            setAiProgress({
+              message: event.message,
+              step: event.step ?? 1,
+              total: event.total ?? 2,
+            });
+            logTerm(event.message, "cmd");
+          } else if (event.type === "delta") {
+            setAiLiveCode((prev) => (prev + event.text).slice(-14_000));
+          } else if (event.type === "file") {
+            setAiLiveLabel(`Fichier · ${event.fileId}`);
+          }
+        });
+        data = {
+          note: done.note,
+          multi: done.multi,
+          files: done.files,
+          content: done.files[0]?.content,
+        };
+      } else {
+        setAiProgress({
+          message: "Préparation des diffs…",
+          step: 2,
+          total: 2,
+        });
+        data = (await res.json().catch(() => null)) as typeof data;
+        if (!data || data.error) {
+          throw new Error(data?.error || "Édition impossible.");
+        }
       }
+
+      setAiLiveCode("");
 
       const edits: PendingEdit[] = (
         data?.files?.length
@@ -1085,13 +1510,20 @@ export function OkapiStudio({
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erreur IA Studio";
       setAiError(msg);
-      setAiMessages((prev) => [...prev, { role: "assistant", content: msg }]);
+      setAiMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `${msg}\n\nAstuce: depuis Agent Accueil, colle le même brief — Preview plus rapide, puis Continuer dans Studio.`,
+        },
+      ]);
       logTerm(`Erreur IA · ${msg}`, "err");
       setTerminalOpen(true);
       setTermTab("terminal");
     } finally {
       setAiBusy(false);
       setAiProgress(null);
+      setAiLiveCode("");
     }
   }
 
@@ -1161,10 +1593,6 @@ export function OkapiStudio({
     setActiveId(preferHtml?.fileId ?? batch[0]!.fileId);
     setDiffView("after");
     setAiOpen(true);
-    if (hadHtml) {
-      setPreviewOpen(true);
-      setPreviewKey((k) => k + 1);
-    }
     const names = ids.slice(0, 6).join(", ") + (ids.length > 6 ? "…" : "");
     setAiMessages((prev) => [
       ...prev,
@@ -1172,17 +1600,29 @@ export function OkapiStudio({
         role: "assistant",
         content: [
           opts?.note || "Projet livré.",
-          `✓ ${n} fichier${n > 1 ? "s" : ""} dans l’explorateur${
+          `✓ ${n} fichier${n > 1 ? "s" : ""} dans Monaco${
             opts?.large ? " · grand projet" : ""
           }.`,
           names ? `(${names})` : "",
-          "Dis la suite — je continue comme ton coach.",
+          hadHtml
+            ? "Preview en cours — ajoute une ligne dans le formulaire pour remplir le tableau."
+            : "Dis la suite — ou lance npm run dev quand tu auras du HTML.",
         ]
           .filter(Boolean)
           .join(" "),
       },
     ]);
-    logTerm(`Livré · ${n} fichiers (mode coach)`, "ok");
+    logTerm(`Livré · ${n} fichiers (Studio Okapi)`, "ok");
+    // Sauver d’abord (cloud), puis lancer Preview — évite tableaux vides sans projectId.
+    void (async () => {
+      await ensureCloudAfterAccept(hadHtml);
+      if (hadHtml) {
+        bootOkapiDevServer();
+      } else {
+        openTerminal("terminal");
+        logTerm("Projet prêt — génère app.html puis : npm run dev", "info");
+      }
+    })();
     window.setTimeout(() => aiInputRef.current?.focus(), 80);
   }
 
@@ -1209,8 +1649,12 @@ export function OkapiStudio({
         },
       ]);
       if (wasHtml) {
-        setPreviewOpen(true);
-        setPreviewKey((k) => k + 1);
+        void (async () => {
+          await ensureCloudAfterAccept(true);
+          bootOkapiDevServer();
+        })();
+      } else {
+        void ensureCloudAfterAccept(false);
       }
     } else {
       setActiveId(remaining[0]!.fileId);
@@ -1328,6 +1772,12 @@ export function OkapiStudio({
         setQuickOpen(false);
         return;
       }
+      // Ctrl+W — fermer onglet actif
+      if (meta && e.key.toLowerCase() === "w" && !typing) {
+        e.preventDefault();
+        closeTab(activeId);
+        return;
+      }
       // Ctrl+J — panneau bas
       if (meta && e.key.toLowerCase() === "j" && !typing) {
         e.preventDefault();
@@ -1361,7 +1811,7 @@ export function OkapiStudio({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiOpen, pending, aiBusy, aiPrompt, active.id, active.value, engine, quickOpen, cmdOpen, onSaveCloud, helpOpen]);
+  }, [aiOpen, pending, aiBusy, aiPrompt, active.id, active.value, activeId, engine, quickOpen, cmdOpen, onSaveCloud, helpOpen]);
 
   useEffect(() => {
     if (aiOpen) {
@@ -1388,56 +1838,45 @@ export function OkapiStudio({
   };
 
   return (
-    <div className="okapi-studio-shell relative flex h-full min-h-[480px] flex-1 flex-col overflow-hidden">
-      {/* Safety banner */}
-      <div className="okapi-studio-chrome flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[#e8892a] shadow-[0_0_8px_rgba(232,137,42,0.65)]" />
-        <p className="text-[11px] leading-snug text-[#b7c9bf]">
-          Agent à droite · Terminal en bas (
-          <span className="font-mono text-[#ffd7a8]">Ctrl+`</span>
-          ) — diffs après{" "}
-          <span className="font-semibold text-[#3d8f68]">Accepter</span>.
-        </p>
-      </div>
-
+    <div className="okapi-studio-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         {/* Activity bar */}
-        <div className="okapi-studio-activity flex w-full shrink-0 flex-row items-center gap-1 border-b border-white/10 px-2 py-1 lg:w-12 lg:flex-col lg:border-b-0 lg:border-r lg:px-0 lg:py-2">
+        <div className="okapi-studio-activity flex w-full shrink-0 flex-row items-center gap-0.5 border-b border-white/10 px-1 py-0.5 lg:w-10 lg:flex-col lg:gap-0.5 lg:border-b-0 lg:border-r lg:px-0 lg:py-1">
           <button
             type="button"
             title="Fichiers (Ctrl+B)"
             onClick={() => setExplorerOpen((v) => !v)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
+            className={`flex h-8 w-8 items-center justify-center rounded transition ${
               explorerOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
-            <IconExplorer className="h-5 w-5" />
+            <IconExplorer className="h-4 w-4" />
           </button>
           <button
             type="button"
             title="IA"
             onClick={() => setAiOpen((v) => !v)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
+            className={`flex h-8 w-8 items-center justify-center rounded transition ${
               aiOpen
                 ? "border-b-2 border-[#ffd7a8] bg-[#e8892a]/25 text-[#ffd7a8] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
-            <IconSpark className="h-5 w-5" />
+            <IconSpark className="h-4 w-4" />
           </button>
           <button
             type="button"
             title="Preview"
             onClick={() => setPreviewOpen((v) => !v)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
+            className={`flex h-8 w-8 items-center justify-center rounded transition ${
               previewOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
-            <IconPreview className="h-5 w-5" />
+            <IconPreview className="h-4 w-4" />
           </button>
           <button
             type="button"
@@ -1449,55 +1888,54 @@ export function OkapiStudio({
                 return next;
               })
             }
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition ${
+            className={`flex h-8 w-8 items-center justify-center rounded transition ${
               terminalOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
-            <IconTerminal className="h-5 w-5" />
+            <IconTerminal className="h-4 w-4" />
           </button>
-          <div className="ml-auto px-1 text-center text-[9px] font-bold uppercase tracking-wider text-[#5f766a] lg:ml-0 lg:mt-auto lg:pb-1">
+          <div className="ml-auto px-1 text-center text-[8px] font-bold uppercase tracking-wider text-[#5f766a] lg:ml-0 lg:mt-auto lg:pb-1">
             OK
           </div>
         </div>
 
-        {/* Explorer — hidden on small screens when preview open to save space */}
+        {/* Explorer */}
         {explorerOpen ? (
-          <aside className="okapi-studio-panel flex w-[min(72vw,220px)] shrink-0 flex-col border-r border-white/10 lg:w-[220px]">
-            <div className="border-b border-white/10 px-3 py-3">
+          <aside className="okapi-studio-panel flex w-[min(72vw,200px)] shrink-0 flex-col border-r border-white/10 lg:w-[200px]">
+            <div className="border-b border-white/10 px-2 py-1.5">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#7d9588]">
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#7d9588]">
                   Explorateur
                 </p>
                 <button
                   type="button"
                   onClick={() => setQuickOpen(true)}
-                  className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[9px] text-[#5f766a] hover:text-[#d5e4db]"
+                  className="rounded border border-white/10 px-1 py-0.5 font-mono text-[9px] text-[#5f766a] hover:text-[#d5e4db]"
                   title="Quick Open"
                 >
                   Ctrl+P
                 </button>
               </div>
-              <p className="mt-1 truncate text-[13px] font-semibold text-[#eef6f1]">
+              <p className="mt-0.5 truncate text-[12px] font-semibold text-[#eef6f1]">
                 {title || "Projet Okapi"}
               </p>
             </div>
-            <nav className="scrollbar-thin flex-1 overflow-auto px-1.5 py-2">
+            <nav className="scrollbar-thin flex-1 overflow-auto px-1 py-1.5">
               {groups.length === 0 ? (
-                <div className="mx-1.5 rounded-lg border border-dashed border-white/10 px-3 py-4 text-center">
+                <div className="mx-1 rounded border border-dashed border-white/10 px-2 py-3 text-center">
                   <p className="text-[11px] font-semibold text-[#c8ddd2]">
                     Projet vide
                   </p>
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-[#6a7f74]">
-                    Les fichiers (React, Next, SQL…) n’apparaissent qu’après ta
-                    demande à l’Agent.
+                  <p className="mt-1 text-[10px] leading-relaxed text-[#6a7f74]">
+                    Demande un fichier à l’Agent.
                   </p>
                 </div>
               ) : (
                 groups.map((group) => (
-                <div key={group.id} className="mb-3">
-                  <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#5f766a]">
+                <div key={group.id} className="mb-2">
+                  <p className="px-2 pb-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#5f766a]">
                     {group.label}
                   </p>
                   {group.items.map((file) => {
@@ -1509,7 +1947,7 @@ export function OkapiStudio({
                         key={file.id}
                         type="button"
                         onClick={() => openFile(file.id)}
-                        className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
+                        className={`mb-px flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left transition ${
                           selected
                             ? "bg-[#1b4f3a] text-white shadow-[inset_2px_0_0_#e8892a]"
                             : "text-[#b7c9bf] hover:bg-white/[0.04]"
@@ -1524,11 +1962,11 @@ export function OkapiStudio({
                                 : "bg-white/20"
                           }`}
                         />
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">
+                        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
                           {file.label}
                         </span>
                         <span
-                          className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                          className={`shrink-0 rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide ${
                             selected
                               ? "bg-white/15 text-white/90"
                               : "bg-white/5 text-[#7d9588]"
@@ -1561,7 +1999,7 @@ export function OkapiStudio({
                     return (
                       <div
                         key={file.id}
-                        className={`group flex h-9 shrink-0 items-center gap-1.5 border-r border-white/10 px-2.5 ${
+                        className={`group flex h-8 shrink-0 items-center gap-1 border-r border-white/10 px-2 ${
                           selected
                             ? "bg-[#15221c] text-[#eef6f1]"
                             : "bg-transparent text-[#7d9588] hover:bg-white/[0.03] hover:text-[#b7c9bf]"
@@ -1570,7 +2008,7 @@ export function OkapiStudio({
                         <button
                           type="button"
                           onClick={() => openFile(file.id)}
-                          className="flex max-w-[160px] items-center gap-1.5"
+                          className="flex max-w-[140px] items-center gap-1.5"
                           title={file.label}
                         >
                           {dirty ? (
@@ -1582,19 +2020,21 @@ export function OkapiStudio({
                               }`}
                             />
                           ) : null}
-                          <span className="truncate font-mono text-[12px] font-medium">
+                          <span className="truncate font-mono text-[11px] font-medium">
                             {file.label}
                           </span>
                         </button>
                         <button
                           type="button"
-                          title="Fermer l’onglet"
+                          title="Fermer (Ctrl+W)"
                           onClick={(e) => {
                             e.stopPropagation();
                             closeTab(file.id);
                           }}
-                          className={`rounded p-0.5 text-[10px] opacity-0 transition group-hover:opacity-100 ${
-                            selected ? "hover:bg-white/10" : "hover:bg-white/5"
+                          className={`rounded p-0.5 text-[10px] transition ${
+                            selected
+                              ? "opacity-70 hover:bg-white/10 hover:opacity-100"
+                              : "opacity-0 group-hover:opacity-100 hover:bg-white/5"
                           }`}
                         >
                           ×
@@ -1605,7 +2045,7 @@ export function OkapiStudio({
                   <button
                     type="button"
                     onClick={() => setQuickOpen(true)}
-                    className="flex h-9 shrink-0 items-center px-2.5 text-[11px] text-[#5f766a] hover:text-[#d5e4db]"
+                    className="flex h-8 shrink-0 items-center px-2 text-[11px] text-[#5f766a] hover:text-[#d5e4db]"
                     title="Quick Open (Ctrl+P)"
                   >
                     +
@@ -1711,16 +2151,16 @@ export function OkapiStudio({
 
               <div className="relative min-h-0 flex-1">
                 {!editorValue.trim() && !hasPendingHere ? (
-                  <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-8">
-                    <div className="max-w-sm rounded-2xl border border-white/10 bg-[#0d1512]/90 px-5 py-4 text-center backdrop-blur-sm">
-                      <p className="text-sm font-semibold text-[#eef6f1]">
+                  <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6">
+                    <div className="max-w-sm text-center">
+                      <p className="text-[13px] font-medium text-[#5f766a]/80">
                         {visibleFiles.length === 0
-                          ? "En attente du modèle"
+                          ? "En attente d’un projet"
                           : "Fichier vide"}
                       </p>
-                      <p className="mt-1.5 text-[12px] leading-relaxed text-[#7d9588]">
+                      <p className="mt-1 text-[11px] leading-snug text-[#5f766a]/55">
                         {visibleFiles.length === 0
-                          ? "Demande un projet ou un fichier à l’Agent — React, Next, SQL… n’apparaissent qu’alors."
+                          ? "Ctrl+L · demande à l’Agent"
                           : active.emptyHint}
                       </p>
                     </div>
@@ -1779,9 +2219,12 @@ export function OkapiStudio({
                 ) : (
                   <MonacoEditor
                     height="100%"
+                    path={studioFilePath(active.id)}
                     language={active.language}
                     theme="vs-dark"
                     value={editorValue}
+                    beforeMount={handleMonacoBeforeMount}
+                    onMount={handleMonacoMount}
                     onChange={(v) => {
                       if (pending?.fileId === active.id) return;
                       onChangeFile(active.id, v ?? "");
@@ -1798,59 +2241,87 @@ export function OkapiStudio({
                   />
                 )}
               </div>
+            </div>
 
-              {/* Status bar */}
-              <div className="flex h-[22px] shrink-0 items-center justify-between gap-3 border-t border-[#e8892a]/20 bg-gradient-to-r from-[#1b4f3a] via-[#245a44] to-[#1b4f3a] px-3 text-[10px] text-[#c8ddd2]">
-                <div className="flex items-center gap-3">
-                  <span className="font-semibold">Okapi Studio</span>
-                  <span>Ln {lineCount}</span>
-                  <span className="uppercase">{active.language}</span>
-                  <button
-                    type="button"
-                    onClick={() => openTerminal("terminal")}
-                    className="rounded px-1 font-semibold hover:bg-white/10"
-                    title="Ouvrir le terminal (Ctrl+`)"
+            {/* Preview — dans la colonne éditeur (Agent reste à droite) */}
+            {previewOpen ? (
+              <div className="okapi-studio-panel flex max-h-[38vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(48%,440px)] lg:border-l lg:border-t-0">
+                <div className="okapi-studio-chrome flex h-8 shrink-0 items-center gap-1.5 border-b px-2">
+                  <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.14em] text-[#7d9588]">
+                    Preview
+                  </span>
+                  <span
+                    className="shrink-0 rounded border border-white/10 bg-[#06100c]/50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#9bb0a4]"
+                    title="Seul app.html tourne ici — Next/Flutter/Python = ZIP"
                   >
-                    Terminal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCmdOpen(true)}
-                    className="rounded px-1 font-semibold hover:bg-white/10"
-                    title="Palette (Ctrl+Shift+P)"
-                  >
-                    Cmd
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHelpOpen(true)}
-                    className="rounded px-1 font-semibold hover:bg-white/10"
-                    title="Raccourcis (Ctrl+/)"
-                  >
-                    ?
-                  </button>
-                  {dirtyIds.size > 0 ? (
-                    <span className="text-[#ffd7a8]">
-                      {dirtyIds.size} modifié{dirtyIds.size > 1 ? "s" : ""}
+                    HTML
+                  </span>
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-[#e8892a]/15 bg-[#06100c]/60 px-2 py-0.5">
+                    <span
+                      className={`shrink-0 text-[9px] ${
+                        cloudStatus.tone === "ok"
+                          ? "text-[#3d8f68]"
+                          : "text-[#e8892a]"
+                      }`}
+                    >
+                      ●
                     </span>
-                  ) : null}
+                    <span className="min-w-0 truncate font-mono text-[10px] text-[#9bb0a4]">
+                      {previewUrl}
+                    </span>
+                  </div>
+                  <span
+                    title={cloudStatus.hint}
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                      cloudStatus.tone === "ok"
+                        ? "bg-[#3d8f68]/20 text-[#9fd4b5]"
+                        : "bg-[#e8892a]/15 text-[#ffd7a8]"
+                    }`}
+                  >
+                    {cloudStatus.label}
+                  </span>
+                  <button
+                    type="button"
+                    title="Actualiser"
+                    onClick={refreshPreview}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#7d9588] transition hover:bg-white/5 hover:text-[#d5e4db]"
+                  >
+                    <IconRefresh className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Fermer"
+                    onClick={() => setPreviewOpen(false)}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#7d9588] transition hover:bg-white/5 hover:text-[#d5e4db]"
+                  >
+                    <IconClose className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-                <div className="flex items-center gap-3">
-                  {aiBusy ? (
-                    <span className="flex items-center gap-1.5 text-[#ffd7a8]">
-                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#e8892a]" />
-                      Modèle…
-                    </span>
-                  ) : pending ? (
-                    <span className="font-mono text-[#ffd7a8]">
-                      Review +{pendingStats.added}/−{pendingStats.removed}
-                    </span>
-                  ) : null}
-                  <span>UTF-8</span>
-                  <span className="text-[#ffd7a8]">MMC SARL</span>
+
+                <div className="min-h-0 flex-1 bg-white">
+                  {html?.trim() ? (
+                    <iframe
+                      ref={previewIframeRef}
+                      key={previewKey}
+                      title={`${title} preview`}
+                      srcDoc={liveHtml || ""}
+                      sandbox={OKAPI_PREVIEW_SANDBOX}
+                      referrerPolicy="no-referrer"
+                      className="h-full w-full"
+                    />
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
+                      <p className="text-sm font-medium text-gray-500">
+                        Pas encore de preview
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        Génère un HTML ou édite app.html
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            ) : null}
           </div>
 
           {/* Terminal panel */}
@@ -1930,7 +2401,9 @@ export function OkapiStudio({
                   </>
                 ) : termTab === "problems" ? (
                   studioProblems.length === 0 ? (
-                    <p className="text-[#5f766a]">Aucun problème détecté.</p>
+                    <p className="text-[#5f766a]">
+                      Aucun problème · TS/JSON via Monaco + checks Okapi.
+                    </p>
                   ) : (
                     <div className="space-y-2">
                       {problemsBadge > 0 ? (
@@ -2018,13 +2491,13 @@ export function OkapiStudio({
                   }}
                 >
                   <span className="font-mono text-[11px] font-semibold text-[#e8892a]">
-                    okapi ›
+                    PS&gt;
                   </span>
                   <input
                     ref={termInputRef}
                     value={termCmd}
                     onChange={(e) => setTermCmd(e.target.value)}
-                    placeholder="help · status · preview · agent · open app.html"
+                    placeholder="npm run dev · dir · preview · help"
                     className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-[#eef6f1] outline-none placeholder:text-[#4a5c54]"
                     autoComplete="off"
                     spellCheck={false}
@@ -2035,160 +2508,103 @@ export function OkapiStudio({
           ) : null}
         </div>
 
-        {/* Preview — right on lg, below editor on small */}
-        {previewOpen ? (
-          <div className="okapi-studio-panel flex max-h-[40vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(36%,420px)] lg:border-l lg:border-t-0">
-            {/* Browser chrome */}
-            <div className="okapi-studio-chrome flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
-              <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7d9588]">
-                Preview
-              </span>
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-[#e8892a]/15 bg-[#06100c]/60 px-2 py-1">
-                <span className="shrink-0 text-[10px] text-[#3d8f68]">●</span>
-                <span className="min-w-0 truncate font-mono text-[11px] text-[#9bb0a4]">
-                  {previewUrl}
-                </span>
-              </div>
-              <button
-                type="button"
-                title="Actualiser"
-                onClick={refreshPreview}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-[#7d9588] transition hover:bg-white/5 hover:text-[#d5e4db]"
-              >
-                <IconRefresh className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                title="Fermer"
-                onClick={() => setPreviewOpen(false)}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-[#7d9588] transition hover:bg-white/5 hover:text-[#d5e4db]"
-              >
-                <IconClose className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 bg-white">
-              {html?.trim() ? (
-                <iframe
-                  ref={previewIframeRef}
-                  key={previewKey}
-                  title={`${title} preview`}
-                  srcDoc={liveHtml || ""}
-                  sandbox={OKAPI_PREVIEW_SANDBOX}
-                  referrerPolicy="no-referrer"
-                  className="h-full w-full"
-                />
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
-                  <p className="text-sm font-medium text-gray-500">Pas encore de preview</p>
-                  <p className="text-xs text-gray-400">
-                    Génère un HTML ou édite app.html
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {/* Agent Okapi — à droite du code */}
+        {/* Agent Okapi — rail droit dense */}
         {aiOpen ? (
-          <aside className="okapi-studio-panel flex max-h-[46vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(40%,420px)] lg:border-l lg:border-t-0">
-            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-[12px] font-semibold text-[#eef6f1]">Agent</p>
+          <aside className="okapi-studio-panel flex max-h-[46vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(32%,320px)] lg:border-l lg:border-t-0">
+            <div className="flex h-7 items-center justify-between gap-2 border-b border-white/10 px-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#eef6f1]">
+                  Agent
+                </p>
                 <select
                   value={agentId}
                   onChange={(e) => setAgentId(e.target.value as OkapiAgentId)}
                   disabled={aiBusy}
-                  className="mt-1 max-w-[180px] truncate rounded border border-white/12 bg-[#06100c] px-1.5 py-0.5 text-[10px] text-[#ffd7a8] outline-none focus:border-[#e8892a]"
+                  className="max-w-[130px] truncate rounded border border-white/10 bg-[#06100c] px-1 py-0.5 text-[9px] text-[#ffd7a8] outline-none focus:border-[#e8892a]"
                   title="Agent métier"
                 >
                   {OKAPI_AGENTS.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.label} · {a.short}
+                      {a.label}
                     </option>
                   ))}
                 </select>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-[#8aa89a]">
+              <div className="flex shrink-0 items-center gap-1">
+                <span className="rounded border border-white/10 px-1 py-px font-mono text-[8px] uppercase text-[#8aa89a]">
                   {engine}
                 </span>
                 <button
                   type="button"
                   title="Réduire l’agent"
                   onClick={() => setAiOpen(false)}
-                  className="rounded p-1 text-[#5f766a] hover:bg-white/5 hover:text-[#d5e4db]"
+                  className="rounded p-0.5 text-[#5f766a] hover:bg-white/5 hover:text-[#d5e4db]"
                 >
                   <IconClose className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
 
-            <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+            <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2 py-2">
               {aiMessages.map((m, i) => (
                 <div
                   key={`${m.role}-${i}`}
-                  className={`text-[12px] leading-relaxed ${
-                    m.role === "user" ? "ml-3" : "mr-1"
-                  }`}
+                  className="text-[12px] leading-snug"
                 >
-                  <p
-                    className={`mb-1 text-[9px] font-bold uppercase tracking-[0.14em] ${
-                      m.role === "user" ? "text-[#8aa89a]" : "text-[#e8892a]/90"
+                  <span
+                    className={`mr-1.5 font-mono text-[9px] font-bold ${
+                      m.role === "user" ? "text-[#6a8578]" : "text-[#e8892a]"
                     }`}
                   >
-                    {m.role === "user" ? "Toi" : "Okapi"}
-                  </p>
-                  <div
-                    className={`rounded-lg px-3 py-2 ${
-                      m.role === "user"
-                        ? "bg-[#1b4f3a]/40 text-[#eef6f1]"
-                        : "border border-white/8 bg-[#0c1411]/80 text-[#b7c9bf]"
-                    }`}
+                    {m.role === "user" ? "›" : "◆"}
+                  </span>
+                  <span
+                    className={
+                      m.role === "user" ? "text-[#eef6f1]" : "text-[#b7c9bf]"
+                    }
                   >
                     {m.content}
-                  </div>
+                  </span>
                 </div>
               ))}
 
               {pending && pendingFile ? (
-                <div className="overflow-hidden rounded-lg border border-[#e8892a]/35 bg-[#121a16]">
-                  <div className="flex items-center justify-between gap-2 border-b border-[#e8892a]/25 bg-[#e8892a]/10 px-3 py-2">
+                <div className="overflow-hidden rounded border border-[#e8892a]/35 bg-[#121a16]">
+                  <div className="flex items-center justify-between gap-2 border-b border-[#e8892a]/25 bg-[#e8892a]/10 px-2 py-1">
                     <div className="min-w-0">
-                      <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
-                        Revue modèle
+                      <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-[#ffd7a8]">
+                        Review
                         {pendingList.length > 1
-                          ? ` · ${pendingList.length} fichiers`
+                          ? ` · ${pendingList.length}`
                           : ""}
                       </p>
-                      <p className="mt-0.5 truncate font-mono text-[12px] text-[#eef6f1]">
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-[#eef6f1]">
                         {pendingFile.label}
                       </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2 font-mono text-[11px]">
+                    <div className="flex shrink-0 items-center gap-2 font-mono text-[10px]">
                       <span className="text-[#9fd4b5]">+{pendingStats.added}</span>
                       <span className="text-red-300">−{pendingStats.removed}</span>
                     </div>
                   </div>
-                  <div className="p-3">
+                  <div className="p-2">
                     {pending.fileId !== active.id ? (
                       <button
                         type="button"
                         onClick={() => openFile(pending.fileId)}
-                        className="mb-2 rounded border border-white/12 px-2 py-1 text-[10px] font-semibold text-[#d5e4db] hover:bg-white/5"
+                        className="mb-1.5 rounded border border-white/12 px-2 py-0.5 text-[10px] font-semibold text-[#d5e4db] hover:bg-white/5"
                       >
-                        Ouvrir dans l’éditeur
+                        Ouvrir
                       </button>
                     ) : null}
                     {pendingList.length > 1 ? (
-                      <div className="mb-2 flex flex-wrap gap-1">
+                      <div className="mb-1.5 flex flex-wrap gap-1">
                         {pendingList.map((p) => (
                           <button
                             key={p.fileId}
                             type="button"
                             onClick={() => openFile(p.fileId)}
-                            className={`rounded px-2 py-0.5 font-mono text-[10px] ${
+                            className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
                               p.fileId === pending.fileId
                                 ? "bg-[#e8892a]/25 text-[#ffd7a8]"
                                 : "bg-white/5 text-[#9bb0a4] hover:bg-white/10"
@@ -2199,11 +2615,11 @@ export function OkapiStudio({
                         ))}
                       </div>
                     ) : null}
-                    <p className="text-[11px] leading-relaxed text-[#c9b896]">
+                    <p className="text-[11px] leading-snug text-[#c9b896]">
                       {pending.note}
                     </p>
                     {pendingDiffLines.length > 0 ? (
-                      <pre className="mt-2 max-h-40 overflow-auto rounded border border-white/10 bg-[#0a100e] p-2 font-mono text-[10px] leading-relaxed">
+                      <pre className="mt-1.5 max-h-36 overflow-auto rounded border border-white/10 bg-[#0a100e] p-1.5 font-mono text-[10px] leading-relaxed">
                         {pendingDiffLines.map((line, idx) => (
                           <div
                             key={`${line.type}-${idx}`}
@@ -2227,21 +2643,21 @@ export function OkapiStudio({
                         ))}
                       </pre>
                     ) : null}
-                    <div className="mt-3 flex flex-wrap gap-1.5">
+                    <div className="mt-2 flex flex-wrap gap-1">
                       <button
                         type="button"
                         onClick={() => {
                           if (pending.fileId !== active.id) openFile(pending.fileId);
                           setSplitDiff(true);
                         }}
-                        className="rounded border border-white/12 px-2.5 py-1.5 text-[11px] font-semibold text-[#c8ddd2] hover:bg-white/5"
+                        className="rounded border border-white/12 px-2 py-1 text-[10px] font-semibold text-[#c8ddd2] hover:bg-white/5"
                       >
-                        Voir le code
+                        Voir
                       </button>
                       <button
                         type="button"
                         onClick={acceptPending}
-                        className="rounded bg-[#2f6b4f] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#3a7d5c]"
+                        className="rounded bg-[#2f6b4f] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#3a7d5c]"
                       >
                         Accepter
                       </button>
@@ -2249,30 +2665,27 @@ export function OkapiStudio({
                         <button
                           type="button"
                           onClick={acceptAllPending}
-                          className="rounded bg-[#e8892a] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#d67a1f]"
+                          className="rounded bg-[#e8892a] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#d67a1f]"
                         >
-                          Accepter tout ({pendingList.length})
+                          Tout ({pendingList.length})
                         </button>
                       ) : null}
                       <button
                         type="button"
                         onClick={rejectPending}
-                        className="rounded border border-white/12 px-3 py-1.5 text-[11px] font-semibold text-[#d5e4db] hover:bg-white/5"
+                        className="rounded border border-white/12 px-2.5 py-1 text-[10px] font-semibold text-[#d5e4db] hover:bg-white/5"
                       >
                         Refuser
                       </button>
                     </div>
-                    <p className="mt-2 text-[10px] text-[#6a7f74]">
-                      Esc refuse · barre Review dans l’éditeur
-                    </p>
                   </div>
                 </div>
               ) : null}
 
               {aiBusy || aiProgress ? (
-                <div className="rounded-lg border border-[#e8892a]/30 bg-[#e8892a]/8 px-3 py-2.5">
+                <div className="border-l-2 border-[#e8892a]/50 py-1 pl-2">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="flex min-w-0 items-center gap-2 text-[11px] font-medium text-[#ffd7a8]">
+                    <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-[#ffd7a8]">
                       <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#e8892a]" />
                       <span className="truncate">
                         {aiProgress?.message || "Okapi répond…"}
@@ -2284,7 +2697,7 @@ export function OkapiStudio({
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#0c1411]">
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[#0c1411]">
                     <div
                       className="h-full rounded-full bg-[#e8892a] transition-[width] duration-500 ease-out"
                       style={{
@@ -2302,10 +2715,29 @@ export function OkapiStudio({
                       }}
                     />
                   </div>
+                  {aiLiveCode ? (
+                    <div className="mt-2 overflow-hidden rounded border border-white/10 bg-[#070c0a]">
+                      <div className="flex items-center justify-between border-b border-white/8 px-2 py-1">
+                        <span className="font-mono text-[9px] font-bold uppercase tracking-wide text-[#e8892a]">
+                          {aiLiveLabel}
+                        </span>
+                        <span className="font-mono text-[9px] text-[#5f766a]">
+                          live
+                        </span>
+                      </div>
+                      <pre
+                        ref={liveCodeEndRef}
+                        className="max-h-52 overflow-auto p-2 font-mono text-[10px] leading-relaxed text-[#9fd4b5] whitespace-pre-wrap break-all"
+                      >
+                        {aiLiveCode}
+                        <span className="inline-block h-3 w-1.5 animate-pulse bg-[#e8892a]/80 align-middle" />
+                      </pre>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {aiError ? (
-                <p className="rounded-lg bg-red-500/10 px-2 py-1.5 text-[11px] text-red-300">
+                <p className="border-l-2 border-red-400/50 py-1 pl-2 text-[11px] text-red-300">
                   {aiError}
                 </p>
               ) : null}
@@ -2314,7 +2746,7 @@ export function OkapiStudio({
 
             <form
               onSubmit={(e) => void askStudioAi(e)}
-              className="border-t border-white/10 p-3"
+              className="border-t border-white/10 p-2"
             >
               <textarea
                 ref={aiInputRef}
@@ -2330,18 +2762,26 @@ export function OkapiStudio({
                 disabled={aiBusy}
                 placeholder={
                   pendingList.length
-                    ? "Accepte / Refuse, ou écris une nouvelle demande…"
-                    : "Écris ta demande (1 fichier ou plusieurs)…"
+                    ? "Accepte / Refuse, ou nouvelle demande…"
+                    : "Crée une boutique CRM… (projet complet + serveur)"
                 }
-                className="w-full resize-none rounded-lg border border-white/12 bg-[#06100c]/70 px-3 py-2.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
+                className="w-full resize-none rounded border border-white/10 bg-[#06100c]/70 px-2 py-1.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
               />
-              <button
-                type="submit"
-                disabled={aiBusy || !aiPrompt.trim()}
-                className="mt-2 w-full rounded-lg bg-[#e8892a] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-[#d67a1f] disabled:opacity-45"
-              >
-                {aiBusy ? "…" : "Envoyer"}
-              </button>
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <button
+                  type="submit"
+                  disabled={aiBusy || !aiPrompt.trim()}
+                  className="flex-1 rounded bg-[#e8892a] px-2 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#d67a1f] disabled:opacity-45"
+                >
+                  {aiBusy ? "…" : "Envoyer"}
+                </button>
+                <span className="hidden font-mono text-[9px] text-[#5f766a] sm:inline">
+                  ↵
+                </span>
+              </div>
+              <p className="mt-1 text-[9px] leading-snug text-[#5f766a]">
+                Okapi peut se tromper — vérifie le code avant prod.
+              </p>
             </form>
           </aside>
         ) : (
@@ -2351,16 +2791,89 @@ export function OkapiStudio({
               setAiOpen(true);
               window.setTimeout(() => aiInputRef.current?.focus(), 80);
             }}
-            className="absolute bottom-4 right-4 z-30 flex items-center gap-2 rounded-2xl border border-[#e8892a]/40 bg-[#0d1512] px-4 py-3 text-sm font-semibold text-[#ffd7a8] shadow-lg shadow-black/40 transition hover:border-[#e8892a] hover:bg-[#15211c]"
+            className="absolute bottom-8 right-3 z-30 flex items-center gap-1.5 rounded-md border border-[#e8892a]/35 bg-[#0d1512] px-2.5 py-1.5 text-[11px] font-semibold text-[#ffd7a8] shadow-md shadow-black/30 transition hover:border-[#e8892a] hover:bg-[#15211c]"
             title="Ouvrir l’agent (Ctrl+L)"
           >
-            <IconSpark className="h-4 w-4" />
+            <IconSpark className="h-3.5 w-3.5" />
             Agent
-            <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10px] text-[#9bb0a4]">
-              Ctrl+L
-            </span>
+            <span className="font-mono text-[9px] text-[#9bb0a4]">Ctrl+L</span>
           </button>
         )}
+      </div>
+
+      {/* Status bar — pleine largeur workbench */}
+      <div className="flex h-5 shrink-0 items-center justify-between gap-3 border-t border-white/10 bg-[#0a1410] px-2 text-[10px] text-[#8aa89a]">
+        <div className="flex min-w-0 items-center gap-2.5 overflow-x-auto">
+          <span className="shrink-0 font-semibold text-[#c8ddd2]">Okapi</span>
+          <button
+            type="button"
+            onClick={() => openTerminal("problems")}
+            className={`shrink-0 rounded px-0.5 font-semibold hover:bg-white/10 hover:text-[#eef6f1] ${
+              problemsBadge > 0 ? "text-[#ffd7a8]" : ""
+            }`}
+            title="Problems"
+          >
+            {problemsBadge > 0 ? `${problemsBadge} problem${problemsBadge > 1 ? "s" : ""}` : "Problems"}
+          </button>
+          <span className="shrink-0">Ln {lineCount}</span>
+          <span className="shrink-0 uppercase">{active.language}</span>
+          <button
+            type="button"
+            onClick={() => openTerminal("terminal")}
+            className="shrink-0 rounded px-0.5 font-semibold hover:bg-white/10 hover:text-[#eef6f1]"
+            title="Terminal (Ctrl+`)"
+          >
+            Terminal
+          </button>
+          <button
+            type="button"
+            onClick={() => setCmdOpen(true)}
+            className="shrink-0 rounded px-0.5 font-semibold hover:bg-white/10 hover:text-[#eef6f1]"
+            title="Palette (Ctrl+Shift+P)"
+          >
+            Cmd
+          </button>
+          {dirtyIds.size > 0 ? (
+            <span className="shrink-0 text-[#ffd7a8]">
+              {dirtyIds.size} modifié{dirtyIds.size > 1 ? "s" : ""}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2.5">
+          {aiBusy ? (
+            <span className="flex items-center gap-1.5 text-[#ffd7a8]">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#e8892a]" />
+              Modèle…
+            </span>
+          ) : serverRunning ? (
+            <span className="flex items-center gap-1.5 text-[#9fd4b5]">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#3d8f68]" />
+              Serveur
+            </span>
+          ) : pending ? (
+            <span className="font-mono text-[#ffd7a8]">
+              Review +{pendingStats.added}/−{pendingStats.removed}
+            </span>
+          ) : null}
+          <span
+            title={cloudStatus.hint}
+            className={
+              cloudStatus.tone === "ok" ? "text-[#9fd4b5]" : "text-[#ffd7a8]"
+            }
+          >
+            {cloudStatus.label}
+          </span>
+          {stackHints.length > 1 ? (
+            <span
+              className="max-w-[220px] truncate text-[#5f766a]"
+              title={stackHints.join(" · ")}
+            >
+              {stackHints.slice(1).join(" · ")}
+            </span>
+          ) : null}
+          <span>UTF-8</span>
+          <span className="text-[#5f766a]">MMC</span>
+        </div>
       </div>
 
       {/* Quick Open — Ctrl+P */}
@@ -2551,8 +3064,9 @@ export function OkapiStudio({
                 [
                   ["Ctrl+L", "Focus Agent"],
                   ["Ctrl+P", "Quick Open fichier"],
-                  ["Ctrl+Shift+P", "Palette commandes"],
-                  ["Ctrl+`", "Terminal"],
+                  ["Ctrl+Shift+P", "Palette · npm run dev"],
+                  ["Ctrl+W", "Fermer onglet"],
+                  ["Ctrl+`", "Terminal PowerShell"],
                   ["Ctrl+J", "Panneau bas"],
                   ["Ctrl+B", "Explorateur"],
                   ["Ctrl+S", "Sauvegarder cloud"],

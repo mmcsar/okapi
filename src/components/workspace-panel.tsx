@@ -7,6 +7,7 @@ import { useOkapiPreviewBridge } from "@/hooks/use-okapi-preview-bridge";
 import {
   OKAPI_PREVIEW_SANDBOX,
   injectOkapiRuntime,
+  resolveOkapiCloudStatus,
 } from "@/lib/okapi-runtime";
 
 const OkapiStudio = dynamic(
@@ -36,10 +37,13 @@ type WorkspacePanelProps = {
   react: string | null;
   reactNative: string | null;
   nextjs: string | null;
+  packageJson?: string | null;
   sql: string | null;
   api: string | null;
   python: string | null;
+  requirements?: string | null;
   flutter: string | null;
+  pubspec?: string | null;
   readme: string | null;
   sending: boolean;
   device: "mobile" | "desktop";
@@ -53,7 +57,7 @@ type WorkspacePanelProps = {
   onExportReadme: () => void;
   onExportZip?: () => void;
   onChangeArtifact: (id: StudioFileId, value: string) => void;
-  onSaveCloud?: () => void | Promise<boolean>;
+  onSaveCloud?: (opts?: { silent?: boolean }) => void | Promise<boolean>;
   onStudioCommitted?: (fileId: StudioFileId, content: string) => void;
   cloudStatus?: string | null;
   engine?: string;
@@ -71,6 +75,10 @@ type WorkspacePanelProps = {
   studioSeedMessages?: { role: "user" | "assistant"; content: string }[];
   /** Mode Studio immersif : full-bleed, chrome minimal */
   immersive?: boolean;
+  /** Quitter le mode Studio (retour Agent Accueil) */
+  onLeaveStudio?: () => void;
+  /** Nouveau projet vide (reste en Studio) */
+  onNewProject?: () => void;
 };
 
 const TABS: { id: WorkspaceTab; label: string }[] = [
@@ -81,6 +89,9 @@ const TABS: { id: WorkspaceTab; label: string }[] = [
   { id: "api", label: "API" },
   { id: "docs", label: "Docs" },
 ];
+
+/** Accueil Agent : Preview/Code — pas d’IDE Studio (réservé à #studio). */
+const AGENT_TABS = TABS.filter((t) => t.id !== "studio");
 
 function CodeView({
   value,
@@ -145,10 +156,13 @@ export function WorkspacePanel({
   react,
   reactNative,
   nextjs,
+  packageJson = null,
   sql,
   api,
   python,
+  requirements = null,
   flutter,
+  pubspec = null,
   readme,
   sending,
   device,
@@ -174,8 +188,11 @@ export function WorkspacePanel({
   studioSeedKey = 0,
   studioSeedMessages,
   immersive = false,
+  onLeaveStudio,
+  onNewProject,
 }: WorkspacePanelProps) {
   const [tab, setTab] = useState<WorkspaceTab>(immersive ? "studio" : "preview");
+  const [previewKey, setPreviewKey] = useState(0);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   useOkapiPreviewBridge(previewIframeRef, projectId);
 
@@ -189,17 +206,38 @@ export function WorkspacePanel({
     });
   }, [html, projectId]);
 
+  const prevProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    const prev = prevProjectIdRef.current;
+    prevProjectIdRef.current = projectId;
+    if (projectId && projectId !== prev) {
+      setPreviewKey((k) => k + 1);
+    }
+  }, [projectId]);
+
+  const previewCloud = useMemo(
+    () =>
+      resolveOkapiCloudStatus({
+        projectId,
+        accessToken,
+      }),
+    [projectId, accessToken],
+  );
+
   useEffect(() => {
     if (focusPreviewKey > 0) setTab("preview");
   }, [focusPreviewKey]);
 
   useEffect(() => {
+    // Sur Accueil Agent, ignore les kicks Studio — reste en Preview
+    if (!immersive) return;
     if (focusStudioKey > 0) setTab("studio");
-  }, [focusStudioKey]);
+  }, [focusStudioKey, immersive]);
 
   useEffect(() => {
     if (immersive) setTab("studio");
-  }, [immersive]);
+    else if (tab === "studio") setTab("preview");
+  }, [immersive, tab]);
 
   const exportForTab = () => {
     if (tab === "preview" || tab === "code" || tab === "studio") onExportHtml();
@@ -236,12 +274,15 @@ export function WorkspacePanel({
       className={`flex min-h-0 flex-1 flex-col lg:min-h-0 ${
         studioBleed
           ? "okapi-studio-shell min-h-[48vh]"
-          : "min-h-[48vh] bg-[linear-gradient(180deg,rgba(223,230,225,0.85),rgba(232,238,233,0.9))]"
+          : "min-h-0 flex-1 bg-[linear-gradient(180deg,rgba(223,230,225,0.85),rgba(232,238,233,0.9))] lg:min-h-[48vh]"
       }`}
     >
       {studioBleed ? (
-        <div className="okapi-studio-chrome flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5">
-          <div className="flex items-center gap-1">
+        <div className="okapi-studio-chrome flex h-8 shrink-0 items-center justify-between gap-2 border-b px-1.5">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="mr-1 hidden max-w-[140px] truncate font-mono text-[10px] font-medium text-[#c8ddd2] sm:inline">
+              {title || "Okapi Studio"}
+            </span>
             {(
               [
                 ["studio", "Studio"],
@@ -255,7 +296,7 @@ export function WorkspacePanel({
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                className={`rounded px-2 py-0.5 text-[10px] font-medium transition ${
                   tab === id
                     ? "bg-white/10 text-[#eef6f1]"
                     : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
@@ -265,27 +306,60 @@ export function WorkspacePanel({
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1">
+            {onNewProject ? (
+              <button
+                type="button"
+                onClick={onNewProject}
+                className="rounded px-2 py-0.5 text-[10px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1]"
+                title="Effacer les fichiers et démarrer un projet vide"
+              >
+                Nouveau
+              </button>
+            ) : null}
+            {!accessToken ? (
+              <span
+                className="hidden max-w-[160px] truncate text-[9px] text-[#9bb0a4] sm:inline"
+                title="Génération et Preview locale sans compte. Connexion pour sauver."
+              >
+                Invité · essai libre
+              </span>
+            ) : null}
             {onSaveCloud ? (
               <button
                 type="button"
-                onClick={onSaveCloud}
-                className="rounded-lg bg-[#1b4f3a] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#2f6b4f]"
+                onClick={() => void onSaveCloud()}
+                className="rounded bg-[#e8892a] px-2 py-0.5 text-[10px] font-bold text-[#1a1208] hover:bg-[#f0a04a]"
+                title={
+                  accessToken
+                    ? "Sauvegarder le projet sur ton compte (Ctrl+S)"
+                    : "Connexion requise pour sauver — tu peux déjà générer sans compte"
+                }
               >
-                Sauvegarder
+                Sauver
               </button>
             ) : null}
             {cloudStatus ? (
-              <span className="max-w-[120px] truncate text-[10px] text-[#7d9588]">
+              <span className="max-w-[80px] truncate text-[9px] text-[#7d9588]">
                 {cloudStatus}
               </span>
+            ) : null}
+            {onLeaveStudio ? (
+              <button
+                type="button"
+                onClick={onLeaveStudio}
+                className="rounded px-2 py-0.5 text-[10px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1]"
+                title="Retour Agent Accueil"
+              >
+                ← Agent
+              </button>
             ) : null}
           </div>
         </div>
       ) : (
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--okapi-stroke)] px-3 py-2 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {TABS.map((item) => {
+          {AGENT_TABS.map((item) => {
             const active = tab === item.id;
             const badge =
               item.id === "sql"
@@ -294,7 +368,7 @@ export function WorkspacePanel({
                   ? api
                   : item.id === "docs"
                     ? readme
-                    : item.id === "code" || item.id === "studio"
+                    : item.id === "code"
                       ? html || react || reactNative || nextjs
                       : true;
             return (
@@ -304,9 +378,7 @@ export function WorkspacePanel({
                 onClick={() => setTab(item.id)}
                 className={`relative shrink-0 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
                   active
-                    ? item.id === "studio"
-                      ? "bg-[#0f1a14] text-white"
-                      : "bg-okapi-forest text-white"
+                    ? "bg-okapi-forest text-white"
                     : "text-okapi-ink/50 hover:bg-white/70 hover:text-okapi-ink"
                 }`}
               >
@@ -324,10 +396,20 @@ export function WorkspacePanel({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {onNewProject ? (
+            <button
+              type="button"
+              onClick={onNewProject}
+              className="rounded-xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-okapi-ink/70 hover:bg-white"
+              title="Effacer les fichiers et démarrer un projet vide"
+            >
+              Nouveau projet
+            </button>
+          ) : null}
           {onSaveCloud ? (
             <button
               type="button"
-              onClick={onSaveCloud}
+              onClick={() => void onSaveCloud()}
               className="rounded-xl bg-okapi-forest px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-okapi-leaf"
               title="Sauvegarder tous les fichiers sur ton compte"
             >
@@ -408,17 +490,20 @@ export function WorkspacePanel({
       )}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {tab === "studio" ? (
+        {tab === "studio" && immersive ? (
           <OkapiStudio
             title={title}
             html={html}
             react={react}
             reactNative={reactNative}
             nextjs={nextjs}
+            packageJson={packageJson}
             sql={sql}
             api={api}
             python={python}
+            requirements={requirements}
             flutter={flutter}
+            pubspec={pubspec}
             readme={readme}
             showPreview
             engine={engine}
@@ -430,6 +515,7 @@ export function WorkspacePanel({
             onChangeFile={onChangeArtifact}
             onCommitted={onStudioCommitted}
             onSaveCloud={onSaveCloud}
+            onNewProject={onNewProject}
           />
         ) : null}
 
@@ -458,7 +544,29 @@ export function WorkspacePanel({
                     : "h-full w-full max-w-5xl overflow-hidden rounded-[24px] border border-[var(--okapi-stroke)] bg-white"
                 }
               >
+                <div
+                  className={`flex items-center justify-between gap-2 border-b px-3 py-1.5 text-[10px] ${
+                    immersive
+                      ? "border-white/10 bg-[#0a1410] text-[#8aa89a]"
+                      : "border-[var(--okapi-stroke)] bg-okapi-mist/80 text-okapi-ink/55"
+                  }`}
+                >
+                  <span className="font-semibold uppercase tracking-wide">
+                    Preview · HTML
+                  </span>
+                  <span
+                    title={previewCloud.hint}
+                    className={
+                      previewCloud.tone === "ok"
+                        ? "font-semibold text-emerald-700"
+                        : "font-semibold text-amber-700"
+                    }
+                  >
+                    {previewCloud.label}
+                  </span>
+                </div>
                 <iframe
+                  key={previewKey}
                   ref={previewIframeRef}
                   title={title}
                   srcDoc={liveHtml || ""}
@@ -467,7 +575,7 @@ export function WorkspacePanel({
                   className={`w-full bg-white ${
                     device === "mobile"
                       ? "h-[640px] pt-6"
-                      : "h-full min-h-[560px]"
+                      : "h-[calc(100%-28px)] min-h-[530px]"
                   }`}
                 />
               </div>
