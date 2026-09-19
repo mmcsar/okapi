@@ -278,9 +278,9 @@ export function WorkspacePanel({
       }`}
     >
       {studioBleed ? (
-        <div className="okapi-studio-chrome flex h-8 shrink-0 items-center justify-between gap-2 border-b px-1.5">
-          <div className="flex min-w-0 items-center gap-1">
-            <span className="mr-1 hidden max-w-[140px] truncate font-mono text-[10px] font-medium text-[#c8ddd2] sm:inline">
+        <div className="okapi-studio-chrome flex h-8 shrink-0 items-center justify-between gap-1 border-b px-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+            <span className="mr-1 hidden max-w-[120px] shrink-0 truncate font-mono text-[10px] font-medium text-[#c8ddd2] sm:inline">
               {title || "Okapi Studio"}
             </span>
             {(
@@ -296,7 +296,7 @@ export function WorkspacePanel({
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
-                className={`rounded px-2 py-0.5 text-[10px] font-medium transition ${
+                className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition ${
                   tab === id
                     ? "bg-white/10 text-[#eef6f1]"
                     : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
@@ -311,7 +311,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 onClick={onNewProject}
-                className="rounded px-2 py-0.5 text-[10px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1]"
+                className="hidden rounded px-2 py-0.5 text-[10px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1] sm:inline"
                 title="Effacer les fichiers et démarrer un projet vide"
               >
                 Nouveau
@@ -340,7 +340,7 @@ export function WorkspacePanel({
               </button>
             ) : null}
             {cloudStatus ? (
-              <span className="max-w-[80px] truncate text-[9px] text-[#7d9588]">
+              <span className="hidden max-w-[80px] truncate text-[9px] text-[#7d9588] sm:inline">
                 {cloudStatus}
               </span>
             ) : null}

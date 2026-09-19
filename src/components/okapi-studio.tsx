@@ -312,12 +312,13 @@ export function OkapiStudio({
   const [dirtyIds, setDirtyIds] = useState<Set<StudioFileId>>(() => new Set());
   /** Fichiers ouverts à la main (Ctrl+P) même encore vides. */
   const [pinnedIds, setPinnedIds] = useState<Set<StudioFileId>>(() => new Set());
-  const [explorerOpen, setExplorerOpen] = useState(true);
+  /** Mobile-first : éditeur d’abord — explorer/terminal ouverts sur desktop. */
+  const [explorerOpen, setExplorerOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(true);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(true);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [termCmd, setTermCmd] = useState("");
-  const [termHeight, setTermHeight] = useState(200);
+  const [termHeight, setTermHeight] = useState(140);
   const termInputRef = useRef<HTMLInputElement>(null);
   const [previewKey, setPreviewKey] = useState(0);
   const [termTab, setTermTab] = useState<TermTab>("terminal");
@@ -410,6 +411,78 @@ export function OkapiStudio({
       setPreviewKey((k) => k + 1);
     }
   }, [projectId]);
+
+  /** Desktop (≥lg) : explorer + terminal ouverts. Mobile : un panneau à la fois. */
+  const isStudioDesktop = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(min-width: 1024px)").matches;
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const apply = () => {
+      if (mq.matches) {
+        setExplorerOpen(true);
+        setTerminalOpen(true);
+        setTermHeight(200);
+      } else {
+        setExplorerOpen(false);
+        setTerminalOpen(false);
+        setPreviewOpen(false);
+        setAiOpen(true);
+        setTermHeight(140);
+      }
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  type StudioPanel = "explorer" | "ai" | "preview" | "terminal";
+
+  const toggleStudioPanel = useCallback(
+    (panel: StudioPanel) => {
+      if (isStudioDesktop()) {
+        if (panel === "explorer") setExplorerOpen((v) => !v);
+        else if (panel === "ai") setAiOpen((v) => !v);
+        else if (panel === "preview") setPreviewOpen((v) => !v);
+        else {
+          setTerminalOpen((v) => {
+            const next = !v;
+            if (next) setTermTab("terminal");
+            return next;
+          });
+        }
+        return;
+      }
+      // Mobile : exclusif — rouvrir le même panneau le ferme (éditeur plein)
+      const isOn =
+        panel === "explorer"
+          ? explorerOpen
+          : panel === "ai"
+            ? aiOpen
+            : panel === "preview"
+              ? previewOpen
+              : terminalOpen;
+      setExplorerOpen(panel === "explorer" && !isOn);
+      setAiOpen(panel === "ai" && !isOn);
+      setPreviewOpen(panel === "preview" && !isOn);
+      setTerminalOpen(panel === "terminal" && !isOn);
+      if (panel === "terminal" && !isOn) setTermTab("terminal");
+    },
+    [aiOpen, explorerOpen, isStudioDesktop, previewOpen, terminalOpen],
+  );
+
+  const openAiPanel = useCallback(() => {
+    if (isStudioDesktop()) {
+      setAiOpen(true);
+      return;
+    }
+    setExplorerOpen(false);
+    setPreviewOpen(false);
+    setTerminalOpen(false);
+    setAiOpen(true);
+  }, [isStudioDesktop]);
 
   const logTerm = useCallback((text: string, kind: TermLine["kind"] = "info") => {
     const stamp = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -676,7 +749,7 @@ export function OkapiStudio({
         label: "Focus Agent Okapi",
         hint: "Ctrl+L",
         run: () => {
-          setAiOpen(true);
+          openAiPanel();
           window.setTimeout(() => aiInputRef.current?.focus(), 60);
         },
       },
@@ -690,12 +763,7 @@ export function OkapiStudio({
         id: "terminal",
         label: "Basculer Terminal PowerShell",
         hint: "Ctrl+`",
-        run: () =>
-          setTerminalOpen((v) => {
-            const next = !v;
-            if (next) setTermTab("terminal");
-            return next;
-          }),
+        run: () => toggleStudioPanel("terminal"),
       },
       {
         id: "dev-server",
@@ -707,13 +775,13 @@ export function OkapiStudio({
         id: "preview",
         label: "Basculer Preview",
         hint: "",
-        run: () => setPreviewOpen((v) => !v),
+        run: () => toggleStudioPanel("preview"),
       },
       {
         id: "explorer",
         label: "Basculer Explorateur",
         hint: "Ctrl+B",
-        run: () => setExplorerOpen((v) => !v),
+        run: () => toggleStudioPanel("explorer"),
       },
       {
         id: "split-diff",
@@ -796,7 +864,7 @@ export function OkapiStudio({
     return list;
     // acceptPending/rejectPending via closure at click time
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending, pendingList.length, onSaveCloud, onNewProject, logTerm, html, title]);
+  }, [pending, pendingList.length, onSaveCloud, onNewProject, logTerm, html, title, openAiPanel, toggleStudioPanel]);
 
   const cmdMatches = useMemo(() => {
     const q = cmdQuery.trim().toLowerCase();
@@ -1032,7 +1100,7 @@ export function OkapiStudio({
       return;
     }
     if (c0 === "agent") {
-      setAiOpen(true);
+      openAiPanel();
       logTerm("Agent Okapi focus (Ctrl+L)", "ok");
       window.setTimeout(() => aiInputRef.current?.focus(), 80);
       return;
@@ -1534,9 +1602,9 @@ export function OkapiStudio({
       setAiOpen(true);
       return;
     }
-    openFile(problem.fileId);
-    setAiOpen(true);
-    setTerminalOpen(true);
+            openFile(problem.fileId);
+    openAiPanel();
+    if (isStudioDesktop()) setTerminalOpen(true);
     setTermTab("problems");
     logTerm(`Fix Agent · ${problem.fileId}`, "cmd");
     void askStudioAi(undefined, {
@@ -1555,8 +1623,8 @@ export function OkapiStudio({
     );
     if (fixable.length === 0) return;
     openFile(fixable[0]!.fileId);
-    setAiOpen(true);
-    setTerminalOpen(true);
+    openAiPanel();
+    if (isStudioDesktop()) setTerminalOpen(true);
     setTermTab("problems");
     logTerm(`Fix Agent · ${fixable.length} problèmes`, "cmd");
     void askStudioAi(undefined, {
@@ -1707,11 +1775,7 @@ export function OkapiStudio({
       // Ctrl+` — toggle terminal
       if (meta && (e.key === "`" || e.code === "Backquote")) {
         e.preventDefault();
-        setTerminalOpen((v) => {
-          const next = !v;
-          if (next) setTermTab("terminal");
-          return next;
-        });
+        toggleStudioPanel("terminal");
         return;
       }
       // Ctrl+P — Quick Open (sans Shift)
@@ -1729,7 +1793,7 @@ export function OkapiStudio({
       // Ctrl+B — explorateur
       if (meta && e.key.toLowerCase() === "b" && !typing) {
         e.preventDefault();
-        setExplorerOpen((v) => !v);
+        toggleStudioPanel("explorer");
         return;
       }
       // Ctrl+Shift+/ ou Ctrl+/ — raccourcis
@@ -1781,16 +1845,12 @@ export function OkapiStudio({
       // Ctrl+J — panneau bas
       if (meta && e.key.toLowerCase() === "j" && !typing) {
         e.preventDefault();
-        setTerminalOpen((v) => {
-          const next = !v;
-          if (next) setTermTab("terminal");
-          return next;
-        });
+        toggleStudioPanel("terminal");
         return;
       }
       if (meta && e.key.toLowerCase() === "l") {
         e.preventDefault();
-        setAiOpen(true);
+        openAiPanel();
         window.setTimeout(() => aiInputRef.current?.focus(), 50);
       }
       if (meta && e.key === "Enter" && aiOpen && !pending && !aiBusy) {
@@ -1811,7 +1871,7 @@ export function OkapiStudio({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiOpen, pending, aiBusy, aiPrompt, active.id, active.value, activeId, engine, quickOpen, cmdOpen, onSaveCloud, helpOpen]);
+  }, [aiOpen, pending, aiBusy, aiPrompt, active.id, active.value, activeId, engine, quickOpen, cmdOpen, onSaveCloud, helpOpen, toggleStudioPanel, openAiPanel]);
 
   useEffect(() => {
     if (aiOpen) {
@@ -1845,7 +1905,7 @@ export function OkapiStudio({
           <button
             type="button"
             title="Fichiers (Ctrl+B)"
-            onClick={() => setExplorerOpen((v) => !v)}
+            onClick={() => toggleStudioPanel("explorer")}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               explorerOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
@@ -1857,7 +1917,7 @@ export function OkapiStudio({
           <button
             type="button"
             title="IA"
-            onClick={() => setAiOpen((v) => !v)}
+            onClick={() => toggleStudioPanel("ai")}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               aiOpen
                 ? "border-b-2 border-[#ffd7a8] bg-[#e8892a]/25 text-[#ffd7a8] lg:border-b-0 lg:border-l-2"
@@ -1869,7 +1929,7 @@ export function OkapiStudio({
           <button
             type="button"
             title="Preview"
-            onClick={() => setPreviewOpen((v) => !v)}
+            onClick={() => toggleStudioPanel("preview")}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               previewOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
@@ -1881,13 +1941,7 @@ export function OkapiStudio({
           <button
             type="button"
             title="Terminal (Ctrl+`)"
-            onClick={() =>
-              setTerminalOpen((v) => {
-                const next = !v;
-                if (next) setTermTab("terminal");
-                return next;
-              })
-            }
+            onClick={() => toggleStudioPanel("terminal")}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               terminalOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
@@ -1901,14 +1955,22 @@ export function OkapiStudio({
           </div>
         </div>
 
-        {/* Explorer */}
+        {/* Explorer — overlay mobile, rail fixe desktop */}
         {explorerOpen ? (
-          <aside className="okapi-studio-panel flex w-[min(72vw,200px)] shrink-0 flex-col border-r border-white/10 lg:w-[200px]">
+          <>
+            <button
+              type="button"
+              aria-label="Fermer l’explorateur"
+              className="absolute inset-0 z-30 bg-black/45 lg:hidden"
+              onClick={() => setExplorerOpen(false)}
+            />
+            <aside className="okapi-studio-panel absolute inset-y-0 left-0 z-40 flex w-[min(78vw,240px)] flex-col border-r border-white/10 shadow-xl lg:static lg:inset-auto lg:z-auto lg:w-[200px] lg:shadow-none">
             <div className="border-b border-white/10 px-2 py-1.5">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#7d9588]">
                   Explorateur
                 </p>
+                <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => setQuickOpen(true)}
@@ -1917,6 +1979,15 @@ export function OkapiStudio({
                 >
                   Ctrl+P
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setExplorerOpen(false)}
+                  className="rounded px-1.5 py-0.5 text-[11px] text-[#9bb0a4] lg:hidden"
+                  aria-label="Fermer"
+                >
+                  ×
+                </button>
+                </div>
               </div>
               <p className="mt-0.5 truncate text-[12px] font-semibold text-[#eef6f1]">
                 {title || "Projet Okapi"}
@@ -1982,11 +2053,12 @@ export function OkapiStudio({
               )}
             </nav>
           </aside>
+          </>
         ) : null}
 
         {/* Center column: editor + terminal */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
             {/* Editor */}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* Tabs bar — multi-fichiers Okapi */}
@@ -2245,7 +2317,7 @@ export function OkapiStudio({
 
             {/* Preview — dans la colonne éditeur (Agent reste à droite) */}
             {previewOpen ? (
-              <div className="okapi-studio-panel flex max-h-[38vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(48%,440px)] lg:border-l lg:border-t-0">
+              <div className="okapi-studio-panel flex max-h-[min(42vh,320px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(48%,440px)] lg:border-l lg:border-t-0">
                 <div className="okapi-studio-chrome flex h-8 shrink-0 items-center gap-1.5 border-b px-2">
                   <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.14em] text-[#7d9588]">
                     Preview
@@ -2510,7 +2582,7 @@ export function OkapiStudio({
 
         {/* Agent Okapi — rail droit dense */}
         {aiOpen ? (
-          <aside className="okapi-studio-panel flex max-h-[46vh] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(32%,320px)] lg:border-l lg:border-t-0">
+          <aside className="okapi-studio-panel flex max-h-[min(48vh,360px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(32%,320px)] lg:border-l lg:border-t-0">
             <div className="flex h-7 items-center justify-between gap-2 border-b border-white/10 px-2">
               <div className="flex min-w-0 items-center gap-1.5">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[#eef6f1]">
@@ -2788,15 +2860,17 @@ export function OkapiStudio({
           <button
             type="button"
             onClick={() => {
-              setAiOpen(true);
+              openAiPanel();
               window.setTimeout(() => aiInputRef.current?.focus(), 80);
             }}
-            className="absolute bottom-8 right-3 z-30 flex items-center gap-1.5 rounded-md border border-[#e8892a]/35 bg-[#0d1512] px-2.5 py-1.5 text-[11px] font-semibold text-[#ffd7a8] shadow-md shadow-black/30 transition hover:border-[#e8892a] hover:bg-[#15211c]"
+            className="absolute bottom-[max(4.5rem,calc(env(safe-area-inset-bottom)+3.5rem))] right-3 z-30 flex items-center gap-1.5 rounded-md border border-[#e8892a]/35 bg-[#0d1512] px-2.5 py-1.5 text-[11px] font-semibold text-[#ffd7a8] shadow-md shadow-black/30 transition hover:border-[#e8892a] hover:bg-[#15211c] lg:bottom-8"
             title="Ouvrir l’agent (Ctrl+L)"
           >
             <IconSpark className="h-3.5 w-3.5" />
             Agent
-            <span className="font-mono text-[9px] text-[#9bb0a4]">Ctrl+L</span>
+            <span className="hidden font-mono text-[9px] text-[#9bb0a4] sm:inline">
+              Ctrl+L
+            </span>
           </button>
         )}
       </div>

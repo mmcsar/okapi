@@ -1,5 +1,5 @@
 /* Okapi PWA — cache shell only; APIs always network */
-const CACHE = "okapi-shell-v2";
+const CACHE = "okapi-shell-v3";
 const PRECACHE = ["/", "/manifest.webmanifest", "/okapi-logo.png"];
 
 self.addEventListener("install", (event) => {

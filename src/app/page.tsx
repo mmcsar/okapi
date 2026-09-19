@@ -187,7 +187,7 @@ function HomeApp() {
 
       <div
         className={`relative z-0 flex min-h-0 min-w-0 flex-1 flex-col ${
-          studioLayout ? "gap-0 pt-0" : "gap-2 pt-12 md:pt-0"
+          studioLayout ? "gap-0 pt-12 md:pt-0" : "gap-2 pt-12 md:pt-0"
         }`}
       >
         {!studioLayout ? (
