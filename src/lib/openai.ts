@@ -93,6 +93,7 @@ export async function openAiComplete(opts: {
 export async function streamOpenAiChat(opts: {
   system: string;
   engine?: OkapiEngine;
+  temperature?: number;
   messages: Array<{
     role: "user" | "assistant";
     content:
@@ -107,6 +108,7 @@ export async function streamOpenAiChat(opts: {
   const stream = await openai.chat.completions.create({
     model: openAiModel(opts.engine ?? "flash"),
     stream: true,
+    temperature: opts.temperature ?? 0.4,
     messages: [
       { role: "system", content: opts.system },
       ...(opts.messages as OpenAiChatMessage[]),

@@ -208,3 +208,22 @@ ${packet.note}
 FORBIDDEN: inventing any person’s name as current office-holder.
 Tell the user you could not confirm live and point to the provincial .gouv.cd site and Radio Okapi. End with « Okapi peut se tromper — vérifie les infos importantes ».`;
 }
+
+/**
+ * Réponse figée (sans LLM) quand le nom est connu — évite les hallucinations.
+ */
+export function formatVerifiedOfficeAnswer(packet: LiveFactPacket): string | null {
+  if (!packet.ok || !packet.name || !packet.province) return null;
+  const url = packet.sourceUrl || "le site officiel de la province";
+  const role = packet.curated
+    ? "gouverneur intérimaire"
+    : "gouverneur";
+  const confirm = packet.curated
+    ? `Cette info vient d’un snapshot Okapi (à confirmer sur ${url}).`
+    : `Source : ${url}.`;
+  return [
+    `Selon les sources Okapi, le ${role} du ${packet.province} est **${packet.name}**.`,
+    confirm,
+    `Okapi peut se tromper — vérifie les infos importantes.`,
+  ].join("\n\n");
+}

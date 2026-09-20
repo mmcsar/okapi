@@ -19,6 +19,7 @@ import { assertBodySize } from "@/lib/security";
 import type { OkapiAgentLane } from "@/lib/intent";
 import { wantsLiveCurrentFact } from "@/lib/intent";
 import {
+  formatVerifiedOfficeAnswer,
   liveFactSystemBlock,
   resolveLiveOfficeFact,
 } from "@/lib/live-facts";
@@ -144,9 +145,11 @@ export async function POST(request: Request) {
     body?.lane === "creer" ? "creer" : "conseil";
   const liveFact = wantsLiveCurrentFact(message);
   let liveBlock = "";
+  let verifiedDirect: string | null = null;
   if (liveFact) {
     const packet = await resolveLiveOfficeFact(message);
     if (packet) {
+      verifiedDirect = formatVerifiedOfficeAnswer(packet);
       liveBlock = liveFactSystemBlock(packet);
     } else {
       liveBlock = `
@@ -158,6 +161,18 @@ REQUIRED: say you cannot confirm without an official source; point to .gouv.cd /
 End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
     }
   }
+
+  // Fait vérifié → réponse directe (pas de LLM qui invente un autre nom)
+  if (verifiedDirect) {
+    return new Response(verifiedDirect, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Okapi-Provider": "okapi",
+        "X-Okapi-Fact": "verified",
+      },
+    });
+  }
+
   const system =
     buildSystem(language, Boolean(body?.debug), lane) +
     (hasImage
@@ -174,11 +189,21 @@ End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
     ? { mimeType: imageMime, base64: imageBase64! }
     : null;
 
+  // Conseiller : température basse = moins d’invention
+  const temperature = lane === "conseil" || liveFact ? 0.25 : 0.55;
+
   if (provider === "openai") {
-    return streamViaOpenAi(userContent, history, image, system, engine);
+    return streamViaOpenAi(userContent, history, image, system, engine, temperature);
   }
   if (provider === "openrouter") {
-    return streamViaOpenRouter(userContent, history, image, system, engine);
+    return streamViaOpenRouter(
+      userContent,
+      history,
+      image,
+      system,
+      engine,
+      temperature,
+    );
   }
   if (provider === "gemini") {
     return streamGemini(userContent, history, image, system);
@@ -228,12 +253,14 @@ async function streamViaOpenAi(
   image: ImagePart | null,
   system: string,
   engine: OkapiEngine = "flash",
+  temperature = 0.4,
 ) {
   try {
     return await streamOpenAiChat({
       system,
       engine,
       messages: toOpenRouterMessages(userContent, history, image),
+      temperature,
     });
   } catch (err) {
     return new Response(`\n\n${friendlyLlmError(err)}`, {
@@ -251,6 +278,7 @@ async function streamViaOpenRouter(
   image: ImagePart | null,
   system: string,
   engine: OkapiEngine = "flash",
+  temperature = 0.4,
 ) {
   try {
     return await streamOpenRouterChat({
@@ -258,6 +286,7 @@ async function streamViaOpenRouter(
       engine,
       messages: toOpenRouterMessages(userContent, history, image),
       vision: Boolean(image),
+      temperature,
     });
   } catch (err) {
     return new Response(`\n\n${friendlyLlmError(err)}`, {

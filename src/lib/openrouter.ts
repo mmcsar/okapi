@@ -88,6 +88,7 @@ async function openRouterFetch(opts: {
   messages: ChatMessage[];
   maxTokens: number;
   stream?: boolean;
+  temperature?: number;
 }) {
   return fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -97,6 +98,9 @@ async function openRouterFetch(opts: {
       messages: opts.messages,
       max_tokens: opts.maxTokens,
       stream: opts.stream === true,
+      ...(typeof opts.temperature === "number"
+        ? { temperature: opts.temperature }
+        : {}),
     }),
   });
 }
@@ -270,6 +274,7 @@ export async function streamOpenRouterChat(opts: {
   engine?: OkapiEngine;
   messages: ChatMessage[];
   vision?: boolean;
+  temperature?: number;
 }): Promise<Response> {
   const key = requireOpenRouterKey();
 
@@ -280,6 +285,7 @@ export async function streamOpenRouterChat(opts: {
     { role: "system", content: opts.system },
     ...opts.messages,
   ];
+  const temperature = opts.temperature ?? 0.4;
 
   let upstream = await openRouterFetch({
     key,
@@ -287,6 +293,7 @@ export async function streamOpenRouterChat(opts: {
     messages,
     maxTokens: 8192,
     stream: true,
+    temperature,
   });
 
   if (!upstream.ok) {
@@ -307,6 +314,7 @@ export async function streamOpenRouterChat(opts: {
         messages,
         maxTokens: 8192,
         stream: true,
+        temperature,
       });
     } else {
       throw new Error(
