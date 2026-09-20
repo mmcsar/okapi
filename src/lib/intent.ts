@@ -42,19 +42,26 @@ export function wantsLiveCurrentFact(message: string): boolean {
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .replace(/['’]/g, " ");
+  // fautes fréquentes : gourveneur, gouvernor…
+  const norm = m
+    .replace(/\bgourveneur(e)?s?\b/g, "gouverneur")
+    .replace(/\bgouvernor(e)?s?\b/g, "gouverneur")
+    .replace(/\bgovernor(e)?s?\b/g, "gouverneur");
   const office =
     /\b(gouverneur|vice[- ]?gouverneur|ministre|premier ministre|president|maire|bourgmestre|depute|senateur|chef de l etat|gouvernement provincial)\b/.test(
-      m,
+      norm,
     );
   const who =
     /\b(qui (est|sont)|quel(le)? (est|sont)|nom (du|de la|des)|actuel(le)?|aujourd hui|en ce moment|maintenant)\b/.test(
-      m,
-    ) || /\bqui\b.{0,40}\b(gouverneur|ministre|maire|president)\b/.test(m);
+      norm,
+    ) || /\bqui\b.{0,40}\b(gouverneur|ministre|maire|president)\b/.test(norm);
   const news =
     /\b(dernieres? nouvelles?|actu(alite)?s?|ce qui se passe|breaking)\b/.test(
-      m,
+      norm,
     );
-  return (office && who) || (office && /\b(du|de la|des|en|au|aux)\b/.test(m)) || news;
+  return (
+    (office && who) || (office && /\b(du|de la|des|en|au|aux)\b/.test(norm)) || news
+  );
 }
 
 /** Métiers / écrans RDC — même sans le verbe « crée ». */

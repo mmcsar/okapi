@@ -19,8 +19,8 @@ import { assertBodySize } from "@/lib/security";
 import type { OkapiAgentLane } from "@/lib/intent";
 import { wantsLiveCurrentFact } from "@/lib/intent";
 import {
+  formatUnverifiedOfficeAnswer,
   formatVerifiedOfficeAnswer,
-  liveFactSystemBlock,
   resolveLiveOfficeFact,
 } from "@/lib/live-facts";
 import {
@@ -149,25 +149,19 @@ export async function POST(request: Request) {
   const lane: OkapiAgentLane =
     body?.lane === "creer" ? "creer" : "conseil";
   const liveFact = wantsLiveCurrentFact(message);
-  let liveBlock = "";
   let verifiedDirect: string | null = null;
   if (liveFact) {
     const packet = await resolveLiveOfficeFact(message);
     if (packet) {
       verifiedDirect = formatVerifiedOfficeAnswer(packet);
-      liveBlock = liveFactSystemBlock(packet);
-    } else {
-      liveBlock = `
-
-LIVE / CURRENT OFFICE-HOLDER QUESTION — HARD RULE:
-You do NOT have verified live data for this answer.
-FORBIDDEN: inventing or guessing any person’s name as the current gouverneur / ministre / maire / président.
-REQUIRED: say you cannot confirm without an official source; point to .gouv.cd / Radio Okapi / Actualite.cd.
-End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
+    }
+    // Toujours réponse figée pour postes officiels — JAMAIS le LLM (il invente des noms)
+    if (!verifiedDirect) {
+      verifiedDirect = formatUnverifiedOfficeAnswer(message);
     }
   }
 
-  // Fait vérifié → réponse directe (pas de LLM qui invente un autre nom)
+  // Fait officiel → réponse directe (vérifiée ou « je ne confirme pas »)
   if (verifiedDirect) {
     return new Response(verifiedDirect, {
       headers: {
@@ -180,7 +174,7 @@ End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
 
   // Recherche générale (Conseiller) → ancrage sources publiques
   let researchBlock = "";
-  if (lane === "conseil" && !hasImage && !liveFact) {
+  if (lane === "conseil" && !hasImage) {
     const research = await resolveResearchGrounding(message);
     if (research) {
       researchBlock = researchGroundingSystemBlock(research);
@@ -192,7 +186,6 @@ End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
     (hasImage
       ? `\n\nVISION: An image is attached — you can see it. Describe accurately in the user’s language. If something is unclear, blurry, or illegible, say so — do not invent text or details.`
       : "") +
-    liveBlock +
     researchBlock;
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const userContent = sector
@@ -206,7 +199,7 @@ End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
 
   // Conseiller / recherche ancrée : température basse = moins d’invention
   const temperature =
-    lane === "conseil" || liveFact || Boolean(researchBlock) ? 0.2 : 0.55;
+    lane === "conseil" || Boolean(researchBlock) ? 0.2 : 0.55;
 
   if (provider === "openai") {
     return streamViaOpenAi(userContent, history, image, system, engine, temperature);

@@ -27,6 +27,20 @@ const GOVERNOR_SOURCES: OfficialSource[] = [
     },
   },
   {
+    match: /\b(lualaba|kolwezi)\b/i,
+    label: "Lualaba",
+    urls: [
+      "https://www.provincelualaba.cd/",
+      "https://provincelualaba.cd/",
+    ],
+    curated: {
+      name: "Fifi Masuka Saini",
+      role: "gouverneure",
+      asOf: "2026-09",
+      interim: false,
+    },
+  },
+  {
     match: /\b(kinshasa)\b/i,
     label: "Kinshasa",
     urls: ["https://www.kinshasa.cd/", "https://kinshasa.gouv.cd/"],
@@ -115,7 +129,13 @@ export type LiveFactPacket = {
 export async function resolveLiveOfficeFact(
   message: string,
 ): Promise<LiveFactPacket | null> {
-  const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  const m = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, " ")
+    .replace(/\bgourveneur(e)?s?\b/g, "gouverneur")
+    .replace(/\bgouvernor(e)?s?\b/g, "gouverneur");
   const isGovernorAsk =
     /\bgouverneur\b/.test(m) ||
     /\bvice[- ]?gouverneur\b/.test(m) ||
@@ -216,14 +236,40 @@ export function formatVerifiedOfficeAnswer(packet: LiveFactPacket): string | nul
   if (!packet.ok || !packet.name || !packet.province) return null;
   const url = packet.sourceUrl || "le site officiel de la province";
   const role = packet.curated
-    ? "gouverneur intérimaire"
+    ? packet.note.includes("intérimaire") || /intérimaire/i.test(packet.note)
+      ? "gouverneur intérimaire"
+      : /gouverneure/i.test(packet.note)
+        ? "gouverneure"
+        : "gouverneur"
     : "gouverneur";
+  // Prefer curated role if we can parse from note
+  const roleFromNote = packet.note.match(
+    /,\s*((?:gouverneur|gouverneure)(?:\s+intérimaire)?)\s+du/i,
+  )?.[1];
+  const roleFinal = roleFromNote || role;
   const confirm = packet.curated
     ? `Cette info vient d’un snapshot Okapi (à confirmer sur ${url}).`
     : `Source : ${url}.`;
   return [
-    `Selon les sources Okapi, le ${role} du ${packet.province} est **${packet.name}**.`,
+    `Selon les sources Okapi, le/la ${roleFinal} du ${packet.province} est **${packet.name}**.`,
     confirm,
+    `Okapi peut se tromper — vérifie les infos importantes.`,
+  ].join("\n\n");
+}
+
+/** Réponse sûre sans LLM — jamais de nom inventé. */
+export function formatUnverifiedOfficeAnswer(message: string): string {
+  const m = message.toLowerCase();
+  let hint =
+    "Consulte le site officiel de la province (.gouv.cd / provincelualaba.cd) ou Radio Okapi.";
+  if (/\blualaba|kolwezi\b/i.test(m)) {
+    hint = "Consulte https://www.provincelualaba.cd/ ou Radio Okapi.";
+  } else if (/\bhaut[- ]?katanga|lubumbashi\b/i.test(m)) {
+    hint = "Consulte https://haut-katanga.gouv.cd/le-gouverneur/ ou Radio Okapi.";
+  }
+  return [
+    `Je ne peux pas confirmer de façon fiable le nom du gouverneur / de la gouverneure demandé(e) à cet instant — Okapi refuse d’inventer un nom.`,
+    hint,
     `Okapi peut se tromper — vérifie les infos importantes.`,
   ].join("\n\n");
 }
