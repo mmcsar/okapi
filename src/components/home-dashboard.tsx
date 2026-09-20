@@ -7,6 +7,7 @@ import { UserMenu } from "@/components/user-menu";
 import { useOkapiAudio } from "@/hooks/use-okapi-audio";
 import {
   downloadDataUrl,
+  downloadImageUrl,
   fileToAttachedImage,
   type AttachedImage,
 } from "@/lib/image";
@@ -19,6 +20,8 @@ import {
 import {
   wantsAppBuild,
   wantsDebug,
+  wantsImageGen,
+  extractImagePrompt,
   chatDeniedBuilder,
   getStoredAgentLane,
   setStoredAgentLane,
@@ -81,7 +84,12 @@ export function HomeDashboard({
   const [sector, setSector] = useState<string>("Général");
   const [status, setStatus] = useState<string | null>(null);
   const [messages, setMessages] = useState<
-    { role: "user" | "assistant"; content: string; imageUrl?: string }[]
+    {
+      role: "user" | "assistant";
+      content: string;
+      imageUrl?: string;
+      imageFallbacks?: string[];
+    }[]
   >([]);
   const [sending, setSending] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -123,6 +131,7 @@ export function HomeDashboard({
   const [voiceOut, setVoiceOut] = useState(false);
   const [draftVoice, setDraftVoice] = useState("");
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<string | null>(null);
@@ -828,9 +837,12 @@ export function HomeDashboard({
     const largeAsk = !imagePayload && wantsLargeProject(trimmed);
     const debug =
       debugArmed || (!imagePayload && wantsDebug(trimmed));
+    const imageGen =
+      !imagePayload && Boolean(trimmed) && wantsImageGen(trimmed);
     // Debug + Preview = corriger l’app (les 2 lanes) ; sinon build selon lane
     const build =
       !imagePayload &&
+      !imageGen &&
       (wantsAppBuild(trimmed, Boolean(previewHtml), agentLane) ||
         (debug && Boolean(previewHtml)));
     const mode = build
@@ -859,23 +871,25 @@ export function HomeDashboard({
       },
       {
         role: "assistant",
-        content: build
-          ? debug
-            ? "Okapi debug… correction en cours…"
-            : largeAsk
-              ? engine === "pro"
-                ? "Okapi Pro — grand projet en cours…"
-                : "Okapi Flash — grand projet en cours…"
-              : mode === "fullstack"
-                ? previewHtml
-                  ? "Mise à jour fullstack (UI + base)…"
-                  : "Génération fullstack (UI + base)…"
-                : previewHtml
-                  ? "Mise à jour de la preview…"
-                  : "Génération de la preview…"
-          : debug
-            ? "Okapi analyse le bug…"
-            : "Okapi réfléchit…",
+        content: imageGen
+          ? "Okapi génère l’image IA…"
+          : build
+            ? debug
+              ? "Okapi debug… correction en cours…"
+              : largeAsk
+                ? engine === "pro"
+                  ? "Okapi Pro — grand projet en cours…"
+                  : "Okapi Flash — grand projet en cours…"
+                : mode === "fullstack"
+                  ? previewHtml
+                    ? "Mise à jour fullstack (UI + base)…"
+                    : "Génération fullstack (UI + base)…"
+                  : previewHtml
+                    ? "Mise à jour de la preview…"
+                    : "Génération de la preview…"
+            : debug
+              ? "Okapi analyse le bug…"
+              : "Okapi réfléchit…",
       },
     ]);
     setPrompt("");
@@ -884,15 +898,104 @@ export function HomeDashboard({
     setStatus(null);
     setSending(true);
 
-    const setAssistant = (content: string) => {
+    const setAssistant = (
+      content: string,
+      imageUrl?: string,
+      imageFallbacks?: string[],
+    ) => {
       setMessages((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { role: "assistant", content };
+        next[next.length - 1] = {
+          role: "assistant",
+          content,
+          ...(imageUrl ? { imageUrl } : {}),
+          ...(imageFallbacks?.length ? { imageFallbacks } : {}),
+        };
         return next;
       });
     };
 
     try {
+      if (imageGen) {
+        // Jamais Studio pour une image — reste sur Accueil Agent
+        setStudioHandoffReady(false);
+        setDevMode(false);
+        const imgRes = await fetch("/api/image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: extractImagePrompt(trimmed),
+          }),
+        });
+        const imgData = (await imgRes.json().catch(() => null)) as {
+          ok?: boolean;
+          url?: string;
+          prompt?: string;
+          error?: string;
+          fallbackUrls?: string[];
+          upgradeUrls?: string[];
+          mode?: string;
+          note?: string;
+        } | null;
+        if (!imgRes.ok || !imgData?.url) {
+          throw new Error(
+            imgData?.error ?? `Génération image impossible (${imgRes.status})`,
+          );
+        }
+        setAssistant(
+          imgData.mode === "okapi" || imgData.mode === "openrouter"
+            ? `Voici ton image${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. Clique pour agrandir · télécharge si tu veux.`
+            : `Voici un aperçu${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. ${
+                imgData.note ||
+                "Image IA temporairement indisponible — réessaie dans un instant."
+              }`,
+          imgData.url,
+          imgData.fallbackUrls,
+        );
+        setStatus(null);
+
+        // Upgrade navigateur seulement si pas déjà une vraie image Okapi
+        if (imgData.mode === "okapi" || imgData.mode === "openrouter") return;
+
+        const upgrades = imgData.upgradeUrls || imgData.fallbackUrls || [];
+        void (async () => {
+          for (const candidate of upgrades) {
+            const ok = await new Promise<boolean>((resolve) => {
+              const img = new window.Image();
+              const timer = window.setTimeout(() => {
+                img.src = "";
+                resolve(false);
+              }, 10_000);
+              img.onload = () => {
+                window.clearTimeout(timer);
+                resolve(true);
+              };
+              img.onerror = () => {
+                window.clearTimeout(timer);
+                resolve(false);
+              };
+              img.referrerPolicy = "no-referrer";
+              img.src = candidate;
+            });
+            if (!ok) continue;
+            setMessages((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              if (last?.role === "assistant") {
+                next[next.length - 1] = {
+                  ...last,
+                  imageUrl: candidate,
+                  content: `Voici ton image${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. Clique pour agrandir · télécharge si tu veux.`,
+                };
+              }
+              return next;
+            });
+            break;
+          }
+        })();
+        return;
+      }
+
       if (!build) {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -1352,9 +1455,13 @@ export function HomeDashboard({
               ? "Okapi est très sollicité. Réessaie dans quelques secondes."
               : /crédit|credits|billing|402/i.test(raw)
                 ? "Le crédit IA Okapi est épuisé. Réessaie plus tard."
-                : /^Okapi\b|^Le crédit\b|^Trop de\b|^Réponse Okapi\b/i.test(raw)
+                : /image|génération image|Génération image|timeout|Timeout|502|504|crédit image|fournisseur/i.test(
+                      raw,
+                    )
                   ? raw
-                  : "Okapi n’a pas pu répondre. Réessaie dans quelques secondes.";
+                  : /^Okapi\b|^Le crédit\b|^Trop de\b|^Réponse Okapi\b/i.test(raw)
+                    ? raw
+                    : "Okapi n’a pas pu répondre. Réessaie dans quelques secondes.";
       setStatus(soft);
       setAssistant(soft);
     } finally {
@@ -1448,28 +1555,84 @@ export function HomeDashboard({
             >
               {msg.imageUrl ? (
                 <div className="mb-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={msg.imageUrl}
-                    alt="Pièce jointe"
-                    className="max-h-36 rounded-lg border border-white/20 object-cover"
-                  />
                   <button
                     type="button"
-                    onClick={() =>
-                      downloadDataUrl(
-                        msg.imageUrl!,
-                        `okapi-image-${i + 1}.png`,
-                      )
-                    }
-                    className={`mt-1.5 text-[11px] font-semibold underline-offset-2 hover:underline ${
-                      msg.role === "user"
-                        ? "text-white/85"
-                        : "text-okapi-forest/80"
-                    }`}
+                    onClick={() => setLightboxUrl(msg.imageUrl!)}
+                    className="group relative block w-full overflow-hidden rounded-lg text-left"
+                    title="Agrandir l’image"
                   >
-                    Télécharger l’image
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={msg.imageUrl}
+                      alt={
+                        msg.role === "assistant"
+                          ? "Image générée par Okapi"
+                          : "Pièce jointe"
+                      }
+                      loading="eager"
+                      decoding="async"
+                      referrerPolicy="no-referrer"
+                      onLoad={(e) => {
+                        e.currentTarget.style.opacity = "1";
+                      }}
+                      onError={(e) => {
+                        const el = e.currentTarget;
+                        const list = msg.imageFallbacks || [];
+                        const cur = el.getAttribute("src") || "";
+                        const idx = list.indexOf(cur);
+                        const next =
+                          idx >= 0 ? list[idx + 1] : list.find((u) => u !== cur);
+                        if (next && next !== cur) {
+                          el.src = next;
+                          setMessages((prev) => {
+                            const copy = [...prev];
+                            const m = copy[i];
+                            if (m) copy[i] = { ...m, imageUrl: next };
+                            return copy;
+                          });
+                        }
+                      }}
+                      className={`w-full rounded-lg border object-cover opacity-80 transition group-hover:opacity-95 ${
+                        msg.role === "assistant"
+                          ? "max-h-[min(70vh,28rem)] min-h-[12rem] border-[var(--okapi-stroke)] bg-gradient-to-br from-okapi-forest/20 to-okapi-ink/10"
+                          : "max-h-36 border-white/20"
+                      }`}
+                    />
+                    {msg.role === "assistant" ? (
+                      <span className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+                        Agrandir
+                      </span>
+                    ) : null}
                   </button>
+                  <div className="mt-1.5 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setLightboxUrl(msg.imageUrl!)}
+                      className={`text-[11px] font-semibold underline-offset-2 hover:underline ${
+                        msg.role === "user"
+                          ? "text-white/85"
+                          : "text-okapi-forest/80"
+                      }`}
+                    >
+                      Ouvrir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void downloadImageUrl(
+                          msg.imageUrl!,
+                          `okapi-image-${i + 1}.jpg`,
+                        )
+                      }
+                      className={`text-[11px] font-semibold underline-offset-2 hover:underline ${
+                        msg.role === "user"
+                          ? "text-white/85"
+                          : "text-okapi-forest/80"
+                      }`}
+                    >
+                      Télécharger
+                    </button>
+                  </div>
                 </div>
               ) : null}
               {isStreamingAssistant &&
@@ -1589,14 +1752,14 @@ export function HomeDashboard({
                 : agentLane === "conseil"
                   ? attachedImage
                     ? "Que faire avec cette image ?"
-                    : "Pose une question, demande un conseil ou un contenu…"
+                    : "Question, conseil, contenu… ou « crée une image de… »"
                   : devMode
                     ? "Demande un conseil — le code s’édite dans Studio…"
                     : attachedImage
                       ? "Que faire avec cette image ?"
                       : previewHtml
                         ? "Modifie, debug, ou dis ce qu’il faut changer…"
-                        : "Décris l’app ou le site à créer…"
+                        : "App, site… ou « crée une image / logo de… »"
           }
           className="min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
         />
@@ -2035,6 +2198,33 @@ export function HomeDashboard({
         ) : null}
       </div>
       )}
+      {lightboxUrl ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image agrandie"
+          onClick={() => setLightboxUrl(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setLightboxUrl(null);
+          }}
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-lg bg-white/15 px-3 py-1.5 text-sm font-semibold text-white hover:bg-white/25"
+            onClick={() => setLightboxUrl(null)}
+          >
+            Fermer
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt="Image Okapi"
+            className="max-h-[90vh] max-w-[min(96vw,1100px)] rounded-lg object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }

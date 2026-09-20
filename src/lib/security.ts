@@ -132,6 +132,11 @@ export function sanitizePublicError(err: unknown) {
     .replace(/[A-Za-z]:\\[^\s]+/g, "[path]")
     .replace(/\/Users\/[^\s]+/g, "[path]")
     .replace(/OPENAI_API_KEY|SUPABASE_SERVICE_ROLE|OPENROUTER_API_KEY|OKAPI_AES_KEY|OKAPI_SESSION_SECRET|OKAPI_ADMIN_CODE|OKAPI_BILLING_WEBHOOK_SECRET/gi, "[secret]")
+    .replace(/\bopenrouter\.ai\b/gi, "Okapi")
+    .replace(/\bopenrouter\b/gi, "Okapi")
+    .replace(/\bpollinations(\.ai)?\b/gi, "Okapi")
+    .replace(/\bopenai\b/gi, "Okapi")
+    .replace(/\bgemini\b/gi, "Okapi")
     .slice(0, 400);
 }
 

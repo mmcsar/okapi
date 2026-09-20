@@ -23,6 +23,22 @@ export function downloadDataUrl(dataUrl: string, filename: string) {
   a.remove();
 }
 
+/** Download data URL, blob URL, or same-origin / remote image URL. */
+export async function downloadImageUrl(url: string, filename: string) {
+  if (url.startsWith("data:") || url.startsWith("blob:")) {
+    downloadDataUrl(url, filename);
+    return;
+  }
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    downloadBlob(blob, filename);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
 export function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   downloadDataUrl(url, filename);

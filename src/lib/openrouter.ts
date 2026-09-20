@@ -398,3 +398,184 @@ export async function streamOpenRouterChat(opts: {
     },
   });
 }
+
+/** Modèles image à essayer (ordre). Surcharge : OPENROUTER_IMAGE_MODEL. */
+export function openRouterImageModels(): string[] {
+  const primary = process.env.OPENROUTER_IMAGE_MODEL?.trim();
+  const list = [
+    primary,
+    "google/gemini-2.5-flash-image-preview",
+    "google/gemini-2.0-flash-exp:free",
+    "black-forest-labs/flux.2-flex",
+    "openai/gpt-4o",
+  ].filter((m): m is string => Boolean(m));
+  return [...new Set(list)];
+}
+
+/** @deprecated use openRouterImageModels */
+export function openRouterImageModel() {
+  return openRouterImageModels()[0]!;
+}
+
+function extractImageDataUrl(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+
+  // /api/v1/images → data[].b64_json | url
+  const data = root.data;
+  if (Array.isArray(data) && data[0] && typeof data[0] === "object") {
+    const first = data[0] as Record<string, unknown>;
+    if (typeof first.b64_json === "string" && first.b64_json.length > 32) {
+      const mt =
+        typeof first.media_type === "string"
+          ? first.media_type
+          : "image/png";
+      return `data:${mt};base64,${first.b64_json}`;
+    }
+    if (typeof first.url === "string" && /^https?:|^data:/.test(first.url)) {
+      return first.url;
+    }
+  }
+
+  // chat/completions → choices[0].message.images[] or content parts
+  const choices = root.choices;
+  if (Array.isArray(choices) && choices[0] && typeof choices[0] === "object") {
+    const msg = (choices[0] as { message?: Record<string, unknown> }).message;
+    if (msg) {
+      const images = msg.images;
+      if (Array.isArray(images)) {
+        for (const im of images) {
+          if (!im || typeof im !== "object") continue;
+          const url = (im as { image_url?: { url?: string } }).image_url?.url;
+          if (url && /^https?:|^data:/.test(url)) return url;
+        }
+      }
+      const content = msg.content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (!part || typeof part !== "object") continue;
+          const url = (part as { image_url?: { url?: string } }).image_url
+            ?.url;
+          if (url && /^https?:|^data:/.test(url)) return url;
+        }
+      }
+      if (typeof content === "string") {
+        const m = content.match(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/);
+        if (m?.[0]) return m[0];
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Génère une image via OpenRouter (même clé que le chat).
+ * Retourne data URL + modèle, ou error pour l’UI.
+ */
+export async function generateOpenRouterImage(
+  prompt: string,
+  opts?: { timeoutMs?: number },
+): Promise<
+  | { dataUrl: string; model: string; error?: undefined }
+  | { dataUrl?: undefined; model?: string; error: string }
+  | null
+> {
+  if (!openRouterConfigured()) return null;
+  const key = requireOpenRouterKey();
+  const timeoutMs = opts?.timeoutMs ?? 55_000;
+  const userPrompt = `Generate one clear image. Subject: ${prompt.trim().slice(0, 400)}`;
+  const models = openRouterImageModels();
+  const errors: string[] = [];
+
+  for (const model of models) {
+    // A) Dedicated images API
+    try {
+      const imgRes = await fetch("https://openrouter.ai/api/v1/images", {
+        method: "POST",
+        headers: openRouterHeaders(key),
+        body: JSON.stringify({
+          model,
+          prompt: userPrompt,
+          aspect_ratio: "4:3",
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const imgText = await imgRes.text();
+      let imgJson: unknown = null;
+      try {
+        imgJson = JSON.parse(imgText);
+      } catch {
+        /* ignore */
+      }
+      if (imgRes.ok) {
+        const dataUrl = extractImageDataUrl(imgJson);
+        if (dataUrl) return { dataUrl, model };
+        errors.push(`${model} /images: réponse sans image`);
+      } else {
+        const errMsg =
+          (imgJson as { error?: { message?: string } } | null)?.error
+            ?.message || imgText.slice(0, 160);
+        errors.push(`${model} /images ${imgRes.status}: ${errMsg}`);
+        if (imgRes.status === 402) {
+          return {
+            error:
+              "Le crédit image Okapi est épuisé. Recharge le crédit IA Okapi puis réessaie.",
+          };
+        }
+      }
+    } catch (e) {
+      errors.push(
+        `${model} /images: ${e instanceof Error ? e.message : "timeout"}`,
+      );
+    }
+
+    // B) Chat + modalities
+    try {
+      const chatRes = await fetch(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: openRouterHeaders(key),
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: userPrompt }],
+            modalities: ["image", "text"],
+          }),
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+      );
+      const chatText = await chatRes.text();
+      let chatJson: unknown = null;
+      try {
+        chatJson = JSON.parse(chatText);
+      } catch {
+        /* ignore */
+      }
+      if (chatRes.ok) {
+        const dataUrl = extractImageDataUrl(chatJson);
+        if (dataUrl) return { dataUrl, model };
+        errors.push(`${model} chat: pas d’image dans la réponse`);
+      } else {
+        const errMsg =
+          (chatJson as { error?: { message?: string } } | null)?.error
+            ?.message || chatText.slice(0, 160);
+        errors.push(`${model} chat ${chatRes.status}: ${errMsg}`);
+        if (chatRes.status === 402) {
+          return {
+            error:
+              "Le crédit image Okapi est épuisé. Recharge le crédit IA Okapi puis réessaie.",
+          };
+        }
+      }
+    } catch (e) {
+      errors.push(
+        `${model} chat: ${e instanceof Error ? e.message : "timeout"}`,
+      );
+    }
+  }
+
+  return {
+    error:
+      "Okapi n’a pas pu générer l’image pour le moment. Réessaie ou vérifie le crédit IA Okapi.",
+  };
+}

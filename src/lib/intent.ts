@@ -36,12 +36,73 @@ export function wantsKnowledgeOrContent(message: string): boolean {
 const METIER_BUILD_RE =
   /\b(boutique|catalogue|stock|panier|checkout|commande|mobile\s*money|m[- ]?pesa|airtel\s*money|orange\s*money|whatsapp|restaurant|menu|clinique|patient|rendez[- ]?vous|ecole|eleve|crm|clients?|dashboard|marketplace|facture|caisse|flotte|livraison)\b/i;
 
+/** Demande d’image seule (pas une app avec photos). */
+export function wantsImageGen(message: string): boolean {
+  const m = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, " ");
+  // « limage » / « l image » / fautes fréquentes
+  const norm = m.replace(/\bl\s*image\b/g, " image ").replace(/\s+/g, " ");
+
+  const imageAsk =
+    /\b(cree|creer|gener[eè]e?|fabrique|fais|dessine|illustre|montre)\b.{0,60}\b(image|illustration|photo|logo|visuel|dessin|picture|picto)\b/.test(
+      norm,
+    ) ||
+    /\b(image|illustration|photo|logo|visuel|dessin)\b.{0,40}\b(de|d |du|des|pour|avec|qui|un|une)\b/.test(
+      norm,
+    ) ||
+    /\b(genere|cree|fais)[- ]?(moi )?(une? |un |la |le )?(image|illustration|photo|logo|visuel)\b/.test(
+      norm,
+    ) ||
+    /\b(une?|la) (belle )?image\b/.test(norm);
+
+  if (!imageAsk) return false;
+  // « crée un site avec des photos… » → builder, pas image seule
+  if (
+    /\b(app|application|site|page web|boutique|dashboard|crm|landing)\b/.test(
+      norm,
+    ) &&
+    !/\b(juste|seulement|uniquement).{0,24}\b(image|logo|illustration|photo|visuel)\b/.test(
+      norm,
+    )
+  ) {
+    return false;
+  }
+  // « projet » seul ne doit pas bloquer une image (« mon projet photo »)
+  if (
+    /\b(projet)\b/.test(norm) &&
+    /\b(app|site|web|fullstack|crm)\b/.test(norm)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Prompt nettoyé pour /api/image. */
+export function extractImagePrompt(message: string): string {
+  let p = message.trim();
+  p = p.replace(/^(okapi[,:]?\s*)/i, "");
+  p = p.replace(/^(s['’]il te pla[iî]t[,:]?\s*)/i, "");
+  p = p.replace(/^(peux[- ]tu|pourrais[- ]tu|svp)[,:]?\s*/i, "");
+  p = p.replace(
+    /^(cr[eé]e[rz]?|g[eé]n[eè]re[rz]?|fabrique[rz]?|fais[- ]moi|dessine[rz]?|illustre[rz]?)(\s*moi)?\s*(une?|un|le|la|des)?\s*(image|illustration|photo|logo|visuel|dessin)\s*(de|d['’]|pour|avec|:)?\s*/i,
+    "",
+  );
+  const out = (p.trim() || message.trim()).slice(0, 500);
+  return out.length >= 3 ? out : message.trim().slice(0, 500);
+}
+
 export function wantsAppBuild(
   message: string,
   hasPreview: boolean,
   lane: OkapiAgentLane = "creer",
 ): boolean {
   const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+
+  // Image seule → /api/image, pas le builder HTML
+  if (wantsImageGen(message)) return false;
 
   // Lane Conseiller : uniquement un « crée une app… » explicite (jamais Studio forcé)
   if (lane === "conseil") {

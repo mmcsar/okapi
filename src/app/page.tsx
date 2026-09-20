@@ -93,7 +93,8 @@ function HomeApp() {
         id === "agents" ||
         id === "website"
       ) {
-        // Garder le projet ouvert — sinon Studio → Agent efface la Preview
+        // Keep openProject so Agent Preview survives Studio ↔ Accueil.
+        // Clear only via startNewProject (+ Nouveau).
         setOpenInStudio(false);
         setNav("home");
         return;
