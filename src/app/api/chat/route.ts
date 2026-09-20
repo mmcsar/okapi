@@ -23,6 +23,10 @@ import {
   liveFactSystemBlock,
   resolveLiveOfficeFact,
 } from "@/lib/live-facts";
+import {
+  researchGroundingSystemBlock,
+  resolveResearchGrounding,
+} from "@/lib/research-grounding";
 
 export const runtime = "nodejs";
 
@@ -54,6 +58,7 @@ LANE = CRÉATEUR (builders / apps):
 LANE = CONSEILLER (savoir / contenu / recherche):
 - Answer questions, research, advice, drafts (articles, posts, scripts, letters). Stay helpful in this chat.
 - Credibility is everything: a false fact destroys trust. Prefer « je ne sais pas / à vérifier » over a guessed name or date.
+- When RESEARCH GROUNDING excerpts are provided: factual claims MUST come from those excerpts only.
 - Do NOT push Studio, code editors, or “ouvre Studio”. Do NOT invent that a constructor is missing.
 - Only if the user explicitly asks to create an app/site: say they can switch to mode « Créateur » on Accueil, or type « Crée une app… » — do not open Studio for them.
 - Never pitch apps/templates unsolicited.
@@ -173,12 +178,22 @@ End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
     });
   }
 
+  // Recherche générale (Conseiller) → ancrage sources publiques
+  let researchBlock = "";
+  if (lane === "conseil" && !hasImage && !liveFact) {
+    const research = await resolveResearchGrounding(message);
+    if (research) {
+      researchBlock = researchGroundingSystemBlock(research);
+    }
+  }
+
   const system =
     buildSystem(language, Boolean(body?.debug), lane) +
     (hasImage
       ? `\n\nVISION: An image is attached — you can see it. Describe accurately in the user’s language. If something is unclear, blurry, or illegible, say so — do not invent text or details.`
       : "") +
-    liveBlock;
+    liveBlock +
+    researchBlock;
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const userContent = sector
     ? lane === "creer"
@@ -189,8 +204,9 @@ End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
     ? { mimeType: imageMime, base64: imageBase64! }
     : null;
 
-  // Conseiller : température basse = moins d’invention
-  const temperature = lane === "conseil" || liveFact ? 0.25 : 0.55;
+  // Conseiller / recherche ancrée : température basse = moins d’invention
+  const temperature =
+    lane === "conseil" || liveFact || Boolean(researchBlock) ? 0.2 : 0.55;
 
   if (provider === "openai") {
     return streamViaOpenAi(userContent, history, image, system, engine, temperature);
