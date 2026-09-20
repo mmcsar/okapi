@@ -18,6 +18,10 @@ import { normalizeImageMime } from "@/lib/image";
 import { assertBodySize } from "@/lib/security";
 import type { OkapiAgentLane } from "@/lib/intent";
 import { wantsLiveCurrentFact } from "@/lib/intent";
+import {
+  liveFactSystemBlock,
+  resolveLiveOfficeFact,
+} from "@/lib/live-facts";
 
 export const runtime = "nodejs";
 
@@ -139,24 +143,27 @@ export async function POST(request: Request) {
   const lane: OkapiAgentLane =
     body?.lane === "creer" ? "creer" : "conseil";
   const liveFact = wantsLiveCurrentFact(message);
+  let liveBlock = "";
+  if (liveFact) {
+    const packet = await resolveLiveOfficeFact(message);
+    if (packet) {
+      liveBlock = liveFactSystemBlock(packet);
+    } else {
+      liveBlock = `
+
+LIVE / CURRENT OFFICE-HOLDER QUESTION — HARD RULE:
+You do NOT have verified live data for this answer.
+FORBIDDEN: inventing or guessing any person’s name as the current gouverneur / ministre / maire / président.
+REQUIRED: say you cannot confirm without an official source; point to .gouv.cd / Radio Okapi / Actualite.cd.
+End with: « Okapi peut se tromper — vérifie les infos importantes ».`;
+    }
+  }
   const system =
     buildSystem(language, Boolean(body?.debug), lane) +
     (hasImage
       ? `\n\nVISION: An image is attached — you can see it. Describe accurately in the user’s language. If something is unclear, blurry, or illegible, say so — do not invent text or details.`
       : "") +
-    (liveFact
-      ? `
-
-LIVE / CURRENT OFFICE-HOLDER QUESTION — HARD RULE:
-You do NOT have verified live data for this answer.
-FORBIDDEN: inventing or guessing any person’s name as the current gouverneur / ministre / maire / président.
-REQUIRED reply shape (French unless user uses another language):
-1) Say clearly you cannot confirm the name in force right now without an official source.
-2) Point to: site officiel de la province (ex. haut-katanga.gouv.cd) and/or Radio Okapi / Actualite.cd.
-3) Optionally recall a well-known past holder only if labeled as past (« anciennement… ») — never present them as current unless certain.
-4) End with: « Okapi peut se tromper — vérifie les infos importantes ».
-Do not pad with a fake “À ma connaissance, c’est X”.`
-      : "");
+    liveBlock;
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const userContent = sector
     ? lane === "creer"
