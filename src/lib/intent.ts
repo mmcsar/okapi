@@ -32,6 +32,31 @@ export function wantsKnowledgeOrContent(message: string): boolean {
   );
 }
 
+/**
+ * Qui détient un poste / actualité « live » — risque élevé d’hallucination.
+ * Mieux : « je ne confirme pas » + sources officielles, plutôt qu’un faux nom.
+ */
+export function wantsLiveCurrentFact(message: string): boolean {
+  const m = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, " ");
+  const office =
+    /\b(gouverneur|vice[- ]?gouverneur|ministre|premier ministre|president|maire|bourgmestre|depute|senateur|chef de l etat|gouvernement provincial)\b/.test(
+      m,
+    );
+  const who =
+    /\b(qui (est|sont)|quel(le)? (est|sont)|nom (du|de la|des)|actuel(le)?|aujourd hui|en ce moment|maintenant)\b/.test(
+      m,
+    ) || /\bqui\b.{0,40}\b(gouverneur|ministre|maire|president)\b/.test(m);
+  const news =
+    /\b(dernieres? nouvelles?|actu(alite)?s?|ce qui se passe|breaking)\b/.test(
+      m,
+    );
+  return (office && who) || (office && /\b(du|de la|des|en|au|aux)\b/.test(m)) || news;
+}
+
 /** Métiers / écrans RDC — même sans le verbe « crée ». */
 const METIER_BUILD_RE =
   /\b(boutique|catalogue|stock|panier|checkout|commande|mobile\s*money|m[- ]?pesa|airtel\s*money|orange\s*money|whatsapp|restaurant|menu|clinique|patient|rendez[- ]?vous|ecole|eleve|crm|clients?|dashboard|marketplace|facture|caisse|flotte|livraison)\b/i;

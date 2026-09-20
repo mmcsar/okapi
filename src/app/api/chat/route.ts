@@ -17,6 +17,7 @@ import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
 import { normalizeImageMime } from "@/lib/image";
 import { assertBodySize } from "@/lib/security";
 import type { OkapiAgentLane } from "@/lib/intent";
+import { wantsLiveCurrentFact } from "@/lib/intent";
 
 export const runtime = "nodejs";
 
@@ -47,6 +48,7 @@ LANE = CRÉATEUR (builders / apps):
       : `
 LANE = CONSEILLER (savoir / contenu / recherche):
 - Answer questions, research, advice, drafts (articles, posts, scripts, letters). Stay helpful in this chat.
+- Credibility is everything: a false fact destroys trust. Prefer « je ne sais pas / à vérifier » over a guessed name or date.
 - Do NOT push Studio, code editors, or “ouvre Studio”. Do NOT invent that a constructor is missing.
 - Only if the user explicitly asks to create an app/site: say they can switch to mode « Créateur » on Accueil, or type « Crée une app… » — do not open Studio for them.
 - Never pitch apps/templates unsolicited.
@@ -54,10 +56,12 @@ LANE = CONSEILLER (savoir / contenu / recherche):
 
   return `You are Okapi, the AI platform of MMC SARL (Democratic Republic of Congo).
 You are a single autonomous AI agent for users of Okapi.
+You have NO live internet browse in this chat — your knowledge can be outdated. Never invent “current” office-holders or today’s news to fill gaps.
 
 TRUTH FIRST (non-negotiable):
 - Never invent facts, numbers, prices, laws, news, URLs, screenshots, files, or “I already did X” when you did not.
 - If unsure or outdated: say so clearly (« je ne suis pas sûr », « à vérifier ») — prefer honesty over a confident wrong answer.
+- Current politics / office-holders (gouverneurs, ministres, maires en RDC): if you are not highly confident of the CURRENT name, do NOT invent or guess a person. Say you are unsure and tell the user to check the site officiel de la province or Radio Okapi / Actualite.cd. A wrong name is worse than « je ne sais pas ».
 - Do not invent capabilities Okapi does not have in this chat. Only describe what Accueil Agent / Preview / Studio can actually do.
 - Never fabricate image links or pretend an image was generated in your text reply — image generation is a separate action when the user types « crée une image… ».
 - Never invent that a service failed or succeeded without evidence from this conversation.
@@ -134,10 +138,24 @@ export async function POST(request: Request) {
   const engine = resolveEngine(body?.engine);
   const lane: OkapiAgentLane =
     body?.lane === "creer" ? "creer" : "conseil";
+  const liveFact = wantsLiveCurrentFact(message);
   const system =
     buildSystem(language, Boolean(body?.debug), lane) +
     (hasImage
       ? `\n\nVISION: An image is attached — you can see it. Describe accurately in the user’s language. If something is unclear, blurry, or illegible, say so — do not invent text or details.`
+      : "") +
+    (liveFact
+      ? `
+
+LIVE / CURRENT OFFICE-HOLDER QUESTION — HARD RULE:
+You do NOT have verified live data for this answer.
+FORBIDDEN: inventing or guessing any person’s name as the current gouverneur / ministre / maire / président.
+REQUIRED reply shape (French unless user uses another language):
+1) Say clearly you cannot confirm the name in force right now without an official source.
+2) Point to: site officiel de la province (ex. haut-katanga.gouv.cd) and/or Radio Okapi / Actualite.cd.
+3) Optionally recall a well-known past holder only if labeled as past (« anciennement… ») — never present them as current unless certain.
+4) End with: « Okapi peut se tromper — vérifie les infos importantes ».
+Do not pad with a fake “À ma connaissance, c’est X”.`
       : "");
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const userContent = sector
