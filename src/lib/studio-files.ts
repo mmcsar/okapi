@@ -1,5 +1,15 @@
 /** Single source of truth for Okapi Studio files (UI, ZIP, cloud, APIs). */
 
+/** Stacks Studio can ship as full projects (Preview / ZIP). */
+export const OKAPI_STUDIO_STACK =
+  "HTML · React · Next · Flutter · Python · SQL";
+
+/**
+ * Honesty line for Agent / Studio when the user asks Java, C#, Go, PHP, etc.
+ * Explain + short excerpt OK — never promise a full Studio project or Preview.
+ */
+export const OKAPI_STUDIO_STACK_HONESTY = `Okapi livre des projets Studio en ${OKAPI_STUDIO_STACK}. Pour Java, C#, Go, PHP, Ruby, Rust, Kotlin (hors Flutter), Swift, etc. : expliquer ou donner un extrait court — pas un projet Studio complet ni une Preview. Proposer plutôt un équivalent HTML/React/Next/Flutter/Python si l’utilisateur veut une app dans Okapi.`;
+
 export type StudioFileId =
   | "app.html"
   | "App.tsx"

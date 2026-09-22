@@ -215,6 +215,15 @@ function IconPreview({ className }: { className?: string }) {
   );
 }
 
+/** Run = lancer la Preview HTML (équivalent honnête de « Run and Debug »). */
+function IconRun({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor">
+      <path d="M8 5.14v13.72a1 1 0 001.5.86l11-6.86a1 1 0 000-1.72l-11-6.86a1 1 0 00-1.5.86z" />
+    </svg>
+  );
+}
+
 function IconTerminal({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -312,7 +321,17 @@ export function OkapiStudio({
   const [dirtyIds, setDirtyIds] = useState<Set<StudioFileId>>(() => new Set());
   /** Fichiers ouverts à la main (Ctrl+P) même encore vides. */
   const [pinnedIds, setPinnedIds] = useState<Set<StudioFileId>>(() => new Set());
-  /** Mobile-first : éditeur d’abord — explorer/terminal ouverts sur desktop. */
+  /** Simple = Agent + éditeur + Preview. Pro = IDE complet (explorer, terminal…). */
+  const [studioMode, setStudioMode] = useState<"simple" | "pro">(() => {
+    if (typeof window === "undefined") return "simple";
+    try {
+      const v = window.localStorage.getItem("okapi-studio-mode");
+      return v === "pro" ? "pro" : "simple";
+    } catch {
+      return "simple";
+    }
+  });
+  /** Mobile-first : éditeur d’abord — explorer/terminal ouverts sur desktop (mode Pro). */
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(true);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -325,15 +344,17 @@ export function OkapiStudio({
   const [serverRunning, setServerRunning] = useState(false);
   const [termLines, setTermLines] = useState<TermLine[]>([
     {
-      t: "Windows PowerShell · Okapi Studio",
+      t: "Console Okapi · simulation Preview (pas un terminal Windows réel)",
       kind: "info",
     },
     {
-      t: "Copyright (c) MMC SARL. Tape help · npm run dev pour lancer le serveur.",
+      t: "MMC SARL · tape help · npm run dev pour ouvrir la Preview.",
       kind: "info",
     },
   ]);
   const [aiPrompt, setAiPrompt] = useState("");
+  /** Intention Trae : Créer (Builder) vs Chat — sans changer les APIs. */
+  const [aiLane, setAiLane] = useState<"creer" | "chat">("creer");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [agentId, setAgentId] = useState<OkapiAgentId>("general");
@@ -359,7 +380,7 @@ export function OkapiStudio({
     {
       role: "assistant",
       content:
-        "Coach Okapi prêt. Décris le projet — je génère tous les fichiers, ouvre le terminal PowerShell et lance le serveur Preview.",
+        "Mode Simple (type Lovable) : décris l’app → fichiers + Preview tout de suite. Mode Pro = diffs à Accepter. Stack : HTML · React · Next · Flutter · Python · SQL.",
     },
   ]);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
@@ -402,6 +423,20 @@ export function OkapiStudio({
     });
   }, [html, projectId]);
 
+  /** Évite le stale closure après Accept (html parent pas encore mis à jour). */
+  const htmlRef = useRef(html);
+  htmlRef.current = html;
+
+  // Si Preview ouverte mais html arrive juste après Accept → rafraîchir l’iframe
+  const prevHtmlLenRef = useRef(0);
+  useEffect(() => {
+    const len = html?.trim().length ?? 0;
+    if (previewOpen && len > 0 && prevHtmlLenRef.current === 0) {
+      setPreviewKey((k) => k + 1);
+    }
+    prevHtmlLenRef.current = len;
+  }, [html, previewOpen]);
+
   // Quand le cloud ID arrive après Sauver, recharger la Preview (tableaux cloud).
   const prevProjectIdRef = useRef(projectId);
   useEffect(() => {
@@ -412,18 +447,31 @@ export function OkapiStudio({
     }
   }, [projectId]);
 
-  /** Desktop (≥lg) : explorer + terminal ouverts. Mobile : un panneau à la fois. */
+  /** Desktop (≥lg) : explorer + terminal ouverts en Pro. Mobile : un panneau à la fois. */
   const isStudioDesktop = useCallback(() => {
     if (typeof window === "undefined") return false;
     return window.matchMedia("(min-width: 1024px)").matches;
   }, []);
 
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const apply = () => {
-      if (mq.matches) {
+  const applyStudioModeLayout = useCallback(
+    (mode: "simple" | "pro") => {
+      const desktop =
+        typeof window !== "undefined" &&
+        window.matchMedia("(min-width: 1024px)").matches;
+      if (mode === "simple") {
+        setExplorerOpen(false);
+        setTerminalOpen(false);
+        setAiOpen(true);
+        // Lovable : Preview visible dès qu’il y a du HTML
+        if (htmlRef.current?.trim()) setPreviewOpen(true);
+        else if (!desktop) setPreviewOpen(false);
+        setTermHeight(140);
+        return;
+      }
+      if (desktop) {
         setExplorerOpen(true);
         setTerminalOpen(true);
+        setAiOpen(true);
         setTermHeight(200);
       } else {
         setExplorerOpen(false);
@@ -432,11 +480,36 @@ export function OkapiStudio({
         setAiOpen(true);
         setTermHeight(140);
       }
-    };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("okapi-studio-mode", studioMode);
+    } catch {
+      /* ignore */
+    }
+  }, [studioMode]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const apply = () => applyStudioModeLayout(studioMode);
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
-  }, []);
+  }, [studioMode, applyStudioModeLayout]);
+
+  function setStudioModeAndLayout(mode: "simple" | "pro") {
+    setStudioMode(mode);
+    applyStudioModeLayout(mode);
+    // Passage Simple + diffs en attente → appliquer tout (zéro friction)
+    if (mode === "simple" && pendingList.length > 0) {
+      deliverProjectBatch([...pendingList], {
+        note: "Appliqué (passage en mode Simple).",
+      });
+    }
+  }
 
   type StudioPanel = "explorer" | "ai" | "preview" | "terminal";
 
@@ -573,8 +646,8 @@ export function OkapiStudio({
       })),
     );
     setAiOpen(true);
-    // Preview reste fermé : Agent prioritaire ; ouvrir via activity bar
-    setPreviewOpen(false);
+    // Simple = Preview dès qu’il y a du HTML (parcours type Lovable)
+    setPreviewOpen(studioMode === "simple" && Boolean(html?.trim()));
     const stamp = new Date().toLocaleTimeString("fr-FR", {
       hour: "2-digit",
       minute: "2-digit",
@@ -587,7 +660,7 @@ export function OkapiStudio({
         kind: "ok",
       },
     ]);
-  }, [seedKey, seedMessages, html, sector]);
+  }, [seedKey, seedMessages, html, sector, studioMode]);
 
   useEffect(() => {
     const fromSector = resolveOkapiAgent({ sector });
@@ -761,25 +834,25 @@ export function OkapiStudio({
       },
       {
         id: "terminal",
-        label: "Basculer Terminal PowerShell",
+        label: "Basculer Console Okapi",
         hint: "Ctrl+`",
         run: () => toggleStudioPanel("terminal"),
       },
       {
         id: "dev-server",
-        label: "Lancer le serveur (npm run dev)",
-        hint: "serve",
+        label: "Run — lancer Preview HTML",
+        hint: "F5",
         run: () => bootOkapiDevServer({ force: true }),
       },
       {
         id: "preview",
-        label: "Basculer Preview",
+        label: "Basculer panneau Preview",
         hint: "",
         run: () => toggleStudioPanel("preview"),
       },
       {
         id: "explorer",
-        label: "Basculer Explorateur",
+        label: "Basculer Explorateur (fichiers)",
         hint: "Ctrl+B",
         run: () => toggleStudioPanel("explorer"),
       },
@@ -826,7 +899,7 @@ export function OkapiStudio({
         run: () => {
           setTermLines([
             {
-              t: "Terminal vidé.",
+              t: "Console Okapi — vidée. (simulation Preview)",
               kind: "info",
             },
           ]);
@@ -945,51 +1018,50 @@ export function OkapiStudio({
     serverTimersRef.current.push(id);
   }
 
-  /** Lance le « serveur » Okapi (Preview) — UX type npm run dev / PowerShell. */
+  /** Lance la Preview Okapi (simulation console — pas un vrai npm local). */
   function bootOkapiDevServer(opts?: { force?: boolean }) {
-    const hasHtml = Boolean(html?.trim());
-    openTerminal("terminal");
+    // force = on vient d’accepter app.html (prop html encore stale)
+    const hasHtml = Boolean(htmlRef.current?.trim()) || Boolean(opts?.force);
+    if (studioMode === "pro") openTerminal("terminal");
     clearServerTimers();
 
     const projectName = (title || "okapi-app")
       .replace(/[^\w\-]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 32) || "okapi-app";
-    const cwd = `C:\\Users\\Okapi\\projects\\${projectName}`;
 
-    logTerm(`PS ${cwd}> npm run dev`, "cmd");
+    logTerm(`okapi> preview ${projectName}`, "cmd");
 
-    if (!hasHtml && !opts?.force) {
-      scheduleTerm(200, "error: aucun app.html — demande un projet à l’Agent d’abord", "err");
+    if (!hasHtml) {
+      scheduleTerm(
+        200,
+        "error: aucun app.html — demande un projet à l’Agent d’abord",
+        "err",
+      );
       setServerRunning(false);
       return;
     }
 
     setServerRunning(true);
-    scheduleTerm(280, "", "info");
-    scheduleTerm(320, "> okapi-preview@1.0.0 dev", "info");
-    scheduleTerm(480, "> okapi serve --preview", "info");
-    scheduleTerm(720, "", "info");
-    scheduleTerm(900, "▲ Okapi Preview 16.x (Turbopack)", "ok");
-    scheduleTerm(1100, `- Local:        ${previewUrl}`, "ok");
-    scheduleTerm(1280, `- Network:      http://127.0.0.1:3000`, "info");
-    scheduleTerm(1450, "✓ Ready in 1.2s", "ok");
-    scheduleTerm(1600, "○ Compiling / …", "info");
+    // Ouvrir tout de suite — pas attendre la simulation console (sinon « Preview morte »)
+    setPreviewOpen(true);
+    setPreviewKey((k) => k + 1);
 
-    const openId = window.setTimeout(() => {
-      setPreviewOpen(true);
-      setPreviewKey((k) => k + 1);
-      logTerm("✓ Preview ouverte — serveur Okapi actif", "ok");
-      logTerm(`PS ${cwd}>`, "cmd");
-    }, 1750);
-    serverTimersRef.current.push(openId);
+    scheduleTerm(120, "Okapi Preview · démarrage…", "info");
+    scheduleTerm(280, "▲ Okapi Preview (navigateur)", "ok");
+    scheduleTerm(400, `- Local:        ${previewUrl}`, "ok");
+    scheduleTerm(
+      520,
+      "Note: console simulée — pas un terminal Windows réel",
+      "info",
+    );
+    scheduleTerm(650, "✓ Ready · Preview ouverte", "ok");
   }
 
   function stopOkapiDevServer() {
     clearServerTimers();
     setServerRunning(false);
-    logTerm("^C", "cmd");
-    logTerm("Serveur Okapi arrêté.", "info");
+    logTerm("Preview arrêtée.", "info");
   }
 
   function runTermCommand(raw: string) {
@@ -999,8 +1071,7 @@ export function OkapiStudio({
       .replace(/[^\w\-]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 32) || "okapi-app";
-    const cwd = `C:\\Users\\Okapi\\projects\\${projectName}`;
-    logTerm(`PS ${cwd}> ${line}`, "cmd");
+    logTerm(`okapi> ${line}`, "cmd");
     setTermCmd("");
 
     const lower = line.toLowerCase();
@@ -1009,10 +1080,10 @@ export function OkapiStudio({
     const c1 = (parts[1] || "").toLowerCase();
     const c2 = (parts[2] || "").toLowerCase();
 
-    // PowerShell / shell basics
+    // Console Okapi (simulation)
     if (c0 === "help" || c0 === "?" || lower === "get-help") {
       logTerm(
-        "PowerShell Okapi : npm run dev · npm start · npx serve · preview · stop · agent · open <fichier> · dir · pwd · clear · accept · reject",
+        "Console Okapi (simulation) : npm run dev · preview · stop · agent · open <fichier> · dir · clear · accept · reject",
         "info",
       );
       return;
@@ -1020,14 +1091,14 @@ export function OkapiStudio({
     if (c0 === "clear" || c0 === "cls" || lower === "clear-host") {
       setTermLines([
         {
-          t: "Windows PowerShell · Okapi Studio — écran effacé.",
+          t: "Console Okapi — écran effacé. (simulation Preview)",
           kind: "info",
         },
       ]);
       return;
     }
     if (c0 === "pwd" || lower === "get-location") {
-      logTerm(cwd, "ok");
+      logTerm(`okapi://project/${projectName}`, "ok");
       return;
     }
     if (c0 === "dir" || c0 === "ls" || lower === "get-childitem") {
@@ -1045,7 +1116,7 @@ export function OkapiStudio({
       return;
     }
     if (c0 === "cd") {
-      logTerm(`Set-Location : reste dans ${cwd} (sandbox Okapi)`, "info");
+      logTerm(`Sandbox Okapi — reste sur le projet courant`, "info");
       return;
     }
     if (c0 === "echo" || c0 === "write-host") {
@@ -1053,8 +1124,8 @@ export function OkapiStudio({
       return;
     }
     if (c0 === "powershell" || c0 === "pwsh" || c0 === "cmd") {
-      logTerm("Shell Okapi déjà actif (PowerShell).", "ok");
-      logTerm("Lance le serveur : npm run dev", "info");
+      logTerm("Ceci n’est pas un terminal Windows — Console Okapi (simulation).", "ok");
+      logTerm("Lance la Preview : npm run dev", "info");
       return;
     }
 
@@ -1357,7 +1428,7 @@ export function OkapiStudio({
           },
           body: JSON.stringify({
             instruction,
-            engine,
+            engine: "pro",
             title: title || undefined,
             agentId: activeAgent.id,
             sector,
@@ -1456,7 +1527,7 @@ export function OkapiStudio({
           fileLabel: target.label,
           language: target.language,
           content: target.value,
-          engine,
+          engine: "pro",
           agentId: activeAgent.id,
           sector,
           workspace: workspacePayload,
@@ -1542,6 +1613,14 @@ export function OkapiStudio({
           { role: "assistant", content: "Aucun changement détecté." },
         ]);
         logTerm("IA · aucun changement détecté", "info");
+        return;
+      }
+
+      // Mode Simple = auto-appliquer (parcours Lovable) · Pro = diffs à Accepter
+      if (studioMode === "simple") {
+        deliverProjectBatch(edits, {
+          note: data?.note || "Modifs appliquées.",
+        });
         return;
       }
 
@@ -1668,29 +1747,39 @@ export function OkapiStudio({
         role: "assistant",
         content: [
           opts?.note || "Projet livré.",
-          `✓ ${n} fichier${n > 1 ? "s" : ""} dans Monaco${
-            opts?.large ? " · grand projet" : ""
-          }.`,
+          studioMode === "simple"
+            ? `✓ ${n} fichier${n > 1 ? "s" : ""} appliqué${n > 1 ? "s" : ""}${
+                opts?.large ? " · grand projet" : ""
+              }.`
+            : `✓ ${n} fichier${n > 1 ? "s" : ""} dans Monaco${
+                opts?.large ? " · grand projet" : ""
+              }.`,
           names ? `(${names})` : "",
           hadHtml
-            ? "Preview en cours — ajoute une ligne dans le formulaire pour remplir le tableau."
-            : "Dis la suite — ou lance npm run dev quand tu auras du HTML.",
+            ? studioMode === "simple"
+              ? "Preview ouverte — teste l’app, puis dis la suite pour modifier."
+              : "Preview en cours — teste l’app, puis continue dans l’Agent."
+            : "Dis la suite — ou ouvre la Preview quand tu auras du HTML.",
         ]
           .filter(Boolean)
           .join(" "),
       },
     ]);
-    logTerm(`Livré · ${n} fichiers (Studio Okapi)`, "ok");
-    // Sauver d’abord (cloud), puis lancer Preview — évite tableaux vides sans projectId.
-    void (async () => {
-      await ensureCloudAfterAccept(hadHtml);
-      if (hadHtml) {
-        bootOkapiDevServer();
-      } else {
-        openTerminal("terminal");
-        logTerm("Projet prêt — génère app.html puis : npm run dev", "info");
-      }
-    })();
+    logTerm(
+      studioMode === "simple"
+        ? `Appliqué · ${n} fichiers (Simple)`
+        : `Livré · ${n} fichiers (Studio Okapi)`,
+      "ok",
+    );
+    // Preview immédiate si HTML accepté (force = html parent peut être encore vide)
+    if (hadHtml) {
+      bootOkapiDevServer({ force: true });
+    } else {
+      if (studioMode === "pro") openTerminal("terminal");
+      logTerm("Projet prêt — génère app.html puis : npm run dev", "info");
+    }
+    // Sauver cloud en parallèle — Preview locale marche déjà sans projectId
+    void ensureCloudAfterAccept(hadHtml);
     window.setTimeout(() => aiInputRef.current?.focus(), 80);
   }
 
@@ -1717,10 +1806,8 @@ export function OkapiStudio({
         },
       ]);
       if (wasHtml) {
-        void (async () => {
-          await ensureCloudAfterAccept(true);
-          bootOkapiDevServer();
-        })();
+        bootOkapiDevServer({ force: true });
+        void ensureCloudAfterAccept(true);
       } else {
         void ensureCloudAfterAccept(false);
       }
@@ -1794,6 +1881,12 @@ export function OkapiStudio({
       if (meta && e.key.toLowerCase() === "b" && !typing) {
         e.preventDefault();
         toggleStudioPanel("explorer");
+        return;
+      }
+      // F5 — Run Preview (équivalent Run and Debug Okapi)
+      if (e.key === "F5" && !typing) {
+        e.preventDefault();
+        bootOkapiDevServer({ force: Boolean(html?.trim()) });
         return;
       }
       // Ctrl+Shift+/ ou Ctrl+/ — raccourcis
@@ -1900,12 +1993,15 @@ export function OkapiStudio({
   return (
     <div className="okapi-studio-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-        {/* Activity bar */}
+        {/* Activity bar — Okapi (pas un clone VS Code : pas Git / Extensions) */}
         <div className="okapi-studio-activity flex w-full shrink-0 flex-row items-center gap-0.5 border-b border-white/10 px-1 py-0.5 lg:w-10 lg:flex-col lg:gap-0.5 lg:border-b-0 lg:border-r lg:px-0 lg:py-1">
           <button
             type="button"
-            title="Fichiers (Ctrl+B)"
-            onClick={() => toggleStudioPanel("explorer")}
+            title="Explorateur — fichiers du projet (Ctrl+B)"
+            onClick={() => {
+              if (studioMode === "simple") setStudioModeAndLayout("pro");
+              toggleStudioPanel("explorer");
+            }}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               explorerOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
@@ -1916,7 +2012,7 @@ export function OkapiStudio({
           </button>
           <button
             type="button"
-            title="IA"
+            title="Agent Okapi — Créer / Chat"
             onClick={() => toggleStudioPanel("ai")}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               aiOpen
@@ -1928,7 +2024,23 @@ export function OkapiStudio({
           </button>
           <button
             type="button"
-            title="Preview"
+            title={
+              html?.trim()
+                ? "Run — lancer la Preview HTML (F5)"
+                : "Run — génère d’abord app.html avec l’Agent"
+            }
+            onClick={() => bootOkapiDevServer({ force: Boolean(html?.trim()) })}
+            className={`flex h-8 w-8 items-center justify-center rounded transition ${
+              serverRunning && previewOpen
+                ? "border-b-2 border-[#3d8f68] bg-[#3d8f68]/25 text-[#9fd4b5] lg:border-b-0 lg:border-l-2"
+                : "text-[#e8892a] hover:bg-[#e8892a]/15 hover:text-[#ffd7a8]"
+            }`}
+          >
+            <IconRun className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            title="Preview — voir l’app HTML"
             onClick={() => toggleStudioPanel("preview")}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               previewOpen
@@ -1940,8 +2052,11 @@ export function OkapiStudio({
           </button>
           <button
             type="button"
-            title="Terminal (Ctrl+`)"
-            onClick={() => toggleStudioPanel("terminal")}
+            title="Console Okapi — simulation (Ctrl+`)"
+            onClick={() => {
+              if (studioMode === "simple") setStudioModeAndLayout("pro");
+              toggleStudioPanel("terminal");
+            }}
             className={`flex h-8 w-8 items-center justify-center rounded transition ${
               terminalOpen
                 ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
@@ -1950,7 +2065,28 @@ export function OkapiStudio({
           >
             <IconTerminal className="h-4 w-4" />
           </button>
-          <div className="ml-auto px-1 text-center text-[8px] font-bold uppercase tracking-wider text-[#5f766a] lg:ml-0 lg:mt-auto lg:pb-1">
+          <button
+            type="button"
+            title={
+              studioMode === "simple"
+                ? "Mode Simple (Lovable) → passer en Pro"
+                : "Mode Pro → revenir en Simple"
+            }
+            onClick={() =>
+              setStudioModeAndLayout(studioMode === "simple" ? "pro" : "simple")
+            }
+            className={`mt-0 flex h-7 items-center justify-center rounded px-1 text-[8px] font-bold uppercase tracking-wider transition lg:mt-1 lg:w-full ${
+              studioMode === "pro"
+                ? "bg-[#e8892a]/20 text-[#ffd7a8]"
+                : "text-[#5f766a] hover:bg-white/5 hover:text-[#d5e4db]"
+            }`}
+          >
+            {studioMode === "simple" ? "Sim" : "Pro"}
+          </button>
+          <div
+            className="ml-auto hidden px-1 text-center text-[7px] font-bold uppercase leading-tight tracking-wider text-[#5f766a] lg:ml-0 lg:mt-auto lg:block lg:pb-1"
+            title="Okapi Studio — pas de Git / Extensions VS Code (ZIP via barre Preview)"
+          >
             OK
           </div>
         </div>
@@ -2317,7 +2453,7 @@ export function OkapiStudio({
 
             {/* Preview — dans la colonne éditeur (Agent reste à droite) */}
             {previewOpen ? (
-              <div className="okapi-studio-panel flex max-h-[min(42vh,320px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(48%,440px)] lg:border-l lg:border-t-0">
+              <div className="okapi-studio-panel flex h-[min(42vh,320px)] w-full shrink-0 flex-col border-t border-white/10 lg:h-auto lg:max-h-none lg:w-[min(48%,440px)] lg:border-l lg:border-t-0">
                 <div className="okapi-studio-chrome flex h-8 shrink-0 items-center gap-1.5 border-b px-2">
                   <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.14em] text-[#7d9588]">
                     Preview
@@ -2370,7 +2506,7 @@ export function OkapiStudio({
                   </button>
                 </div>
 
-                <div className="min-h-0 flex-1 bg-white">
+                <div className="min-h-0 flex-1 bg-white lg:min-h-0">
                   {html?.trim() ? (
                     <iframe
                       ref={previewIframeRef}
@@ -2379,15 +2515,15 @@ export function OkapiStudio({
                       srcDoc={liveHtml || ""}
                       sandbox={OKAPI_PREVIEW_SANDBOX}
                       referrerPolicy="no-referrer"
-                      className="h-full w-full"
+                      className="h-full min-h-[200px] w-full lg:min-h-0"
                     />
                   ) : (
-                    <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
+                    <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-1 px-6 text-center">
                       <p className="text-sm font-medium text-gray-500">
-                        Pas encore de preview
+                        Chargement Preview…
                       </p>
                       <p className="text-xs text-gray-400">
-                        Génère un HTML ou édite app.html
+                        Si ça reste vide : Accepte app.html ou clique Actualiser
                       </p>
                     </div>
                   )}
@@ -2425,7 +2561,7 @@ export function OkapiStudio({
                   [
                     ["problems", "Problems"],
                     ["output", "Output"],
-                    ["terminal", "Terminal"],
+                    ["terminal", "Console"],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -2563,13 +2699,13 @@ export function OkapiStudio({
                   }}
                 >
                   <span className="font-mono text-[11px] font-semibold text-[#e8892a]">
-                    PS&gt;
+                    okapi&gt;
                   </span>
                   <input
                     ref={termInputRef}
                     value={termCmd}
                     onChange={(e) => setTermCmd(e.target.value)}
-                    placeholder="npm run dev · dir · preview · help"
+                    placeholder="npm run dev · preview · help (simulation)"
                     className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-[#eef6f1] outline-none placeholder:text-[#4a5c54]"
                     autoComplete="off"
                     spellCheck={false}
@@ -2580,35 +2716,53 @@ export function OkapiStudio({
           ) : null}
         </div>
 
-        {/* Agent Okapi — rail droit dense */}
+        {/* Agent Okapi — rail droit (intention Trae : Créer | Chat) */}
         {aiOpen ? (
-          <aside className="okapi-studio-panel flex max-h-[min(48vh,360px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(32%,320px)] lg:border-l lg:border-t-0">
-            <div className="flex h-7 items-center justify-between gap-2 border-b border-white/10 px-2">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#eef6f1]">
-                  Agent
-                </p>
-                <select
-                  value={agentId}
-                  onChange={(e) => setAgentId(e.target.value as OkapiAgentId)}
-                  disabled={aiBusy}
-                  className="max-w-[130px] truncate rounded border border-white/10 bg-[#06100c] px-1 py-0.5 text-[9px] text-[#ffd7a8] outline-none focus:border-[#e8892a]"
-                  title="Agent métier"
-                >
-                  {OKAPI_AGENTS.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
+          <aside className="okapi-studio-panel flex max-h-[min(48vh,360px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(36%,360px)] lg:border-l lg:border-t-0">
+            <div className="flex h-8 items-center justify-between gap-2 border-b border-white/10 px-1.5">
+              <div className="flex min-w-0 items-center gap-0.5">
+                {(
+                  [
+                    ["creer", "Créer"],
+                    ["chat", "Chat"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setAiLane(id)}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                      aiLane === id
+                        ? "bg-[#e8892a]/20 text-[#ffd7a8]"
+                        : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                {studioMode === "pro" ? (
+                  <select
+                    value={agentId}
+                    onChange={(e) => setAgentId(e.target.value as OkapiAgentId)}
+                    disabled={aiBusy}
+                    className="ml-1 max-w-[110px] truncate rounded border border-white/10 bg-[#06100c] px-1 py-0.5 text-[9px] text-[#ffd7a8] outline-none focus:border-[#e8892a]"
+                    title="Agent métier"
+                  >
+                    {OKAPI_AGENTS.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <span className="rounded border border-white/10 px-1 py-px font-mono text-[8px] uppercase text-[#8aa89a]">
-                  {engine}
+                <span className="rounded border border-[#e8892a]/30 bg-[#e8892a]/10 px-1.5 py-px font-mono text-[8px] uppercase text-[#ffd7a8]">
+                  Pro
                 </span>
                 <button
                   type="button"
-                  title="Réduire l’agent"
+                  title="Réduire"
                   onClick={() => setAiOpen(false)}
                   className="rounded p-0.5 text-[#5f766a] hover:bg-white/5 hover:text-[#d5e4db]"
                 >
@@ -2617,28 +2771,59 @@ export function OkapiStudio({
               </div>
             </div>
 
-            <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2 py-2">
-              {aiMessages.map((m, i) => (
-                <div
-                  key={`${m.role}-${i}`}
-                  className="text-[12px] leading-snug"
-                >
-                  <span
-                    className={`mr-1.5 font-mono text-[9px] font-bold ${
-                      m.role === "user" ? "text-[#6a8578]" : "text-[#e8892a]"
-                    }`}
-                  >
-                    {m.role === "user" ? "›" : "◆"}
-                  </span>
-                  <span
-                    className={
-                      m.role === "user" ? "text-[#eef6f1]" : "text-[#b7c9bf]"
-                    }
-                  >
-                    {m.content}
-                  </span>
+            <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2.5 py-3">
+              {aiMessages.length <= 1 && !aiBusy && !pending ? (
+                <div className="space-y-3 px-0.5">
+                  <div>
+                    <p className="text-[13px] font-semibold text-[#eef6f1]">
+                      {aiLane === "creer"
+                        ? "Okapi · mode Créer"
+                        : "Okapi · mode Chat"}
+                    </p>
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-[#9bb0a4]">
+                      {aiLane === "creer"
+                        ? studioMode === "simple"
+                          ? "Décris une app — Okapi applique les fichiers et ouvre la Preview HTML (sans Accepter)."
+                          : "Stack : HTML · React · Next · Flutter · Python · SQL. Mode Pro : diffs à Accepter / Voir l’app."
+                        : studioMode === "simple"
+                          ? "Demande une modif — appliquée tout de suite. Passe en Pro pour revoir les diffs."
+                          : "Pose une question sur le code, ou une correction — diffs à Accepter."}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-[#e8892a]/25 bg-[#e8892a]/8 px-3 py-2.5">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
+                      Astuce
+                    </p>
+                    <p className="mt-1 text-[11px] leading-snug text-[#c9b896]">
+                      {aiLane === "creer"
+                        ? "Ex. « boutique : catalogue, panier, WhatsApp, Mobile Money CDF ». Puis « rends le header vert »."
+                        : "Joins un logo / maquette depuis Accueil Agent si tu veux un visuel."}
+                    </p>
+                  </div>
                 </div>
-              ))}
+              ) : (
+                aiMessages.map((m, i) => (
+                  <div
+                    key={`${m.role}-${i}`}
+                    className="text-[12px] leading-snug"
+                  >
+                    <span
+                      className={`mr-1.5 font-mono text-[9px] font-bold ${
+                        m.role === "user" ? "text-[#6a8578]" : "text-[#e8892a]"
+                      }`}
+                    >
+                      {m.role === "user" ? "›" : "◆"}
+                    </span>
+                    <span
+                      className={
+                        m.role === "user" ? "text-[#eef6f1]" : "text-[#b7c9bf]"
+                      }
+                    >
+                      {m.content}
+                    </span>
+                  </div>
+                ))
+              )}
 
               {pending && pendingFile ? (
                 <div className="overflow-hidden rounded border border-[#e8892a]/35 bg-[#121a16]">
@@ -2817,8 +3002,13 @@ export function OkapiStudio({
             </div>
 
             <form
-              onSubmit={(e) => void askStudioAi(e)}
-              className="border-t border-white/10 p-2"
+              onSubmit={(e) =>
+                void askStudioAi(
+                  e,
+                  aiLane === "chat" ? { forceEdit: true } : undefined,
+                )
+              }
+              className="border-t border-white/10 p-2.5"
             >
               <textarea
                 ref={aiInputRef}
@@ -2827,32 +3017,37 @@ export function OkapiStudio({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    void askStudioAi();
+                    void askStudioAi(
+                      undefined,
+                      aiLane === "chat" ? { forceEdit: true } : undefined,
+                    );
                   }
                 }}
-                rows={2}
+                rows={3}
                 disabled={aiBusy}
                 placeholder={
                   pendingList.length
                     ? "Accepte / Refuse, ou nouvelle demande…"
-                    : "Crée une boutique CRM… (projet complet + serveur)"
+                    : aiLane === "creer"
+                      ? "Ex. Crée une boutique : catalogue, panier, WhatsApp, Mobile Money…"
+                      : "Ex. Explique ce fichier · corrige le formulaire · ajoute un bouton…"
                 }
-                className="w-full resize-none rounded border border-white/10 bg-[#06100c]/70 px-2 py-1.5 text-[12px] text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#2f6b4f] disabled:opacity-50"
+                className="w-full resize-none rounded-lg border border-white/10 bg-[#06100c]/80 px-3 py-2.5 text-[13px] leading-relaxed text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#e8892a]/50 disabled:opacity-50"
               />
-              <div className="mt-1.5 flex items-center gap-1.5">
+              <div className="mt-2 flex items-center gap-2">
+                <span className="hidden text-[10px] text-[#5f766a] sm:inline">
+                  {aiLane === "creer" ? "Contexte projet" : "Fichier actif"}
+                </span>
                 <button
                   type="submit"
                   disabled={aiBusy || !aiPrompt.trim()}
-                  className="flex-1 rounded bg-[#e8892a] px-2 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#d67a1f] disabled:opacity-45"
+                  className="ml-auto rounded-lg bg-[#e8892a] px-3.5 py-2 text-[12px] font-bold text-[#1a1008] transition hover:bg-[#f0a04a] disabled:opacity-45"
                 >
-                  {aiBusy ? "…" : "Envoyer"}
+                  {aiBusy ? "…" : aiLane === "creer" ? "Créer" : "Envoyer"}
                 </button>
-                <span className="hidden font-mono text-[9px] text-[#5f766a] sm:inline">
-                  ↵
-                </span>
               </div>
-              <p className="mt-1 text-[9px] leading-snug text-[#5f766a]">
-                Okapi peut se tromper — vérifie le code avant prod.
+              <p className="mt-1.5 text-[10px] leading-snug text-[#5f766a]">
+                Okapi peut se tromper — vérifie avant prod.
               </p>
             </form>
           </aside>
@@ -3111,6 +3306,38 @@ export function OkapiStudio({
         </div>
       ) : null}
 
+      {/* CTA post-génération — mode Pro seulement (Simple auto-applique) */}
+      {studioMode === "pro" && pendingList.length > 0 && !aiBusy ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-40 flex justify-center px-3 lg:bottom-4">
+          <div className="pointer-events-auto flex max-w-xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-[#e8892a]/40 bg-[#0c1612]/95 px-3 py-2.5 shadow-2xl shadow-black/50 backdrop-blur-md">
+            <p className="mr-1 text-[11px] font-semibold text-[#ffd7a8]">
+              {pendingList.length} fichier
+              {pendingList.length > 1 ? "s" : ""} prêt
+              {pendingList.length > 1 ? "s" : ""}
+            </p>
+            <button
+              type="button"
+              onClick={acceptAllPending}
+              className="rounded-lg bg-[#e8892a] px-3.5 py-1.5 text-[12px] font-bold text-[#1a1008] hover:bg-[#f0a04a]"
+            >
+              {pendingList.some((p) => p.fileId === "app.html") ||
+              Boolean(html?.trim())
+                ? "Voir l’app"
+                : pendingList.length > 1
+                  ? "Accepter tout"
+                  : "Accepter"}
+            </button>
+            <button
+              type="button"
+              onClick={rejectPending}
+              className="rounded-lg border border-white/15 px-3 py-1.5 text-[11px] font-semibold text-[#c8ddd2] hover:bg-white/5"
+            >
+              Refuser
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Aide raccourcis */}
       {helpOpen ? (
         <div className="absolute inset-0 z-50 flex items-start justify-center bg-black/55 px-4 pt-[10vh] backdrop-blur-[2px]">
@@ -3136,11 +3363,12 @@ export function OkapiStudio({
             <ul className="space-y-2 px-4 py-4 text-[12px] text-[#b7c9bf]">
               {(
                 [
+                  ["F5", "Run — Preview HTML"],
                   ["Ctrl+L", "Focus Agent"],
                   ["Ctrl+P", "Quick Open fichier"],
-                  ["Ctrl+Shift+P", "Palette · npm run dev"],
+                  ["Ctrl+Shift+P", "Palette commandes"],
                   ["Ctrl+W", "Fermer onglet"],
-                  ["Ctrl+`", "Terminal PowerShell"],
+                  ["Ctrl+`", "Console Okapi (simulation)"],
                   ["Ctrl+J", "Panneau bas"],
                   ["Ctrl+B", "Explorateur"],
                   ["Ctrl+S", "Sauvegarder cloud"],
@@ -3158,7 +3386,8 @@ export function OkapiStudio({
               ))}
             </ul>
             <p className="border-t border-white/10 px-4 py-3 text-[11px] text-[#5f766a]">
-              Élève Okapi · Studio professionnel · MMC SARL
+              Simple = Lovable · Pro = diffs · Pas de Git / Extensions — ZIP
+              depuis Preview · MMC SARL
             </p>
           </div>
         </div>

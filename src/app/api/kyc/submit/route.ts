@@ -121,7 +121,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: missing
-          ? "KYC non configuré. Exécute supabase/migrations/20260313_kyc_profiles.sql dans Supabase."
+          ? "Service identité temporairement indisponible — contacte MMC."
           : error.message,
         setupRequired: missing,
       },
@@ -133,6 +133,6 @@ export async function POST(request: Request) {
     ok: true,
     profile: data ? revealKycProfile(data) : data,
     message:
-      "KYC envoyé. Tu peux payer — MMC valide ton identité sous peu.",
+      "Identité envoyée. Tu peux payer — MMC la valide sous peu.",
   });
 }

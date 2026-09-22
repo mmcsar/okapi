@@ -138,6 +138,8 @@ Rules:
 - Prefer B when the change touches data model, API contracts, or mirrored UI (React/Next/HTML).
 - Prefer A for local UI/copy tweaks on the active file only.
 ${multiBias ? "- This request likely needs MULTI FILE (format B)." : ""}
+- STACK: only edit allowed Studio files (HTML · React · Next · Flutter · Python · SQL · api · package · README). If the user asks for Java/C#/Go/PHP/etc. as a new project language: refuse to invent that file — reply in a short note (put honesty in the edited file comment or keep prior content and say in chat via note) that Okapi Studio does not ship that stack; improve the active supported file instead or suggest HTML/React/Flutter equivalent.
+- Quality: deepen HTML/React/Flutter/Python already in the workspace — polished UI, coherent siblings — do not dilute with unsupported stacks.
 - Use WORKSPACE CONTEXT to stay consistent with sibling files.
 - Use AGENT HISTORY for continuity.
 - Never name third-party AI/cloud vendors (say Okapi / MMC SARL).
@@ -249,7 +251,7 @@ export async function POST(request: Request) {
   const fileLabel = body?.fileLabel?.trim() || fileId;
   const language = body?.language?.trim() || "plaintext";
   const content = (body?.content ?? "").slice(0, 400_000);
-  const engine = resolveEngine(body?.engine);
+  const engine = resolveEngine(body?.engine ?? "pro");
   const workspace = sanitizeStudioWorkspace(body?.workspace);
   const history = sanitizeStudioHistory(body?.history);
   const multiBias = prefersMultiFile(instruction);

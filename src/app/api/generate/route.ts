@@ -135,13 +135,14 @@ Rules:
    https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
 3. Always include HTML + REACT + NEXT + SQL + API + README (all sections, even on edits).
 4. React/Next must be real runnable stubs aligned with the HTML product — not empty placeholders.
-5. SQL: enable RLS, sensible policies.
-6. API stubs: clear, copy-pasteable.
+5. SQL: enable RLS, sensible policies, multiple related tables when the product needs them.
+6. API stubs: clear, copy-pasteable, aligned with SQL + HTML collections.
 7. Do only what was requested — no useless marketing filler.
 8. Never mention third-party AI or database vendor brand names in user-facing text.
 9. On edit: return ALL sections updated (never omit a section that existed).
 10. Follow AGENT MÉTIER rules when present (screens, schema, payments).
-11. Interactive HTML should use window.Okapi.list/create (real persistence) when possible — not localStorage-only demos. list = flat rows [{id,...fields}]; empty → message + seed via create.
+11. Interactive HTML should use window.Okapi.list/create (real persistence) when possible — not localStorage-only demos. list = flat rows [{id,...fields}]; empty → message + seed via create. Wrap in try/catch; show error UI on failure.
+12. ROBUST PRODUCT: multi-screen nav, empty/loading/error states, form validation, at least one full list→create flow. No wireframe-only pages.
 ${scale}
 
 ${languageInstruction(language)}
@@ -247,7 +248,11 @@ ${currentApi ? `Current API:\n${currentApi.slice(0, 8000)}\n` : ""}`;
     }
     return `Sector: ${sector}
 Mode: fullstack (${scaleLabel})
-Generate a ${large ? "large multi-module" : "complete"} fullstack app:
+Generate a ${large ? "large multi-module" : "complete"} ROBUST fullstack app (not a wireframe):
+- Multi-screen HTML Preview with nav + empty/loading/error states
+- window.Okapi for lists/forms + seed when empty
+- Real SQL tables + API stubs + React/Next mirrors
+Brief:
 ${message}`;
   }
 
@@ -486,7 +491,7 @@ export async function POST(request: Request) {
     engine,
   );
   const maxTokens =
-    large || mode === "fullstack" || debug || engine === "pro" ? 9000 : 5000;
+    large || mode === "fullstack" || debug || engine === "pro" ? 12000 : 6000;
 
   const finish = (raw: string) => {
     if (!raw) {

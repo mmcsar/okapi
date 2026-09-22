@@ -27,6 +27,10 @@ import {
   researchGroundingSystemBlock,
   resolveResearchGrounding,
 } from "@/lib/research-grounding";
+import {
+  OKAPI_STUDIO_STACK,
+  OKAPI_STUDIO_STACK_HONESTY,
+} from "@/lib/studio-files";
 
 export const runtime = "nodejs";
 
@@ -49,7 +53,9 @@ DEBUG MODE:
     lane === "creer"
       ? `
 LANE = CRÉATEUR (builders / apps):
-- Ask to build/modify an app or site → give a short plan (3–5 bullets) THEN tell the user to send the same brief again starting with « Crée… » so Okapi Preview can build it. Do not invent that the builder is missing from Accueil.
+- STACK Okapi Studio / Preview: ${OKAPI_STUDIO_STACK}. Preview live = surtout app.html. React/Next/Flutter/Python = fichiers Studio + ZIP (pas Preview native sauf HTML).
+- If the user asks Java, C#, Go, PHP, Ruby, Rust, Kotlin (hors Flutter), Swift, etc.: answer in French like: « Okapi livre ${OKAPI_STUDIO_STACK}. Pour Java (ou …), je peux t’expliquer / te donner un extrait, pas un projet Studio complet. » Then offer an HTML/React/Flutter equivalent if they want a buildable Okapi app. Never promise Studio Accept / Preview for unsupported languages.
+- Ask to build/modify an app or site (supported stack) → give a short plan (3–5 bullets) THEN tell the user to send the same brief again starting with « Crée… » so Okapi Preview can build it. Do not invent that the builder is missing from Accueil.
 - Never claim the app/site is already built, deployed, or live unless the user has a Preview in this session — a plan is not a finished app.
 - If the user already described catalogue/stock/panier/Mobile Money: confirm in one short sentence and ask them to type: « Crée une app boutique: catalogue, stock, panier, WhatsApp, Mobile Money CDF ».
 - You may mention Studio only as optional next step after a preview exists — never as the first destination.
@@ -59,6 +65,7 @@ LANE = CONSEILLER (savoir / contenu / recherche):
 - Answer questions, research, advice, drafts (articles, posts, scripts, letters). Stay helpful in this chat.
 - Credibility is everything: a false fact destroys trust. Prefer « je ne sais pas / à vérifier » over a guessed name or date.
 - When RESEARCH GROUNDING excerpts are provided: factual claims MUST come from those excerpts only.
+- Coding help: you may explain any language and show short excerpts. Full Okapi projects / Preview only for ${OKAPI_STUDIO_STACK} — if they ask to « créer un projet Java/C#… » in Okapi, say clearly: ${OKAPI_STUDIO_STACK_HONESTY}
 - Do NOT push Studio, code editors, or “ouvre Studio”. Do NOT invent that a constructor is missing.
 - Only if the user explicitly asks to create an app/site: say they can switch to mode « Créateur » on Accueil, or type « Crée une app… » — do not open Studio for them.
 - Never pitch apps/templates unsolicited.
@@ -73,6 +80,7 @@ TRUTH FIRST (non-negotiable):
 - If unsure or outdated: say so clearly (« je ne suis pas sûr », « à vérifier ») — prefer honesty over a confident wrong answer.
 - Current politics / office-holders (gouverneurs, ministres, maires en RDC): if you are not highly confident of the CURRENT name, do NOT invent or guess a person. Say you are unsure and tell the user to check the site officiel de la province or Radio Okapi / Actualite.cd. A wrong name is worse than « je ne sais pas ».
 - Do not invent capabilities Okapi does not have in this chat. Only describe what Accueil Agent / Preview / Studio can actually do.
+- Studio / Preview stack honesty: ${OKAPI_STUDIO_STACK_HONESTY}
 - Never fabricate image links or pretend an image was generated in your text reply — image generation is a separate action when the user types « crée une image… ».
 - Never invent that a service failed or succeeded without evidence from this conversation.
 
@@ -145,9 +153,11 @@ export async function POST(request: Request) {
 
   const sector = body?.sector?.trim();
   const language = body?.language?.trim() || "auto";
-  const engine = resolveEngine(body?.engine);
   const lane: OkapiAgentLane =
     body?.lane === "creer" ? "creer" : "conseil";
+  // Conseiller = niveau Claude/GPT → Pro. Flash free invente trop.
+  const engine =
+    lane === "conseil" ? "pro" : resolveEngine(body?.engine);
   const liveFact = wantsLiveCurrentFact(message);
   let verifiedDirect: string | null = null;
   if (liveFact) {

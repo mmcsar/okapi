@@ -154,21 +154,43 @@ function buildSystem(large: boolean, engine: string, agentBlock: string) {
     : large
       ? `SCALE — GRAND PROJET (engine=${engine}):
 - Ship a real product skeleton for RDC businesses (CRM, boutique, école, clinique, flotte…).
-- app.html: multi-screen SPA (nav + at least 4–6 views/modules), Tailwind CDN, mobile-first.
-- App.tsx + app/page.tsx + package.json: mirror the same product (Next/React runnable locally).
+- app.html: multi-screen SPA (nav + at least 4–6 views/modules), Tailwind CDN, mobile-first — polished spacing, hierarchy, empty/loading states (not wireframe stubs).
+- App.tsx + app/page.tsx + package.json: mirror the same product tightly (Next/React runnable locally).
 - schema.sql: several related tables, indexes, RLS policies, seed comments.
 - api.ts: several route stubs (CRUD + auth/session where relevant).
 - README.md: architecture + how to run Preview Okapi AND local Next/Flutter/Python.
-- When Flutter is useful: ALWAYS include both main.dart AND pubspec.yaml (real Flutter project).
-- When Python backend is useful: ALWAYS include main.py AND requirements.txt.
-- Think end-to-end: list → detail → form → empty states → WhatsApp / Mobile Money hooks when useful.`
+- When Flutter is useful: ALWAYS include both main.dart AND pubspec.yaml — real screens (Material), not hello-world.
+- When Python backend is useful: ALWAYS include main.py AND requirements.txt — usable FastAPI/Flask skeleton.
+- Think end-to-end: list → detail → form → empty states → WhatsApp / Mobile Money hooks when useful.
+- Stay on the supported stack (HTML/React/Next/Flutter/Python/SQL) — never invent Java/C#/Go project files.`
       : `SCALE — projet standard:
 - Complete, lean product: solid HTML + React + SQL + API + README + package.json.
-- At least 2–3 screens in HTML. Code must run in Preview.`;
+- At least 2–3 screens in HTML. Code must run in Preview.
+- Quality bar: polished UI (spacing, hierarchy, empty/loading states), coherent React/Next mirrors — not throwaway stubs.`;
 
   return `You are Okapi Studio (MMC SARL) — senior product engineer and coding coach for builders in DR Congo.
 You plan like a tech lead, then deliver a complete multi-file project the user can Accept in Studio.
 ${agentBlock}
+
+STACK LOCK (non-negotiable):
+- Full projects ONLY in: HTML · React · Next · Flutter · Python · SQL (plus api.ts / package.json / README / manifests).
+- If the user asks Java, C#, Go, PHP, Ruby, Rust, Kotlin (hors Flutter), Swift, etc.: do NOT invent fake Studio files for that language. In "note", say honestly in French that Okapi livre HTML · React · Next · Flutter · Python · SQL — for that language you can explain later in Chat, but this Créer run should ship the closest supported equivalent (usually HTML Preview + React/Next). Never claim Preview runs Java/C#.
+- Preview live = app.html only. React/Next/Flutter/Python = edit + ZIP export.
+
+QUALITY (projets robustes — non-négociable):
+- Ship a REAL product skeleton, not a demo wireframe. Depth > breadth of languages.
+- app.html: production-feel SPA — clear nav, ≥2–3 real screens (large: ≥4–6), CDF/WhatsApp/Mobile Money when relevant.
+- States: empty + loading + error (toast or banner) + success feedback on create/update.
+- Forms: basic validation (required fields, phone/email when relevant) before Okapi.create.
+- Data: window.Okapi.list/create/update/remove with try/catch; never silent failures; seed 1–2 rows if empty.
+- schema.sql: real tables matching UI collections, PK/FK or clear relations, indexes, RLS comments/policies — not a single toy table.
+- api.ts: CRUD stubs aligned with schema + HTML collections (same names).
+- App.tsx + app/page.tsx: mirror the same modules (typed props, components) — not hello-world stubs.
+- Flutter when included: real screens in main.dart + valid pubspec.yaml.
+- package.json: valid JSON with name + scripts dev/build + deps.
+- README: how to test Preview Okapi + run Next/Flutter/Python locally.
+- Prefer depth on the supported stack over inventing unsupported languages.
+
 If WORKSPACE CONTEXT already has files, extend / replace coherently — do not ignore existing product names or data shapes unless asked.
 Use AGENT HISTORY for follow-ups.
 
@@ -206,13 +228,15 @@ Rules:
    - await Okapi.create(collection, data) → same flat shape
    - await Okapi.update(id, data) / Okapi.remove(id)
    - If list is empty: show empty state AND seed 1–2 demo rows with create on first load
+   - Wrap async Okapi calls in try/catch; show a clear error message in the UI on failure
    Preview injects window.Okapi always (local memory if not saved; cloud after Sauver).
 9. Always finish JSON completely — never truncate mid-string.
 10. Follow the AGENT MÉTIER product rules above strictly (screens, SQL, API, RDC payments).
 11. In README explain: Preview = base Okapi ; Next = npm i && npm run dev ; Flutter = flutter pub get ; Python = pip install -r requirements.txt.
 12. package.json must be valid JSON with name, scripts (dev/build), and dependencies for the React/Next stubs.
 13. pubspec.yaml must be valid YAML with name, environment sdk, and flutter dependencies when Flutter is included.
-14. requirements.txt must list real pip packages (one per line) when Python is included.`;
+14. requirements.txt must list real pip packages (one per line) when Python is included.
+15. Robustness: nav works, at least one full CRUD path (list → add → edit/delete or equivalent), no broken onclick / missing ids.`;
 }
 
 function parseProjectFiles(
@@ -447,7 +471,7 @@ export async function POST(request: Request) {
   const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate");
   if (!quota.ok) return quotaExceededResponse(quota);
 
-  const engine = resolveEngine(body?.engine);
+  const engine = resolveEngine(body?.engine ?? "pro");
   const large = wantsLargeProject(instruction) || engine === "pro";
   const hintTitle = body?.title?.trim();
   const workspace = sanitizeStudioWorkspace(body?.workspace);

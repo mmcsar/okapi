@@ -13,13 +13,14 @@ export const OKAPI_ENGINES: {
   {
     id: "flash",
     label: "Okapi Flash",
-    hint: "Rapide et économique — apps & grands projets du quotidien",
-    badge: "Défaut",
+    hint: "Rapide — apps & Preview (Créateur)",
+    badge: "Créateur",
   },
   {
     id: "pro",
     label: "Okapi Pro",
-    hint: "Raisonnement fort — CRM, plateformes, projets complexes",
+    hint: "Niveau ChatGPT / Claude — questions, conseils, faits",
+    badge: "Conseiller",
   },
 ];
 

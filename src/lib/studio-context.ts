@@ -129,6 +129,7 @@ export function assessStudioProjectFiles(
 ): StudioQualityIssue[] {
   const issues: StudioQualityIssue[] = [];
   const byId = new Map(files.map((f) => [f.fileId, f.content]));
+  const large = Boolean(opts?.large);
 
   for (const id of MANDATORY) {
     const content = byId.get(id)?.trim() || "";
@@ -155,10 +156,11 @@ export function assessStudioProjectFiles(
           detail: "app.html missing </html> (likely truncated).",
         });
       }
-      if (html.length < 400) {
+      const minHtml = large ? 1800 : 800;
+      if (html.length < minHtml) {
         issues.push({
           code: "html_too_short",
-          detail: "app.html is too short for a usable Preview.",
+          detail: `app.html is too short for a robust ${large ? "large " : ""}Preview product.`,
         });
       }
       const openScript = (html.match(/<script\b/gi) || []).length;
@@ -179,28 +181,103 @@ export function assessStudioProjectFiles(
             "app.html uses localStorage — prefer window.Okapi.list/create for live Preview cloud.",
         });
       }
-      if (opts?.large && (html.match(/\b(nav|tab|view|écran|section)/gi) || []).length < 2) {
-        // soft signal only — don't block alone; skip for repair unless paired
+      const looksInteractive =
+        usesLocalStorage ||
+        /<form\b/i.test(html) ||
+        /Okapi\.(list|create)\s*\(/i.test(html) ||
+        /\.addEventListener\s*\(\s*['"]submit['"]/i.test(html);
+      if (looksInteractive && !usesOkapi) {
+        issues.push({
+          code: "interactive_without_okapi",
+          detail:
+            "Interactive app.html should use window.Okapi.list/create for persistence.",
+        });
+      }
+      const screenHints = (
+        html.match(
+          /\b(data-view|data-screen|id=["'](?:view|screen|page|tab)-|showView|navigateTo|nav-item|role=["']tab["'])/gi,
+        ) || []
+      ).length;
+      const navHints = (html.match(/<nav\b|navbar|bottom-nav|sidebar/gi) || [])
+        .length;
+      if (large && screenHints + navHints < 2) {
+        issues.push({
+          code: "html_weak_navigation",
+          detail:
+            "Large project app.html needs real multi-screen navigation (nav + views).",
+        });
+      }
+      if (
+        looksInteractive &&
+        !/\b(empty|vide|loading|chargement|erreur|error|toast|alert)\b/i.test(
+          html,
+        )
+      ) {
+        issues.push({
+          code: "html_missing_states",
+          detail:
+            "Robust Preview needs empty/loading/error (or toast) UI states.",
+        });
       }
     }
   }
 
   const sql = byId.get("schema.sql")?.trim() || "";
-  if (sql && sql.length < 40) {
+  if (sql) {
+    if (sql.length < (large ? 120 : 60)) {
+      issues.push({
+        code: "sql_too_short",
+        detail: "schema.sql is too short for a robust data model.",
+      });
+    }
+    if (!/\bcreate\s+table\b/i.test(sql)) {
+      issues.push({
+        code: "sql_no_tables",
+        detail: "schema.sql must define at least one CREATE TABLE.",
+      });
+    }
+  }
+
+  const api = byId.get("api.ts")?.trim() || "";
+  if (api && api.length < (large ? 200 : 80)) {
     issues.push({
-      code: "sql_too_short",
-      detail: "schema.sql is too short.",
+      code: "api_too_short",
+      detail: "api.ts stubs are too thin for a robust backend scaffold.",
     });
+  }
+
+  const react = byId.get("App.tsx")?.trim() || "";
+  if (react) {
+    if (react.length < (large ? 250 : 100)) {
+      issues.push({
+        code: "react_too_short",
+        detail: "App.tsx is too short — mirror the HTML product properly.",
+      });
+    }
+    if (!/export\s+default/i.test(react)) {
+      issues.push({
+        code: "react_no_export",
+        detail: "App.tsx should export a default component.",
+      });
+    }
   }
 
   const pkg = byId.get("package.json")?.trim() || "";
   if (pkg) {
     try {
-      const parsed = JSON.parse(pkg) as { name?: string; scripts?: unknown };
+      const parsed = JSON.parse(pkg) as {
+        name?: string;
+        scripts?: Record<string, string>;
+      };
       if (!parsed || typeof parsed !== "object") {
         issues.push({
           code: "package_json_invalid",
           detail: "package.json is not valid JSON object.",
+        });
+      } else if (!parsed.scripts || typeof parsed.scripts !== "object") {
+        issues.push({
+          code: "package_json_no_scripts",
+          detail: "package.json needs scripts (at least dev/build).",
         });
       }
     } catch {
@@ -233,18 +310,27 @@ export function assessStudioProjectFiles(
 }
 
 export function shouldRepairStudioProject(issues: StudioQualityIssue[]) {
-  return issues.some((i) =>
-    [
-      "html_invalid",
-      "html_truncated",
-      "html_too_short",
-      "html_unclosed_script",
-      "sql_too_short",
-      "package_json_invalid",
-      "missing_pubspec_yaml",
-      "missing_requirements_txt",
-      "localstorage_without_okapi",
-    ].includes(i.code) || i.code.startsWith("missing_"),
+  return issues.some(
+    (i) =>
+      [
+        "html_invalid",
+        "html_truncated",
+        "html_too_short",
+        "html_unclosed_script",
+        "html_weak_navigation",
+        "html_missing_states",
+        "interactive_without_okapi",
+        "sql_too_short",
+        "sql_no_tables",
+        "api_too_short",
+        "react_too_short",
+        "react_no_export",
+        "package_json_invalid",
+        "package_json_no_scripts",
+        "missing_pubspec_yaml",
+        "missing_requirements_txt",
+        "localstorage_without_okapi",
+      ].includes(i.code) || i.code.startsWith("missing_"),
   );
 }
 
@@ -268,9 +354,10 @@ Rules:
 2. Include ALL mandatory files: app.html, App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md.
 3. If main.dart exists, also include pubspec.yaml. If main.py exists, also include requirements.txt.
 4. Fix truncation / missing sections. Prefer completing previous content over rewriting from scratch.
-5. app.html must be a full document ending with </html>.
-6. package.json must be valid JSON.
+5. app.html must be a full document ending with </html> — multi-screen, empty/loading/error states, window.Okapi for data.
+6. package.json must be valid JSON with scripts.
 7. Prefer window.Okapi.list/create over localStorage for interactive lists/forms.
+8. schema.sql needs real CREATE TABLE(s). api.ts and App.tsx must be substantial, not stubs.
 ${opts.titleHint ? `Suggested title: ${opts.titleHint}` : ""}
 
 Previous incomplete JSON / output:

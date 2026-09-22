@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: missing
-          ? "KYC non configuré. Exécute supabase/migrations/20260313_kyc_profiles.sql dans Supabase."
+          ? "Service identité temporairement indisponible — contacte MMC."
           : error.message,
         setupRequired: missing,
         profile: null,

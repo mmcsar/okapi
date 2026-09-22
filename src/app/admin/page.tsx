@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { AdminClientsDashboard } from "@/components/admin-clients-dashboard";
 import { AdminExecutiveDashboard } from "@/components/admin-executive-dashboard";
+import { AdminOpsDashboard } from "@/components/admin-ops-dashboard";
 import { GeminiStatus } from "@/components/gemini-status";
 import { HeygenStatus } from "@/components/heygen-status";
 import { SupabaseStatus } from "@/components/supabase-status";
@@ -30,14 +31,14 @@ const systemRows = [
   { name: "PWA", status: "OK" },
 ] as const;
 
-type AdminTab = "clients" | "executive" | "system";
+type AdminTab = "ops" | "clients" | "executive" | "system";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<AdminTab>("clients");
+  const [tab, setTab] = useState<AdminTab>("ops");
 
   useEffect(() => {
     void (async () => {
@@ -104,7 +105,8 @@ export default function AdminPage() {
             Admin Okapi
           </h1>
           <p className="mt-2 text-sm text-okapi-ink/55">
-            Zone privée — gestion clients & système. Pas dans le menu user.
+            Zone privée MMC — identité, paiements, clients. Pas dans le menu
+            user.
           </p>
           <label className="mt-6 block text-left">
             <span className="mb-1.5 block text-xs font-medium text-okapi-ink/50">
@@ -183,6 +185,7 @@ export default function AdminPage() {
         <div className="flex gap-1 border-b border-[var(--okapi-stroke)] px-5 pt-3">
           {(
             [
+              { id: "ops" as const, label: "Ops MMC" },
               { id: "clients" as const, label: "Clients" },
               { id: "executive" as const, label: "Exécutif" },
               { id: "system" as const, label: "Système" },
@@ -204,7 +207,9 @@ export default function AdminPage() {
         </div>
 
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-6">
-          {tab === "clients" ? (
+          {tab === "ops" ? (
+            <AdminOpsDashboard />
+          ) : tab === "clients" ? (
             <AdminClientsDashboard />
           ) : tab === "executive" ? (
             <AdminExecutiveDashboard />

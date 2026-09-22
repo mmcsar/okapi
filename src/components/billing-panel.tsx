@@ -79,7 +79,7 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
       }
       if (data.setupRequired) {
         setStatusLine(
-          "Mobile Pay bientôt actif — exécute la migration SQL dans Supabase.",
+          "Paiement mobile bientôt actif — contacte MMC si besoin.",
         );
       } else if (data.subscription?.active) {
         setSubLabel(`${data.plan?.label ?? "Pro"} · actif`);
@@ -156,7 +156,7 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
             Abonnement
           </h1>
           <p className="mt-1 text-sm text-okapi-ink/50">
-            Mobile Pay · M-Pesa · Orange Money · Airtel Money
+            Mobile Money · M-Pesa · Orange Money · Airtel Money
           </p>
         </div>
         {onBack ? (
@@ -180,7 +180,7 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
               {loading ? "…" : subLabel}
             </p>
             <p className="mt-2 text-sm text-okapi-ink/50">
-              KYC obligatoire · particuliers sans NIF · Mobile Money
+              Identité obligatoire · particuliers sans NIF · Mobile Money
             </p>
             <p className="mt-2 text-xs font-semibold text-okapi-forest">
               Identité : {loading ? "…" : kycLabel}
@@ -190,7 +190,7 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
           {!user ? (
             <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-6 text-center">
               <p className="text-sm text-okapi-ink/60">
-                Connecte-toi pour activer un abonnement Mobile Pay.
+                Connecte-toi pour activer un abonnement Mobile Money.
               </p>
               <button
                 type="button"
@@ -204,11 +204,11 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
             <>
               <section className="rounded-3xl border border-okapi-amber/25 bg-okapi-amber/5 p-5">
                 <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
-                  1. KYC (obligatoire)
+                  1. Ton identité (obligatoire)
                 </h2>
                 <p className="mt-1 text-sm text-okapi-ink/55">
-                  Nom, téléphone et pièce d’identité. NIF/RCCM seulement si
-                  compte entreprise.
+                  Nom, téléphone et pièce d’identité. NIF / registre commerce
+                  seulement si compte entreprise.
                 </p>
                 <div className="mt-4">
                   <KycForm initial={kyc} onDone={() => void load()} />
@@ -262,12 +262,12 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
 
               <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5">
                 <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
-                  3. Mobile Pay
+                  3. Paiement mobile
                 </h2>
                 <p className="mt-1 text-sm text-okapi-ink/45">
                   {kycReady
                     ? "Choisis l’opérateur et ton numéro Mobile Money."
-                    : "Complète d’abord le KYC (étape 1) pour débloquer le paiement."}
+                    : "Complète d’abord ton identité (étape 1) pour débloquer le paiement."}
                 </p>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -313,8 +313,8 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
                   {busy
                     ? "Envoi…"
                     : !kycReady
-                      ? "KYC requis avant paiement"
-                      : "Payer avec Mobile Pay"}
+                      ? "Identité requise avant paiement"
+                      : "Payer avec Mobile Money"}
                 </button>
 
                 {error ? (
@@ -373,7 +373,13 @@ export function BillingPanel({ onBack, onNeedLogin }: BillingPanelProps) {
                                 : "bg-okapi-mist text-okapi-ink/50"
                           }`}
                         >
-                          {p.status}
+                          {p.status === "paid"
+                            ? "Payé"
+                            : p.status === "pending"
+                              ? "En attente"
+                              : p.status === "failed"
+                                ? "Échoué"
+                                : p.status}
                         </span>
                       </li>
                     ))}

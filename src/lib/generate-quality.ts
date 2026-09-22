@@ -46,6 +46,11 @@ export function assessGenerateQuality(
       code: "too_short",
       detail: "HTML is too short to be a usable app preview.",
     });
+  } else if (opts.mode === "fullstack" && html.length < 1200) {
+    issues.push({
+      code: "too_thin",
+      detail: "Fullstack HTML is too thin for a robust multi-screen product.",
+    });
   }
 
   // Truncation: model never closed the document (ensureHtmlDocument may have patched it).
@@ -78,17 +83,35 @@ export function assessGenerateQuality(
         code: "missing_sql",
         detail: "Fullstack output missing ===OKAPI_SQL=== section.",
       });
+    } else if (
+      artifacts.sql.trim().length < 60 ||
+      !/\bcreate\s+table\b/i.test(artifacts.sql)
+    ) {
+      issues.push({
+        code: "weak_sql",
+        detail: "SQL schema too weak — need real CREATE TABLE(s).",
+      });
     }
     if (!artifacts.api) {
       issues.push({
         code: "missing_api",
         detail: "Fullstack output missing ===OKAPI_API=== section.",
       });
+    } else if (artifacts.api.trim().length < 80) {
+      issues.push({
+        code: "weak_api",
+        detail: "API stubs too thin for a robust backend scaffold.",
+      });
     }
     if (!artifacts.react) {
       issues.push({
         code: "missing_react",
         detail: "Fullstack output missing ===OKAPI_REACT=== section.",
+      });
+    } else if (artifacts.react.trim().length < 100) {
+      issues.push({
+        code: "weak_react",
+        detail: "React stub too short — mirror the HTML product.",
       });
     }
     if (!artifacts.nextjs) {
@@ -106,13 +129,33 @@ export function assessGenerateQuality(
   const looksInteractive =
     usesLocalStorage ||
     /<form\b/i.test(html) ||
-    /\.addEventListener\s*\(\s*['"]submit['"]/i.test(html);
+    /\.addEventListener\s*\(\s*['"]submit['"]/i.test(html) ||
+    /Okapi\.(list|create)\s*\(/i.test(html);
 
   if (looksInteractive && usesLocalStorage && !usesOkapi) {
     issues.push({
       code: "localstorage_without_okapi",
       detail:
         "Interactive HTML uses localStorage instead of window.Okapi.list/create (real Okapi cloud).",
+    });
+  }
+
+  if (looksInteractive && !usesOkapi) {
+    issues.push({
+      code: "interactive_without_okapi",
+      detail:
+        "Interactive Preview should use window.Okapi.list/create for persistence.",
+    });
+  }
+
+  if (
+    opts.mode === "fullstack" &&
+    looksInteractive &&
+    !/\b(empty|vide|loading|chargement|erreur|error|toast)\b/i.test(html)
+  ) {
+    issues.push({
+      code: "missing_ui_states",
+      detail: "Robust app needs empty/loading/error UI feedback.",
     });
   }
 
@@ -124,6 +167,7 @@ export function shouldRepairGenerate(issues: GenerateQualityIssue[]) {
     [
       "no_html",
       "too_short",
+      "too_thin",
       "truncated_html",
       "unclosed_script",
       "unclosed_style",
@@ -131,7 +175,12 @@ export function shouldRepairGenerate(issues: GenerateQualityIssue[]) {
       "missing_api",
       "missing_react",
       "missing_next",
+      "weak_sql",
+      "weak_api",
+      "weak_react",
       "localstorage_without_okapi",
+      "interactive_without_okapi",
+      "missing_ui_states",
     ].includes(i.code),
   );
 }
@@ -176,7 +225,8 @@ Rules for this repair:
 3. Prefer completing / closing truncated content over rewriting everything.
 4. Always finish completely — never cut off mid-tag.
 5. If localStorage was used for lists/forms: replace with window.Okapi.list/create/update/remove. list returns flat rows [{id,...fields}] — never row.data. Empty list → empty state + optional seed create.
-6. ${formatHint}
+6. Make the product more robust: multi-screen nav if missing, empty/loading/error UI, real SQL CREATE TABLE, non-empty React/API stubs.
+7. ${formatHint}
 
 Previous (incomplete) output to repair:
 ${opts.previousRaw.slice(0, 24000)}`;

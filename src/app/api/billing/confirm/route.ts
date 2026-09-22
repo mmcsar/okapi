@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import { getPlan } from "@/lib/billing";
+import { requireAdmin } from "@/lib/admin-auth";
+import { confirmMobilePaymentByReference } from "@/lib/billing-confirm";
 import { safeEqualString } from "@/lib/crypto-aes";
-import { getSupabaseAdmin, isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import { assertBodySize } from "@/lib/security";
+import {
+  getSupabaseAdmin,
+  isSupabaseAdminConfigured,
+} from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
 /**
- * Confirme un paiement Mobile Pay (admin MMC ou webhook PSP).
- * Header: x-okapi-billing-secret = OKAPI_BILLING_WEBHOOK_SECRET
- * ou body.adminCode = OKAPI_ADMIN_CODE
+ * Confirme un paiement Mobile Money (admin MMC ou webhook PSP).
+ * Auth : session admin cookie · OU header x-okapi-billing-secret · OU body.adminCode
  */
 export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 32_000);
@@ -22,14 +25,21 @@ export async function POST(request: Request) {
   } | null;
 
   const secret = process.env.OKAPI_BILLING_WEBHOOK_SECRET?.trim() || "";
-  const headerSecret = request.headers.get("x-okapi-billing-secret")?.trim() || "";
+  const headerSecret =
+    request.headers.get("x-okapi-billing-secret")?.trim() || "";
   const adminCode = process.env.OKAPI_ADMIN_CODE?.trim() || "";
   const bodyAdmin = body?.adminCode?.trim() || "";
 
-  const okSecret = Boolean(secret && headerSecret && safeEqualString(headerSecret, secret));
-  const okAdmin = Boolean(adminCode && bodyAdmin && safeEqualString(bodyAdmin, adminCode));
+  const okSecret = Boolean(
+    secret && headerSecret && safeEqualString(headerSecret, secret),
+  );
+  const okAdmin = Boolean(
+    adminCode && bodyAdmin && safeEqualString(bodyAdmin, adminCode),
+  );
+  const session = await requireAdmin();
+  const okSession = !("error" in session);
 
-  if (!okSecret && !okAdmin) {
+  if (!okSecret && !okAdmin && !okSession) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
 
@@ -42,69 +52,30 @@ export async function POST(request: Request) {
 
   if (!isSupabaseAdminConfigured()) {
     return NextResponse.json(
-      { error: "SUPABASE_SERVICE_ROLE_KEY manquante" },
+      { error: "Service paiement indisponible." },
       { status: 503 },
     );
   }
 
-  const admin = getSupabaseAdmin();
-  const { data: payment, error } = await admin
-    .from("mobile_payments")
-    .select("id, user_id, plan_id, status, subscription_id")
-    .eq("reference", reference)
-    .maybeSingle();
+  const result = await confirmMobilePaymentByReference(
+    getSupabaseAdmin(),
+    reference,
+    nextStatus,
+  );
 
-  if (error || !payment) {
+  if (!result.ok) {
     return NextResponse.json(
-      { error: error?.message || "Paiement introuvable" },
-      { status: 404 },
+      { error: result.error },
+      { status: result.status },
     );
-  }
-
-  if (payment.status === "paid" && nextStatus === "paid") {
-    return NextResponse.json({ ok: true, alreadyPaid: true, reference });
-  }
-
-  const now = new Date();
-  const plan = getPlan(payment.plan_id);
-  const periodEnd = new Date(now);
-  periodEnd.setDate(periodEnd.getDate() + (plan?.periodDays || 30));
-
-  const { error: payUpd } = await admin
-    .from("mobile_payments")
-    .update({
-      status: nextStatus,
-      paid_at: nextStatus === "paid" ? now.toISOString() : null,
-      updated_at: now.toISOString(),
-    })
-    .eq("id", payment.id);
-
-  if (payUpd) {
-    return NextResponse.json({ error: payUpd.message }, { status: 500 });
-  }
-
-  if (nextStatus === "paid") {
-    const { error: subUpd } = await admin.from("subscriptions").upsert(
-      {
-        user_id: payment.user_id,
-        plan_id: payment.plan_id,
-        status: "active",
-        current_period_start: now.toISOString(),
-        current_period_end: periodEnd.toISOString(),
-        updated_at: now.toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
-    if (subUpd) {
-      return NextResponse.json({ error: subUpd.message }, { status: 500 });
-    }
   }
 
   return NextResponse.json({
     ok: true,
-    reference,
-    status: nextStatus,
-    planId: payment.plan_id,
-    periodEnd: nextStatus === "paid" ? periodEnd.toISOString() : null,
+    reference: result.reference,
+    status: result.status,
+    planId: result.planId,
+    periodEnd: result.periodEnd,
+    alreadyPaid: result.alreadyPaid,
   });
 }

@@ -63,7 +63,7 @@ export function KycForm({ initial, onDone }: KycFormProps) {
       });
       const data = (await res.json()) as { error?: string; message?: string };
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-      setOk(data.message ?? "KYC enregistré.");
+      setOk(data.message ?? "Identité enregistrée.");
       onDone?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Envoi impossible");
@@ -189,7 +189,8 @@ export function KycForm({ initial, onDone }: KycFormProps) {
       </div>
 
       <p className="text-xs text-okapi-ink/45">
-        Particulier : pas de NIF/RCCM. KYC requis avant Mobile Pay.
+        Particulier : pas besoin de NIF. Identité requise avant le paiement
+        mobile.
       </p>
 
       {error ? (
@@ -206,7 +207,7 @@ export function KycForm({ initial, onDone }: KycFormProps) {
         disabled={busy}
         className="w-full rounded-2xl bg-okapi-forest px-4 py-3 text-sm font-semibold text-white hover:bg-okapi-leaf disabled:opacity-60"
       >
-        {busy ? "Envoi…" : "Envoyer mon KYC"}
+        {busy ? "Envoi…" : "Enregistrer mon identité"}
       </button>
     </form>
   );

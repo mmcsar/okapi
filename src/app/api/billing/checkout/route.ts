@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "KYC obligatoire. Remplis ton identité (nom + téléphone + pièce) avant de payer.",
+          "Identité obligatoire. Remplis nom, téléphone et pièce d’identité avant de payer.",
         code: "kyc_required",
       },
       { status: 403 },
