@@ -112,6 +112,51 @@ export function wantsImageGen(message: string): boolean {
   return true;
 }
 
+function stripAccents(message: string) {
+  return message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Vidéo seule (« crée une vidéo… ») — /api/heygen/video, pas le builder.
+ * « vidéo » sans accent après normalisation.
+ */
+export function wantsVideoGen(message: string): boolean {
+  const norm = stripAccents(message);
+  const videoAsk =
+    /\b(cree|creer|genere|fabrique|fais|tourne)\b.{0,50}\b(video|clip|avatar)\b/.test(
+      norm,
+    ) ||
+    /\b(une?|un|la|le) (courte? |belle? )?(video|clip)\b/.test(norm) ||
+    /\bvideo (de|d |du|pour|avec|sur|avatar)\b/.test(norm);
+
+  if (!videoAsk) return false;
+  if (
+    /\b(app|application|site|page web|boutique|dashboard)\b/.test(norm) &&
+    !/\b(juste|seulement|uniquement).{0,24}\b(video|clip)\b/.test(norm)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function extractVideoPrompt(message: string): string {
+  let p = message.trim();
+  p = p.replace(/^(okapi[,:]?\s*)/i, "");
+  p = p.replace(/^(s['’]il te pla[iî]t[,:]?\s*)/i, "");
+  p = p.replace(/^(peux[- ]tu|pourrais[- ]tu|svp)[,:]?\s*/i, "");
+  p = p.replace(
+    /^(cr[eé]e[rz]?|g[eé]n[eè]re[rz]?|fabrique[rz]?|fais[- ]moi|tourne[rz]?)(\s*moi)?\s*(une?|un|le|la)?\s*(vid[eé]o|clip|avatar)\s*(de|d['’]|pour|avec|sur|:)?\s*/i,
+    "",
+  );
+  const out = (p.trim() || message.trim()).slice(0, 2000);
+  return out.length >= 3 ? out : message.trim().slice(0, 2000);
+}
+
 /** Prompt nettoyé pour /api/image. */
 export function extractImagePrompt(message: string): string {
   let p = message.trim();
@@ -133,8 +178,8 @@ export function wantsAppBuild(
 ): boolean {
   const m = message.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 
-  // Image seule → /api/image, pas le builder HTML
-  if (wantsImageGen(message)) return false;
+  // Image ou vidéo seule → pas le builder HTML
+  if (wantsVideoGen(message) || wantsImageGen(message)) return false;
 
   // Lane Conseiller : uniquement un « crée une app… » explicite (jamais Studio forcé)
   if (lane === "conseil") {

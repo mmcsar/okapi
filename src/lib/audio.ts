@@ -45,8 +45,9 @@ export function pickVoiceForLang(lang: string): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   const prefix = lang.slice(0, 2).toLowerCase();
   return (
+    voices.find((v) => v.lang.toLowerCase() === lang.toLowerCase()) ||
+    voices.find((v) => v.lang.toLowerCase().startsWith(`${prefix}-`)) ||
     voices.find((v) => v.lang.toLowerCase().startsWith(prefix)) ||
-    voices.find((v) => v.lang.toLowerCase().startsWith("fr")) ||
     null
   );
 }
@@ -65,6 +66,7 @@ export function speakText(
   if (!clean) return false;
 
   window.speechSynthesis.cancel();
+  window.speechSynthesis.getVoices();
   const utter = new SpeechSynthesisUtterance(clean);
   utter.lang = opts?.lang || "fr-FR";
   utter.rate = opts?.rate ?? 1.02;

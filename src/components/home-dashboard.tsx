@@ -15,13 +15,16 @@ import { downloadTextFile, downloadProjectZip, slugifyFilename } from "@/lib/exp
 import {
   getStoredLanguage,
   speechLocaleFor,
+  ttsLocaleFor,
   type OkapiLangCode,
 } from "@/lib/i18n";
 import {
   wantsAppBuild,
   wantsDebug,
   wantsImageGen,
+  wantsVideoGen,
   extractImagePrompt,
+  extractVideoPrompt,
   chatDeniedBuilder,
   getStoredAgentLane,
   setStoredAgentLane,
@@ -89,9 +92,12 @@ export function HomeDashboard({
       content: string;
       imageUrl?: string;
       imageFallbacks?: string[];
+      videoUrl?: string;
     }[]
   >([]);
   const [sending, setSending] = useState(false);
+  /** Vrai seulement pendant une génération d’app — pas pour une réponse Agent. */
+  const [buildingPreview, setBuildingPreview] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewReact, setPreviewReact] = useState<string | null>(null);
   const [previewReactNative, setPreviewReactNative] = useState<string | null>(
@@ -195,23 +201,40 @@ export function HomeDashboard({
     sector,
   ]);
 
+  const promptRef = useRef("");
+  const dictateBaseRef = useRef<string | null>(null);
+  const pendingDictationSend = useRef(false);
+  const sendingLock = useRef(false);
+  const composerFormRef = useRef<HTMLFormElement>(null);
+  const voiceOutRef = useRef(voiceOut);
+  voiceOutRef.current = voiceOut;
+
   const onTranscript = useCallback((text: string, isFinal: boolean) => {
     const clean = text.trim();
     if (!clean) return;
-    if (isFinal) {
-      setPrompt((prev) => {
-        const base = prev.trim();
-        return base ? `${base} ${clean}` : clean;
+    const base = (dictateBaseRef.current ?? "").trim();
+    const full = base ? `${base} ${clean}` : clean;
+    promptRef.current = full;
+    setPrompt(full);
+    setDraftVoice("");
+    if (isFinal && !sendingLock.current) {
+      dictateBaseRef.current = null;
+      pendingDictationSend.current = true;
+      queueMicrotask(() => {
+        if (!pendingDictationSend.current || sendingLock.current) return;
+        if (!promptRef.current.trim()) return;
+        pendingDictationSend.current = false;
+        composerFormRef.current?.requestSubmit();
       });
-      setDraftVoice("");
-    } else {
-      setDraftVoice(clean);
     }
   }, []);
 
-  const speechLocale =
-    language === "auto" ? "fr-FR" : speechLocaleFor(language);
-  const audio = useOkapiAudio(onTranscript, speechLocale);
+  const listenLocale =
+    language === "auto"
+      ? (typeof navigator !== "undefined" && navigator.language) || "fr-FR"
+      : speechLocaleFor(language);
+  const speakLocale = language === "auto" ? null : ttsLocaleFor(language);
+  const audio = useOkapiAudio(onTranscript, listenLocale, speakLocale);
   const {
     listening,
     speaking,
@@ -224,8 +247,9 @@ export function HomeDashboard({
     toggleSpeak,
     speak,
   } = audio;
-  const voiceOutRef = useRef(voiceOut);
-  voiceOutRef.current = voiceOut;
+  useEffect(() => {
+    promptRef.current = prompt;
+  }, [prompt]);
 
   useEffect(() => {
     const sync = () => setLanguage(getStoredLanguage());
@@ -389,7 +413,7 @@ export function HomeDashboard({
         previewPubspec ||
         previewReadme,
     ) ||
-    sending ||
+    buildingPreview ||
     immersiveStudio;
 
   function leaveStudio() {
@@ -822,13 +846,14 @@ export function HomeDashboard({
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const trimmed = prompt.trim();
-    if ((!trimmed && !attachedImage) || sending) {
+    const trimmed = (promptRef.current || prompt).trim();
+    if ((!trimmed && !attachedImage) || sending || sendingLock.current) {
       if (!trimmed && !attachedImage) {
         setStatus("Écris ta demande ou ajoute une image.");
       }
       return;
     }
+    sendingLock.current = true;
 
     const imagePayload = attachedImage;
     // Avec une image, on passe par l'agent vision (chat), pas le builder HTML.
@@ -837,12 +862,18 @@ export function HomeDashboard({
     const largeAsk = !imagePayload && wantsLargeProject(trimmed);
     const debug =
       debugArmed || (!imagePayload && wantsDebug(trimmed));
+    const videoGen =
+      !imagePayload && Boolean(trimmed) && wantsVideoGen(trimmed);
     const imageGen =
-      !imagePayload && Boolean(trimmed) && wantsImageGen(trimmed);
+      !videoGen &&
+      !imagePayload &&
+      Boolean(trimmed) &&
+      wantsImageGen(trimmed);
     // Debug + Preview = corriger l’app (les 2 lanes) ; sinon build selon lane
     const build =
       !imagePayload &&
       !imageGen &&
+      !videoGen &&
       (wantsAppBuild(trimmed, Boolean(previewHtml), agentLane) ||
         (debug && Boolean(previewHtml)));
     const mode = build
@@ -871,9 +902,11 @@ export function HomeDashboard({
       },
       {
         role: "assistant",
-        content: imageGen
-          ? "Okapi génère l’image IA…"
-          : build
+        content: videoGen
+          ? "Okapi génère la vidéo…"
+          : imageGen
+            ? "Okapi génère l’image IA…"
+            : build
             ? debug
               ? "Okapi debug… correction en cours…"
               : largeAsk
@@ -893,10 +926,13 @@ export function HomeDashboard({
       },
     ]);
     setPrompt("");
+    promptRef.current = "";
+    dictateBaseRef.current = null;
     setAttachedImage(null);
     setDebugArmed(false);
     setStatus(null);
     setSending(true);
+    setBuildingPreview(Boolean(build));
 
     const setAssistant = (
       content: string,
@@ -916,6 +952,80 @@ export function HomeDashboard({
     };
 
     try {
+      if (videoGen) {
+        setStudioHandoffReady(false);
+        setDevMode(false);
+        const brief = extractVideoPrompt(trimmed);
+        const startRes = await fetch("/api/heygen/video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: brief }),
+        });
+        const started = (await startRes.json().catch(() => null)) as {
+          error?: string;
+          sessionId?: string;
+          videoId?: string | null;
+          videoUrl?: string | null;
+          status?: string;
+          progress?: number | null;
+        } | null;
+        if (!startRes.ok) {
+          throw new Error(started?.error ?? `Vidéo impossible (${startRes.status})`);
+        }
+
+        const showVideo = (url: string) => {
+          setMessages((prev) => {
+            const next = [...prev];
+            next[next.length - 1] = {
+              role: "assistant",
+              content: `Voici ta vidéo${brief ? ` : « ${brief.slice(0, 140)} »` : ""}.`,
+              videoUrl: url,
+            };
+            return next;
+          });
+        };
+
+        if (started?.videoUrl) {
+          showVideo(started.videoUrl);
+          setStatus(null);
+          return;
+        }
+        if (!started?.sessionId) {
+          throw new Error("La vidéo n’a pas démarré.");
+        }
+
+        const deadline = Date.now() + 3.5 * 60_000;
+        let videoId = started.videoId || "";
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 5000));
+          const qs = new URLSearchParams({ sessionId: started.sessionId });
+          if (videoId) qs.set("videoId", videoId);
+          const pollRes = await fetch(`/api/heygen/video?${qs.toString()}`);
+          const poll = (await pollRes.json().catch(() => null)) as {
+            error?: string;
+            videoId?: string | null;
+            videoUrl?: string | null;
+            status?: string;
+            progress?: number | null;
+          } | null;
+          if (!pollRes.ok) {
+            throw new Error(poll?.error ?? `Suivi vidéo impossible (${pollRes.status})`);
+          }
+          if (poll?.videoId) videoId = poll.videoId;
+          if (poll?.videoUrl) {
+            showVideo(poll.videoUrl);
+            setStatus(null);
+            return;
+          }
+          const pct =
+            typeof poll?.progress === "number" ? ` (${poll.progress}%)` : "…";
+          setAssistant(`Okapi prépare ta vidéo${pct}`);
+        }
+        throw new Error(
+          "La vidéo prend plus de temps que prévu. Réessaie dans un instant.",
+        );
+      }
+
       if (imageGen) {
         // Jamais Studio pour une image — reste sur Accueil Agent
         setStudioHandoffReady(false);
@@ -1465,7 +1575,9 @@ export function HomeDashboard({
       setStatus(soft);
       setAssistant(soft);
     } finally {
+      sendingLock.current = false;
       setSending(false);
+      setBuildingPreview(false);
     }
   }
 
@@ -1553,6 +1665,25 @@ export function HomeDashboard({
                   : "mr-4 border border-[var(--okapi-stroke)] bg-white/90 text-okapi-ink"
               }`}
             >
+              {msg.videoUrl ? (
+                <div className="mb-2">
+                  <video
+                    src={msg.videoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="max-h-[min(70vh,28rem)] w-full rounded-lg border border-[var(--okapi-stroke)] bg-black"
+                  />
+                  <a
+                    href={msg.videoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1.5 inline-block text-[11px] font-semibold text-okapi-forest/80 underline-offset-2 hover:underline"
+                  >
+                    Ouvrir la vidéo
+                  </a>
+                </div>
+              ) : null}
               {msg.imageUrl ? (
                 <div className="mb-2">
                   <button
@@ -1693,6 +1824,7 @@ export function HomeDashboard({
     extraClass = "",
   ) => (
     <form
+      ref={composerFormRef}
       onSubmit={onSubmit}
       className={`okapi-composer w-full ${extraClass} ${
         formSplit
@@ -1741,6 +1873,7 @@ export function HomeDashboard({
           value={prompt}
           onChange={(e) => {
             setDraftVoice("");
+            promptRef.current = e.target.value;
             setPrompt(e.target.value);
           }}
           rows={formSplit ? 2 : 3}
@@ -1752,14 +1885,14 @@ export function HomeDashboard({
                 : agentLane === "conseil"
                   ? attachedImage
                     ? "Que faire avec cette image ?"
-                    : "Question, conseil, contenu… ou « crée une image de… »"
+                    : "Question, conseil… ou « crée une image / une vidéo… »"
                   : devMode
                     ? "Demande un conseil — le code s’édite dans Studio…"
                     : attachedImage
                       ? "Que faire avec cette image ?"
                       : previewHtml
                         ? "Modifie, debug, ou dis ce qu’il faut changer…"
-                        : "App, site… ou « crée une image / logo de… »"
+                        : "App, site… ou « crée une image / une vidéo… »"
           }
           className="min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
         />
@@ -1946,7 +2079,12 @@ export function HomeDashboard({
             {supportedListen ? (
               <button
                 type="button"
-                onClick={toggleListen}
+                onClick={() => {
+                  if (!listening) {
+                    dictateBaseRef.current = promptRef.current.trim();
+                  }
+                  toggleListen();
+                }}
                 disabled={sending}
                 className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border transition ${
                   listening

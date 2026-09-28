@@ -9,10 +9,13 @@ import {
   stopSpeaking,
   type SpeechRecognitionLike,
 } from "@/lib/audio";
+import { detectSpeechLocale } from "@/lib/i18n";
 
 export function useOkapiAudio(
   onTranscript: (text: string, isFinal: boolean) => void,
-  locale = "fr-FR",
+  listenLocale = "fr-FR",
+  /** null = choisir la voix selon le texte (mode Auto). */
+  speakLocale: string | null = null,
 ) {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -21,15 +24,23 @@ export function useOkapiAudio(
   const [audioError, setAudioError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const onTranscriptRef = useRef(onTranscript);
-  const localeRef = useRef(locale);
+  const listenLocaleRef = useRef(listenLocale);
+  const speakLocaleRef = useRef(speakLocale);
+  const finalBufRef = useRef("");
+  const interimBufRef = useRef("");
+  const suppressEndRef = useRef(false);
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
   }, [onTranscript]);
 
   useEffect(() => {
-    localeRef.current = locale;
-  }, [locale]);
+    listenLocaleRef.current = listenLocale;
+  }, [listenLocale]);
+
+  useEffect(() => {
+    speakLocaleRef.current = speakLocale;
+  }, [speakLocale]);
 
   useEffect(() => {
     setSupportedListen(isSpeechRecognitionSupported());
@@ -49,7 +60,11 @@ export function useOkapiAudio(
   }, []);
 
   const stopListen = useCallback(() => {
-    recognitionRef.current?.stop();
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* déjà arrêté */
+    }
     setListening(false);
   }, []);
 
@@ -65,24 +80,36 @@ export function useOkapiAudio(
     setAudioError(null);
 
     const recognition = new Ctor();
-    recognition.lang = localeRef.current || "fr-FR";
+    recognition.lang = listenLocaleRef.current || "fr-FR";
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+    finalBufRef.current = "";
+    interimBufRef.current = "";
+    suppressEndRef.current = false;
 
     recognition.onresult = (event) => {
-      let interim = "";
       let finalText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const piece = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalText += piece;
+      let interim = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const piece = event.results[i]?.[0]?.transcript ?? "";
+        if (event.results[i]?.isFinal) finalText += piece;
         else interim += piece;
       }
-      if (finalText) onTranscriptRef.current(finalText, true);
-      else if (interim) onTranscriptRef.current(interim, false);
+      finalBufRef.current = finalText;
+      interimBufRef.current = interim;
+      const shown = `${finalText} ${interim}`.trim();
+      if (shown) onTranscriptRef.current(shown, false);
     };
 
     recognition.onerror = (event) => {
+      if (event.error === "aborted") {
+        suppressEndRef.current = true;
+        finalBufRef.current = "";
+        interimBufRef.current = "";
+        setListening(false);
+        return;
+      }
       const map: Record<string, string> = {
         "not-allowed": "Micro bloqué. Autorise le micro dans le navigateur.",
         "no-speech": "Aucune voix détectée. Réessaie.",
@@ -95,6 +122,14 @@ export function useOkapiAudio(
 
     recognition.onend = () => {
       setListening(false);
+      if (suppressEndRef.current) {
+        suppressEndRef.current = false;
+        return;
+      }
+      const text = `${finalBufRef.current} ${interimBufRef.current}`.trim();
+      finalBufRef.current = "";
+      interimBufRef.current = "";
+      if (text) onTranscriptRef.current(text, true);
     };
 
     recognitionRef.current = recognition;
@@ -115,8 +150,11 @@ export function useOkapiAudio(
   const speak = useCallback((text: string) => {
     if (!text.trim()) return;
     setAudioError(null);
+    const preferred =
+      speakLocaleRef.current || listenLocaleRef.current || "fr-FR";
+    const lang = detectSpeechLocale(text, preferred);
     const ok = speakText(text, {
-      lang: localeRef.current || "fr-FR",
+      lang,
       onend: () => setSpeaking(false),
     });
     if (!ok) {

@@ -14,16 +14,15 @@ type ChatMessage = {
       >;
 };
 
-/** Gratuit OpenRouter — utilisé si pas de crédit / modèle payant refusé. */
-const FREE_FALLBACK_MODEL = "nex-agi/nex-n2.5-mini:free";
+/** Route gratuite OpenRouter — utilisée si le modèle payant n’a pas de crédit. */
+const FREE_FALLBACK_MODEL = "openrouter/free";
 /** Pro par défaut (payant) — retombe sur FREE_FALLBACK_MODEL si 402. */
 const DEFAULT_PRO_MODEL = "openai/gpt-4o";
 /** Flash par défaut : gratuit pour RDC sans crédit. */
 const DEFAULT_FLASH_MODEL = FREE_FALLBACK_MODEL;
 /** Fallback vision (doit supporter les images). */
 const FREE_VISION_FALLBACK =
-  process.env.OPENROUTER_MODEL_VISION_FREE?.trim() ||
-  "google/gemini-2.0-flash-exp:free";
+  process.env.OPENROUTER_MODEL_VISION_FREE?.trim() || "openrouter/free";
 
 export function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
@@ -60,6 +59,15 @@ export function openRouterModel(
     process.env.OPENROUTER_MODEL_FLASH?.trim() ||
     process.env.OPENROUTER_MODEL?.trim() ||
     DEFAULT_FLASH_MODEL
+  );
+}
+
+function isModelGone(status: number, message?: string) {
+  return (
+    status === 404 ||
+    /no endpoints found|unavailable for free|not found|is not a valid model/i.test(
+      message || "",
+    )
   );
 }
 
@@ -215,7 +223,7 @@ export async function openRouterComplete(opts: {
       } | null;
       const msg = failBody?.error?.message || "";
       if (
-        isPaymentBlocked(res.status, msg) &&
+        (isPaymentBlocked(res.status, msg) || isModelGone(res.status, msg)) &&
         model !== FREE_FALLBACK_MODEL
       ) {
         return once(FREE_FALLBACK_MODEL, stream);
@@ -304,6 +312,7 @@ export async function streamOpenRouterChat(opts: {
     const canRetry =
       primary !== fallback &&
       (isPaymentBlocked(upstream.status, msg) ||
+        isModelGone(upstream.status, msg) ||
         (vision &&
           /vision|image|multimodal|content type|not support/i.test(msg)));
 
