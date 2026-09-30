@@ -1,5 +1,6 @@
 import { friendlyLlmError } from "@/lib/llm-errors";
-import { missingLlmMessage, pickLlmProvider } from "@/lib/llm-provider";
+import { claudeComplete } from "@/lib/anthropic";
+import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
   checkAndConsumeQuota,
   quotaExceededResponse,
@@ -11,6 +12,7 @@ import { openRouterComplete } from "@/lib/openrouter";
 import { resolveEngine } from "@/lib/okapi-engine";
 import { wantsLargeProject } from "@/lib/fullstack";
 import { assertBodySize } from "@/lib/security";
+import { OKAPI_PRODUCT_DESIGN } from "@/lib/generate-quality";
 import {
   assessStudioProjectFiles,
   buildStudioProjectRepairPrompt,
@@ -88,9 +90,17 @@ async function complete(opts: {
   maxTokens: number;
   onChunk?: (text: string) => void;
 }) {
-  const provider = pickLlmProvider();
+  const provider = pickWithClaude();
   if (!provider) throw new Error(missingLlmMessage());
 
+  if (provider === "claude") {
+    return claudeComplete({
+      system: opts.system,
+      user: opts.user,
+      maxTokens: opts.maxTokens,
+      onChunk: opts.onChunk,
+    });
+  }
   if (provider === "openai") {
     return openAiComplete({
       system: opts.system,
@@ -218,7 +228,7 @@ Optional stacks (when relevant — always ship companion manifests):
 Rules:
 1. ${scale}
 2. app.html must be a full document (DOCTYPE … </html>), Tailwind CDN, RDC-friendly UX.
-3. Photos: https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
+3. ${OKAPI_PRODUCT_DESIGN}
 4. Never invent real API keys. Prefer window.Okapi.list/create for live Preview data (Okapi cloud). Optional stubs in api.ts may mirror the same collections.
 5. Never mention third-party AI or database vendor brand names in UI or README — say « base Okapi » / Okapi / MMC SARL.
 6. UI copy in the user's language (French if they write French).
@@ -452,7 +462,7 @@ export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 1_500_000);
   if (tooBig) return tooBig;
 
-  if (!pickLlmProvider()) {
+  if (!pickWithClaude()) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 

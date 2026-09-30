@@ -29,6 +29,22 @@ export function pickLlmProvider(): LlmProvider | null {
   return null;
 }
 
+/**
+ * Chat, Studio et Preview : la clé Anthropic prime.
+ * openai / gemini forcés ne sont pas remplacés.
+ */
+export function pickWithClaude(): LlmProvider | null {
+  const forced = process.env.LLM_PROVIDER?.trim().toLowerCase();
+  if (
+    process.env.ANTHROPIC_API_KEY?.trim() &&
+    forced !== "openai" &&
+    forced !== "gemini"
+  ) {
+    return "claude";
+  }
+  return pickLlmProvider();
+}
+
 /** User-facing — never expose env var names or providers. */
 export function missingLlmMessage() {
   return friendlyConfigError();

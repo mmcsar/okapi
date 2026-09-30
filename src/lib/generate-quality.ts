@@ -9,6 +9,15 @@ export type GenerateQualityIssue = {
 
 const MAX_REPAIR_ATTEMPTS = 1;
 
+/** Barème visuel partagé Preview + Studio. */
+export const OKAPI_PRODUCT_DESIGN = `DESIGN — vrai site ou vraie app, pas une maquette:
+- Produit cliquable: en-tête avec le nom, navigation vers chaque écran, contenu principal, pied de page ou barre d’app.
+- Une palette cohérente avec le métier (vert profond et sable chaud conviennent). Hiérarchie de titres, espaces larges, boutons clairement cliquables. Jamais une seule carte centrée sur un dégradé violet.
+- Contenu d’exemple spécifique au brief (noms, prix en CDF pour une boutique, Kinshasa ou Gombe si c’est local). Pas de lorem ipsum, pas de « Titre ici », pas de TODO.
+- Un site a un hero, au moins deux sections de contenu, et une action (contact, commande, WhatsApp). Une app a au moins deux écrans (liste + formulaire ou détail) avec une navigation qui change vraiment de vue.
+- Photos: https://picsum.photos/seed/MOT_ANGLAIS_UNIQUE/1200/800 — un seed différent par image, 4 images maximum. Jamais image.pollinations.ai, jamais un src vide.
+- Listes et formulaires passent par window.Okapi.list/create. États vide, chargement et erreur visibles.`;
+
 export function maxGenerateRepairAttempts() {
   return MAX_REPAIR_ATTEMPTS;
 }
@@ -41,12 +50,12 @@ export function assessGenerateQuality(
     return issues;
   }
 
-  if (html.length < 350) {
+  if (html.length < 1800) {
     issues.push({
       code: "too_short",
-      detail: "HTML is too short to be a usable app preview.",
+      detail: "HTML is too short to be a usable website or app. Add navigation, real sections, and sample content.",
     });
-  } else if (opts.mode === "fullstack" && html.length < 1200) {
+  } else if (opts.mode === "fullstack" && html.length < 2400) {
     issues.push({
       code: "too_thin",
       detail: "Fullstack HTML is too thin for a robust multi-screen product.",
@@ -148,6 +157,21 @@ export function assessGenerateQuality(
     });
   }
 
+  if (/image\.pollinations\.ai|lorem ipsum|titre ici|votre titre/i.test(html)) {
+    issues.push({
+      code: "weak_page",
+      detail:
+        "Page uses placeholder copy or a dead image URL. Use real sample content and https://picsum.photos/seed/UNIQUE/1200/800.",
+    });
+  }
+
+  if (!/<nav\b|<header\b/i.test(html)) {
+    issues.push({
+      code: "missing_nav",
+      detail: "Missing a header or navigation so the product feels like a real site or app.",
+    });
+  }
+
   if (
     opts.mode === "fullstack" &&
     looksInteractive &&
@@ -181,6 +205,8 @@ export function shouldRepairGenerate(issues: GenerateQualityIssue[]) {
       "localstorage_without_okapi",
       "interactive_without_okapi",
       "missing_ui_states",
+      "weak_page",
+      "missing_nav",
     ].includes(i.code),
   );
 }

@@ -1,5 +1,6 @@
 import { friendlyLlmError } from "@/lib/llm-errors";
-import { missingLlmMessage, pickLlmProvider } from "@/lib/llm-provider";
+import { claudeComplete } from "@/lib/anthropic";
+import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
   checkAndConsumeQuota,
   quotaExceededResponse,
@@ -155,9 +156,17 @@ async function complete(opts: {
   maxTokens: number;
   onChunk?: (text: string) => void;
 }) {
-  const provider = pickLlmProvider();
+  const provider = pickWithClaude();
   if (!provider) throw new Error(missingLlmMessage());
 
+  if (provider === "claude") {
+    return claudeComplete({
+      system: opts.system,
+      user: opts.user,
+      maxTokens: opts.maxTokens,
+      onChunk: opts.onChunk,
+    });
+  }
   if (provider === "openai") {
     return openAiComplete({
       system: opts.system,
@@ -224,7 +233,7 @@ export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 1_500_000);
   if (tooBig) return tooBig;
 
-  if (!pickLlmProvider()) {
+  if (!pickWithClaude()) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 

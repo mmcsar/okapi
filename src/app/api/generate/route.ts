@@ -5,7 +5,8 @@ import {
   isLocationBlocked,
   isRetryableLlm,
 } from "@/lib/llm-errors";
-import { missingLlmMessage, pickLlmProvider } from "@/lib/llm-provider";
+import { claudeComplete } from "@/lib/anthropic";
+import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
   checkAndConsumeQuota,
   quotaExceededResponse,
@@ -26,6 +27,7 @@ import {
   assessGenerateQuality,
   buildGenerateRepairPrompt,
   maxGenerateRepairAttempts,
+  OKAPI_PRODUCT_DESIGN,
   shouldRepairGenerate,
 } from "@/lib/generate-quality";
 import { ensureReadmeArtifact } from "@/lib/project-artifacts";
@@ -47,7 +49,7 @@ import { getUserFromAuthHeader } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 /** Generate + 1 repair pass can need the full window. */
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function buildSystemHtml(
   language?: string | null,
@@ -61,7 +63,7 @@ function buildSystemHtml(
 - Include navigation between views (tabs or hash/simple JS router).
 - Cover the main user flows asked (list, detail, forms, empty states).
 - Still ONE HTML file. Prefer depth over decorative fluff.`
-      : `SCALE: Compact but complete single-page app. Only what was asked.`;
+      : `SCALE: One finished single-file product. Include every screen asked, with real sample content. Do not stop at a hero.`;
 
   return `You are Okapi (MMC SARL AI platform) HTML engine — engine=${engine}.
 Generate ONE complete web app as a single HTML file ONLY when asked.
@@ -72,12 +74,10 @@ Rules:
 3. Mobile-first. RDC context (WhatsApp / Mobile Money) when asked or clearly useful.
 4. Tailwind CDN: https://cdn.tailwindcss.com + inline JS if needed.
 5. Header with project name. Clean design, not generic purple.
-6. For photos/hero/product images use REAL URLs (max 4 images total):
-   https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
-   Never use empty src or fake local image paths.
+6. ${OKAPI_PRODUCT_DESIGN}
 7. On edit: return the FULL updated HTML, always closed with </html>.
 8. Never mention third-party AI vendors in the generated UI.
-9. Keep Flash pages compact enough to finish: hero + 1–2 sections + footer is enough unless asked for more.
+9. Finish the document. A website or app that cuts off mid-page is a failed generation.
 10. For interactive lists/forms prefer window.Okapi.list/create/update/remove (real Okapi cloud). Avoid localStorage demos when Okapi is available.
     Shape: list returns flat rows [{ id, name, price, ... }] — NEVER read row.data. On empty list show « Aucun élément — ajoute le premier ». Seed 0–2 demo rows via Okapi.create on first load if list is empty.
 ${scale}
@@ -131,8 +131,7 @@ Setup steps in the user's language. Call the database "base Okapi" — never nam
 
 Rules:
 1. HTML is mobile-first, Tailwind CDN, RDC-friendly (WhatsApp / Mobile Money when useful).
-2. For photos in HTML use:
-   https://image.pollinations.ai/prompt/URL_ENCODED_ENGLISH_DESCRIPTION?width=1200&height=800&nologo=true
+2. ${OKAPI_PRODUCT_DESIGN}
 3. Always include HTML + REACT + NEXT + SQL + API + README (all sections, even on edits).
 4. React/Next must be real runnable stubs aligned with the HTML product — not empty placeholders.
 5. SQL: enable RLS, sensible policies, multiple related tables when the product needs them.
@@ -270,7 +269,7 @@ ${message}`;
 }
 
 function preferProvider() {
-  return pickLlmProvider();
+  return pickWithClaude();
 }
 
 async function generateOnce(
@@ -357,7 +356,13 @@ async function generateWithFallback(
   }
 
   if (provider === "claude") {
-    throw new Error("provider_unavailable");
+    onStatus?.("Okapi génère…");
+    return claudeComplete({
+      system,
+      user: prompt,
+      maxTokens,
+      onChunk,
+    });
   }
 
   const key = process.env.GEMINI_API_KEY?.trim();
@@ -416,7 +421,7 @@ export async function POST(request: Request) {
   }
   const message: string = rawMessage;
 
-  if (!pickLlmProvider()) {
+  if (!pickWithClaude()) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
