@@ -17,7 +17,7 @@ type ChatMessage = {
 /** Route gratuite OpenRouter — utilisée si le modèle payant n’a pas de crédit. */
 const FREE_FALLBACK_MODEL = "openrouter/free";
 /** Pro par défaut (payant) — retombe sur FREE_FALLBACK_MODEL si 402. */
-const DEFAULT_PRO_MODEL = "openai/gpt-4o";
+const DEFAULT_PRO_MODEL = "anthropic/claude-opus-5.5";
 /** Flash par défaut : gratuit pour RDC sans crédit. */
 const DEFAULT_FLASH_MODEL = FREE_FALLBACK_MODEL;
 /** Fallback vision (doit supporter les images). */

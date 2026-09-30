@@ -115,12 +115,23 @@ type ChatBody = {
 
 type ImagePart = { mimeType: string; base64: string };
 
+/**
+ * Chat : la clé Anthropic (Vercel) prime.
+ * Studio / Preview restent sur OpenRouter via pickLlmProvider().
+ */
+function chatProvider() {
+  const forced = process.env.LLM_PROVIDER?.trim().toLowerCase();
+  const hasClaude = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+  if (hasClaude && forced !== "openai" && forced !== "gemini") return "claude" as const;
+  return pickLlmProvider();
+}
+
 export async function POST(request: Request) {
   // Images base64 compressées ~ < 2 Mo ; marge pour historique
   const tooBig = assertBodySize(request, 8_000_000);
   if (tooBig) return tooBig;
 
-  const provider = pickLlmProvider();
+  const provider = chatProvider();
   if (!provider) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
@@ -501,7 +512,7 @@ async function streamClaude(
   ];
 
   const stream = anthropic.messages.stream({
-    model: "claude-sonnet-4-20250514",
+    model: process.env.ANTHROPIC_MODEL?.trim() || "claude-opus-5-5",
     max_tokens: 4096,
     system,
     messages,
