@@ -1,5 +1,7 @@
 /** Vrais agents métier Okapi — prompts branchés sur Studio / generate. */
 
+import { OKAPI_MOBILE_MONEY_UX } from "@/lib/generate-quality";
+
 export type OkapiAgentId =
   | "general"
   | "restaurant"
@@ -25,7 +27,8 @@ export const OKAPI_AGENTS: readonly OkapiAgentDef[] = [
     sector: "Général",
     short: "Polyvalent",
     systemAddon: `AGENT: Okapi généraliste MMC SARL.
-- Produits clairs, mobile-first, RDC (WhatsApp / Mobile Money quand utile).
+- Produits clairs, mobile-first, RDC.
+- ${OKAPI_MOBILE_MONEY_UX}
 - Pas de jargon inutile. UI en français si l’utilisateur écrit en français.`,
   },
   {
@@ -35,10 +38,10 @@ export const OKAPI_AGENTS: readonly OkapiAgentDef[] = [
     short: "Menu & commandes",
     systemAddon: `AGENT MÉTIER: Restaurant (RDC).
 Product rules:
-- Menu avec catégories, prix CDF, photos plats (Pollinations).
+- Menu avec catégories, prix CDF, photos plats (picsum.photos).
 - Commande / panier / table ou à emporter.
-- WhatsApp pour confirmer la commande ; Mobile Money (Orange/Airtel/M-Pesa) au checkout.
-- Écrans: Accueil · Menu · Panier · Suivi commande · Contact.
+- ${OKAPI_MOBILE_MONEY_UX}
+- Écrans: Accueil · Menu · Panier · Paiement · Suivi commande · Contact.
 - SQL: dishes, categories, orders, order_items, tables (si salle).
 - API: window.Okapi.list/create('dishes'|'orders') — lignes plates {id,...} (jamais .data).
 - Ton: appétissant, rapide, mobile-first Kinshasa/Gombe.`,
@@ -51,8 +54,9 @@ Product rules:
     systemAddon: `AGENT MÉTIER: Boutique / e-commerce léger (RDC).
 Product rules:
 - Catalogue produits, stock, prix CDF, variantes simples.
-- Panier + checkout Mobile Money + bouton WhatsApp vendeur.
-- Écrans: Accueil · Catalogue · Fiche produit · Panier · Commandes.
+- Panier + checkout Mobile Money (pas WhatsApp sauf demande explicite).
+- ${OKAPI_MOBILE_MONEY_UX}
+- Écrans: Accueil · Catalogue · Fiche produit · Panier · Paiement · Commandes.
 - SQL: products, categories, stock_movements, customers, orders, order_items.
 - API: window.Okapi.list/create('products'|'orders') — lignes plates {id, name, price…}.
 - UX: confiance, clarté prix, pas de checkout carte bancaire obligatoire.`,
@@ -64,7 +68,7 @@ Product rules:
     short: "Patients & RDV",
     systemAddon: `AGENT MÉTIER: Clinique / cabinet (RDC).
 Product rules:
-- Patients, rendez-vous, file d’attente, contacts WhatsApp.
+- Patients, rendez-vous, file d’attente, contacts.
 - Respect vie privée — pas de données médicales sensibles inventées.
 - Écrans: Accueil · Patients · RDV · Agenda · Contact.
 - SQL: patients, appointments, staff (léger), RLS-friendly.
@@ -80,6 +84,7 @@ Product rules:
 Product rules:
 - Inscriptions, classes, notes, emploi du temps simple.
 - Paiement frais scolaires via Mobile Money + reçu.
+- ${OKAPI_MOBILE_MONEY_UX}
 - Écrans: Accueil · Inscription · Classes · Notes · Paiements.
 - SQL: students, classes, enrollments, grades, payments.
 - API: enroll, grades stubs, payment intent stub.
@@ -92,7 +97,7 @@ Product rules:
     short: "Clients & ventes",
     systemAddon: `AGENT MÉTIER: CRM / gestion clients (PME RDC).
 Product rules:
-- Clients, leads, pipeline, relances WhatsApp.
+- Clients, leads, pipeline, tâches de relance.
 - Écrans: Dashboard · Clients · Pipeline · Tâches · Stats simples.
 - SQL: clients, deals, activities, users.
 - API: clients CRUD, deal stage update.

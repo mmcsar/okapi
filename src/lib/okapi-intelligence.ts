@@ -92,7 +92,7 @@ export function coachNextStep(opts: {
   const offerStudio = opts.offerStudio !== false;
   if (!opts.hasHtml) {
     return offerStudio
-      ? `Prochaine étape: décris plus clairement ce que ${sector} doit faire (ex. « catalogue + panier WhatsApp »).`
+      ? `Prochaine étape: décris plus clairement ce que ${sector} doit faire (ex. « catalogue + panier Mobile Money »).`
       : `Prochaine étape: pose ta question ou demande un contenu (article, script, conseil métier).`;
   }
   if (!opts.loggedIn) {

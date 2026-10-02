@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useOkapiPublicBridge } from "@/hooks/use-okapi-public-bridge";
 import {
   OKAPI_PUBLIC_SANDBOX,
-  stripOkapiRuntime,
+  injectOkapiRuntime,
 } from "@/lib/okapi-runtime";
 
 type PublicProject = {
+  id: string;
   title: string;
   sector: string;
   html: string;
@@ -21,6 +23,8 @@ export default function PublicProjectPage() {
   const [project, setProject] = useState<PublicProject | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  useOkapiPublicBridge(iframeRef, slug);
 
   useEffect(() => {
     if (!slug) return;
@@ -54,10 +58,16 @@ export default function PublicProjectPage() {
     };
   }, [slug]);
 
-  const safeHtml = useMemo(
-    () => stripOkapiRuntime(project?.html || ""),
-    [project?.html],
-  );
+  const liveHtml = useMemo(() => {
+    if (!project?.html) return "";
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    // projectId truthy → bridge parent (données cloud publiques)
+    return injectOkapiRuntime(project.html, {
+      projectId: project.id || "public",
+      parentOrigin: origin,
+    });
+  }, [project?.html, project?.id]);
 
   if (loading) {
     return (
@@ -103,8 +113,9 @@ export default function PublicProjectPage() {
         </Link>
       </header>
       <iframe
+        ref={iframeRef}
         title={project.title}
-        srcDoc={safeHtml}
+        srcDoc={liveHtml}
         sandbox={OKAPI_PUBLIC_SANDBOX}
         referrerPolicy="no-referrer"
         className="min-h-0 w-full flex-1 bg-white"

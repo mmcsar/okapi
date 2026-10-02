@@ -48,6 +48,11 @@ import {
 } from "@/lib/project-artifacts";
 import { parseGenerateStreamLine } from "@/lib/generate-stream";
 import { stripOkapiRuntime } from "@/lib/okapi-runtime";
+import {
+  clearGuestDraft,
+  readGuestDraft,
+  writeGuestDraft,
+} from "@/lib/guest-draft";
 import { WorkspacePanel } from "@/components/workspace-panel";
 import {
   studioFileIdToArtifactKey,
@@ -271,6 +276,69 @@ export function HomeDashboard({
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  // Après connexion : remonter le brouillon invité vers le cloud
+  const guestRestoreRef = useRef(false);
+  useEffect(() => {
+    if (!user || guestRestoreRef.current) return;
+    const draft = readGuestDraft();
+    if (!draft) return;
+    guestRestoreRef.current = true;
+
+    void (async () => {
+      try {
+        setCloudStatus("Restauration brouillon…");
+        setPreviewHtml(draft.html || null);
+        setSector(draft.sector || "Général");
+        snapRef.current = {
+          ...snapRef.current,
+          title: draft.title || "Projet Okapi",
+          sector: draft.sector || "Général",
+          html: draft.html || "",
+          react: draft.artifacts.react ?? null,
+          reactNative: draft.artifacts.reactNative ?? null,
+          nextjs: draft.artifacts.nextjs ?? null,
+          packageJson: draft.artifacts.packageJson ?? null,
+          sql: draft.artifacts.sql ?? null,
+          api: draft.artifacts.api ?? null,
+          python: draft.artifacts.python ?? null,
+          requirements: draft.artifacts.requirements ?? null,
+          flutter: draft.artifacts.flutter ?? null,
+          pubspec: draft.artifacts.pubspec ?? null,
+          readme: draft.artifacts.readme ?? null,
+        };
+        const err = await persistProject({
+          title: draft.title || "Projet Okapi",
+          sector: draft.sector || "Général",
+          html: draft.html || "",
+          summary: draft.summary || "Brouillon invité restauré",
+          artifacts: draft.artifacts,
+        });
+        if (err) {
+          setCloudStatus("Brouillon local");
+          setStatus(err);
+          guestRestoreRef.current = false;
+          return;
+        }
+        clearGuestDraft();
+        setCloudStatus("Cloud · brouillon sauvé");
+        setStatus("Ton brouillon invité a été sauvegardé sur ton compte.");
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "✓ Brouillon récupéré après connexion — projet sauvé dans Mes projets.",
+          },
+        ]);
+        onNavigate?.("studio");
+      } catch {
+        guestRestoreRef.current = false;
+      }
+    })();
+    // persistProject est une fonction du composant ; on ne relance qu’au login
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   useEffect(() => {
     devModeRef.current = devMode;
@@ -616,10 +684,18 @@ export function HomeDashboard({
       return false;
     }
     if (!user) {
-      setCloudStatus("Invité · non sauvé");
+      const snap = snapRef.current;
+      writeGuestDraft({
+        title: snap.title || prompt || "Projet Okapi",
+        sector: snap.sector || sector,
+        html: snap.html || "",
+        summary: "Brouillon invité Okapi",
+        artifacts: artifactsFromSnap(snap),
+      });
+      setCloudStatus("Brouillon local");
       if (!opts?.silent) {
         setStatus(
-          "Tu peux générer sans compte. Connecte-toi pour sauvegarder en cloud.",
+          "Brouillon gardé sur cet appareil. Connecte-toi pour le pousser en cloud.",
         );
         onNavigate?.("login");
       }

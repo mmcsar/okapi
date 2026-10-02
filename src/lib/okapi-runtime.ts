@@ -32,6 +32,19 @@ export type OkapiPreviewApiResponse = {
   error?: string;
 };
 
+export type OkapiMemExportRequest = {
+  source: typeof OKAPI_MSG_SOURCE_HOST;
+  type: "okapi:mem:export";
+  id: string;
+};
+
+export type OkapiMemDumpResponse = {
+  source: typeof OKAPI_MSG_SOURCE_PREVIEW;
+  type: "okapi:mem:dump";
+  id: string;
+  mem: Record<string, Record<string, unknown>[]>;
+};
+
 /** Retire scripts runtime / tokens accidentels avant save ou partage public. */
 export function stripOkapiRuntime(html: string): string {
   if (!html) return html;
@@ -155,7 +168,20 @@ export function buildOkapiRuntimeScript(opts: {
 
   window.addEventListener("message", function(ev) {
     var data = ev.data;
-    if (!data || data.source !== ${JSON.stringify(OKAPI_MSG_SOURCE_HOST)} || data.type !== "okapi:api:result") return;
+    if (!data) return;
+    if (data.source === ${JSON.stringify(OKAPI_MSG_SOURCE_HOST)} && data.type === "okapi:mem:export") {
+      if (PARENT_ORIGIN && ev.origin !== PARENT_ORIGIN && ev.origin !== "null") return;
+      try {
+        window.parent.postMessage({
+          source: ${JSON.stringify(OKAPI_MSG_SOURCE_PREVIEW)},
+          type: "okapi:mem:dump",
+          id: data.id,
+          mem: mem
+        }, PARENT_ORIGIN || "*");
+      } catch (e) {}
+      return;
+    }
+    if (data.source !== ${JSON.stringify(OKAPI_MSG_SOURCE_HOST)} || data.type !== "okapi:api:result") return;
     if (PARENT_ORIGIN && ev.origin !== PARENT_ORIGIN && ev.origin !== "null") return;
     var slot = pending[data.id];
     if (!slot) return;
@@ -244,6 +270,59 @@ export function isOkapiPreviewApiRequest(
       d.op === "update" ||
       d.op === "remove")
   );
+}
+
+export function isOkapiMemDump(
+  data: unknown,
+): data is OkapiMemDumpResponse {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  return (
+    d.source === OKAPI_MSG_SOURCE_PREVIEW &&
+    d.type === "okapi:mem:dump" &&
+    typeof d.id === "string" &&
+    Boolean(d.mem) &&
+    typeof d.mem === "object"
+  );
+}
+
+/** Demande à l’iframe Preview d’exporter sa mémoire locale (avant passage cloud). */
+export function requestPreviewMemExport(
+  iframe: HTMLIFrameElement | null,
+  timeoutMs = 2500,
+): Promise<Record<string, Record<string, unknown>[]>> {
+  return new Promise((resolve) => {
+    if (!iframe?.contentWindow) {
+      resolve({});
+      return;
+    }
+    const id = `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    let done = false;
+    const finish = (mem: Record<string, Record<string, unknown>[]>) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("message", onMsg);
+      resolve(mem);
+    };
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.source !== iframe.contentWindow) return;
+      if (!isOkapiMemDump(ev.data) || ev.data.id !== id) return;
+      finish(ev.data.mem || {});
+    };
+    window.addEventListener("message", onMsg);
+    const msg: OkapiMemExportRequest = {
+      source: OKAPI_MSG_SOURCE_HOST,
+      type: "okapi:mem:export",
+      id,
+    };
+    try {
+      iframe.contentWindow.postMessage(msg, "*");
+    } catch {
+      finish({});
+      return;
+    }
+    window.setTimeout(() => finish({}), timeoutMs);
+  });
 }
 
 /** Indicateur chrome Studio : window.Okapi live ou pas. */

@@ -10,10 +10,12 @@ import {
   type StudioFileId,
 } from "@/lib/studio-files";
 import { wantsStudioScaffold } from "@/lib/fullstack";
+import { shouldClarifyBeforeScaffold } from "@/lib/studio-brief";
 import { useOkapiPreviewBridge } from "@/hooks/use-okapi-preview-bridge";
 import {
   OKAPI_PREVIEW_SANDBOX,
   injectOkapiRuntime,
+  requestPreviewMemExport,
   resolveOkapiCloudStatus,
   studioStackHints,
 } from "@/lib/okapi-runtime";
@@ -376,16 +378,13 @@ export function OkapiStudio({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const termEndRef = useRef<HTMLDivElement>(null);
   const serverTimersRef = useRef<number[]>([]);
-  const [aiMessages, setAiMessages] = useState<AiMsg[]>([
-    {
-      role: "assistant",
-      content:
-        "Mode Simple (type Lovable) : décris l’app → fichiers + Preview tout de suite. Mode Pro = diffs à Accepter. Stack : HTML · React · Next · Flutter · Python · SQL.",
-    },
-  ]);
+  const [aiMessages, setAiMessages] = useState<AiMsg[]>([]);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
   const seenContentRef = useRef<Set<StudioFileId>>(new Set());
   const lastSeedKeyRef = useRef(0);
+  const aiAbortRef = useRef<AbortController | null>(null);
+  const lastAiInstructionRef = useRef<string>("");
+  const [aiCanRetry, setAiCanRetry] = useState(false);
 
   const previewUrl = `okapi://preview/${previewSlug(title)}`;
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
@@ -437,15 +436,47 @@ export function OkapiStudio({
     prevHtmlLenRef.current = len;
   }, [html, previewOpen]);
 
-  // Quand le cloud ID arrive après Sauver, recharger la Preview (tableaux cloud).
+  // Quand le cloud ID arrive après Sauver : migrer mem locale → cloud, puis recharger Preview.
   const prevProjectIdRef = useRef(projectId);
   useEffect(() => {
     const prev = prevProjectIdRef.current;
     prevProjectIdRef.current = projectId;
-    if (projectId && projectId !== prev) {
-      setPreviewKey((k) => k + 1);
-    }
-  }, [projectId]);
+    if (!projectId || projectId === prev) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const mem = await requestPreviewMemExport(previewIframeRef.current);
+        if (cancelled || !accessToken) return;
+        const collections = Object.keys(mem || {});
+        for (const collection of collections) {
+          const rows = mem[collection] || [];
+          for (const row of rows) {
+            const data: Record<string, unknown> = { ...row };
+            delete data.id;
+            delete data.created_at;
+            delete data.updated_at;
+            await fetch(`/api/apps/${projectId}/records`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({ collection, data }),
+            }).catch(() => null);
+          }
+        }
+      } catch {
+        /* ignore — remount anyway */
+      } finally {
+        if (!cancelled) setPreviewKey((k) => k + 1);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, accessToken]);
 
   /** Desktop (≥lg) : explorer + terminal ouverts en Pro. Mobile : un panneau à la fois. */
   const isStudioDesktop = useCallback(() => {
@@ -624,13 +655,7 @@ export function OkapiStudio({
     setPendingList([]);
     setDirtyIds(new Set());
     if (!seedMessages?.length) {
-      setAiMessages([
-        {
-          role: "assistant",
-          content:
-            "Nouveau projet. Décris l’app — Okapi génère les fichiers ici.",
-        },
-      ]);
+      setAiMessages([]);
       return;
     }
     const brief = seedMessages.find((m) => m.role === "user")?.content || "";
@@ -1339,6 +1364,21 @@ export function OkapiStudio({
     logTerm("Preview actualisée", "info");
   }
 
+  function cancelStudioAi() {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    setAiBusy(false);
+    setAiProgress(null);
+    setAiLiveCode("");
+    setAiError(null);
+    setAiCanRetry(Boolean(lastAiInstructionRef.current));
+    setAiMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "Génération annulée." },
+    ]);
+    logTerm("Agent · génération annulée", "info");
+  }
+
   async function askStudioAi(
     e?: FormEvent,
     opts?: {
@@ -1350,6 +1390,12 @@ export function OkapiStudio({
     e?.preventDefault();
     const instruction = (opts?.instruction ?? aiPrompt).trim();
     if (!instruction || aiBusy) return;
+
+    aiAbortRef.current?.abort();
+    const abort = new AbortController();
+    aiAbortRef.current = abort;
+    lastAiInstructionRef.current = instruction;
+    setAiCanRetry(false);
 
     const target =
       files.find((f) => f.id === (opts?.fileId ?? activeId)) ?? active;
@@ -1403,9 +1449,69 @@ export function OkapiStudio({
 
     try {
       if (asProject) {
+        const hasExistingFiles = visibleFiles.some((f) => f.value.trim());
+        const needClarify = shouldClarifyBeforeScaffold(instruction, {
+          hasExistingFiles,
+          history: historyPayload
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => ({
+              role: m.role as "user" | "assistant",
+              content: m.content,
+            })),
+        });
+
+        if (needClarify) {
+          logTerm("Coach · clarification de l’idée…", "cmd");
+          setAiProgress({
+            message: "Okapi comprend ton idée…",
+            step: 1,
+            total: 2,
+          });
+          setAiLiveLabel("Brief · clarification");
+
+          const planRes = await fetch("/api/studio-plan", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(accessToken
+                ? { Authorization: `Bearer ${accessToken}` }
+                : {}),
+            },
+            body: JSON.stringify({
+              instruction,
+              engine: "pro",
+              agentId: activeAgent.id,
+              sector,
+              history: historyPayload,
+            }),
+            signal: abort.signal,
+          });
+
+          const planData = (await planRes.json().catch(() => null)) as {
+            ok?: boolean;
+            reply?: string;
+            error?: string;
+          } | null;
+
+          if (!planRes.ok || !planData?.reply) {
+            throw new Error(
+              planData?.error || "Impossible de clarifier le brief.",
+            );
+          }
+
+          setAiProgress(null);
+          setAiLiveCode("");
+          setAiMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: planData.reply! },
+          ]);
+          logTerm("Coach · questions posées — précise ou dis « crée »", "ok");
+          return;
+        }
+
         logTerm(`Coach · grand projet multi-fichiers…`, "cmd");
         setAiProgress({
-          message: "Okapi planifie le projet…",
+          message: "Okapi planifie une plateforme robuste…",
           step: 1,
           total: 4,
         });
@@ -1414,7 +1520,7 @@ export function OkapiStudio({
           {
             role: "assistant",
             content:
-              "Je construis le projet — le code défile ici en direct.",
+              "Brief compris — je construis une plateforme robuste. Le code défile ici en direct.",
           },
         ]);
 
@@ -1436,6 +1542,7 @@ export function OkapiStudio({
             history: historyPayload,
             stream: true,
           }),
+          signal: abort.signal,
         });
 
         if (!res.ok) {
@@ -1534,6 +1641,7 @@ export function OkapiStudio({
           history: historyPayload,
           stream: true,
         }),
+        signal: abort.signal,
       });
 
       if (!res.ok) {
@@ -1655,19 +1763,28 @@ export function OkapiStudio({
         "ok",
       );
     } catch (err) {
+      const aborted =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && /abort/i.test(err.message));
+      if (aborted) {
+        setAiCanRetry(Boolean(lastAiInstructionRef.current));
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Erreur IA Studio";
       setAiError(msg);
+      setAiCanRetry(Boolean(lastAiInstructionRef.current));
       setAiMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `${msg}\n\nAstuce: depuis Agent Accueil, colle le même brief — Preview plus rapide, puis Continuer dans Studio.`,
+          content: `${msg}\n\nTu peux Réessayer, ou préciser le brief.`,
         },
       ]);
       logTerm(`Erreur IA · ${msg}`, "err");
       setTerminalOpen(true);
       setTermTab("terminal");
     } finally {
+      if (aiAbortRef.current === abort) aiAbortRef.current = null;
       setAiBusy(false);
       setAiProgress(null);
       setAiLiveCode("");
@@ -2780,35 +2897,25 @@ export function OkapiStudio({
             </div>
 
             <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2.5 py-3">
-              {aiMessages.length <= 1 && !aiBusy && !pending ? (
+              {aiMessages.length === 0 && !aiBusy && !pending ? (
+                aiLane === "creer" ? null : (
                 <div className="space-y-4 px-0.5 pt-1">
                   <div>
                     <p className="font-[family-name:var(--font-syne)] text-[15px] font-bold tracking-tight text-[#eef6f1]">
-                      {aiLane === "creer" ? "Créer une app" : "Parler au code"}
+                      Parler au code
                     </p>
                     <p className="mt-1.5 text-[12px] leading-relaxed text-[#9bb0a4]">
-                      {aiLane === "creer"
-                        ? studioMode === "simple"
-                          ? "Décris ton idée — Okapi écrit les fichiers et ouvre la Preview."
-                          : "Décris le projet — tu revois chaque diff avant d’accepter."
-                        : studioMode === "simple"
-                          ? "Une modif, une question — appliquée tout de suite."
-                          : "Question ou correction — diffs à valider dans l’éditeur."}
+                      {studioMode === "simple"
+                        ? "Une modif, une question — appliquée tout de suite."
+                        : "Question ou correction — diffs à valider dans l’éditeur."}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {(aiLane === "creer"
-                      ? [
-                          "Boutique WhatsApp + Mobile Money",
-                          "Landing café Kinshasa",
-                          "Gestion stock boutique",
-                        ]
-                      : [
-                          "Rends le header plus clair",
-                          "Ajoute un bouton WhatsApp",
-                          "Explique ce fichier",
-                        ]
-                    ).map((chip) => (
+                    {[
+                      "Rends le header plus clair",
+                      "Ajoute un paiement Mobile Money",
+                      "Explique ce fichier",
+                    ].map((chip) => (
                       <button
                         key={chip}
                         type="button"
@@ -2824,6 +2931,7 @@ export function OkapiStudio({
                     ))}
                   </div>
                 </div>
+                )
               ) : (
                 aiMessages.map((m, i) => (
                   <div
@@ -2962,11 +3070,20 @@ export function OkapiStudio({
                         {aiProgress?.message || "Okapi répond…"}
                       </span>
                     </p>
-                    {aiProgress ? (
-                      <span className="shrink-0 font-mono text-[10px] text-[#8aa89a]">
-                        {aiProgress.step}/{aiProgress.total}
-                      </span>
-                    ) : null}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {aiProgress ? (
+                        <span className="font-mono text-[10px] text-[#8aa89a]">
+                          {aiProgress.step}/{aiProgress.total}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={cancelStudioAi}
+                        className="rounded border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#c8ddd2] hover:bg-white/5 hover:text-white"
+                      >
+                        Annuler
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[#0c1411]">
                     <div
@@ -3008,9 +3125,38 @@ export function OkapiStudio({
                 </div>
               ) : null}
               {aiError ? (
-                <p className="border-l-2 border-red-400/50 py-1 pl-2 text-[11px] text-red-300">
-                  {aiError}
-                </p>
+                <div className="flex flex-wrap items-center gap-2 border-l-2 border-red-400/50 py-1 pl-2">
+                  <p className="text-[11px] text-red-300">{aiError}</p>
+                  {aiCanRetry && lastAiInstructionRef.current ? (
+                    <button
+                      type="button"
+                      disabled={aiBusy}
+                      onClick={() => {
+                        const again = lastAiInstructionRef.current;
+                        if (!again) return;
+                        void askStudioAi(undefined, { instruction: again });
+                      }}
+                      className="rounded border border-[#e8892a]/40 px-2 py-0.5 text-[10px] font-semibold text-[#ffd7a8] hover:bg-[#e8892a]/15 disabled:opacity-40"
+                    >
+                      Réessayer
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {!aiBusy && !aiError && aiCanRetry && lastAiInstructionRef.current ? (
+                <div className="flex justify-end px-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const again = lastAiInstructionRef.current;
+                      if (!again) return;
+                      void askStudioAi(undefined, { instruction: again });
+                    }}
+                    className="rounded border border-white/10 px-2 py-0.5 text-[10px] font-semibold text-[#9bb0a4] hover:bg-white/5 hover:text-[#eef6f1]"
+                  >
+                    Réessayer la dernière demande
+                  </button>
+                </div>
               ) : null}
               <div ref={chatEndRef} />
             </div>
@@ -3399,8 +3545,7 @@ export function OkapiStudio({
               ))}
             </ul>
             <p className="border-t border-white/10 px-4 py-3 text-[11px] text-[#5f766a]">
-              Simple = Lovable · Pro = diffs · Pas de Git / Extensions — ZIP
-              depuis Preview · MMC SARL
+              Export ZIP depuis Preview · MMC SARL
             </p>
           </div>
         </div>

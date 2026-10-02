@@ -48,8 +48,15 @@ export async function GET(_request: Request, ctx: Ctx) {
 
     const row = data as OkapiProject;
     const project = {
-      ...row,
+      id: row.id,
+      title: row.title,
+      sector: row.sector,
+      summary: row.summary,
       html: stripOkapiRuntime(row.html || ""),
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      is_public: row.is_public,
+      share_slug: row.share_slug,
     };
 
     return NextResponse.json({

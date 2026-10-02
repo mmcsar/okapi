@@ -12,7 +12,10 @@ import { openRouterComplete } from "@/lib/openrouter";
 import { resolveEngine } from "@/lib/okapi-engine";
 import { wantsLargeProject } from "@/lib/fullstack";
 import { assertBodySize } from "@/lib/security";
-import { OKAPI_PRODUCT_DESIGN } from "@/lib/generate-quality";
+import {
+  OKAPI_MOBILE_MONEY_UX,
+  OKAPI_PRODUCT_DESIGN,
+} from "@/lib/generate-quality";
 import {
   assessStudioProjectFiles,
   buildStudioProjectRepairPrompt,
@@ -157,7 +160,7 @@ function buildSystem(large: boolean, engine: string, agentBlock: string) {
     ? `SCALE — PROJET MÉTIER COMPLET mais COMPACT (engine=flash):
 - Priorité: app.html utilisable en Preview (3–5 écrans max), Tailwind CDN, mobile-first RDC.
 - Inclure aussi: App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md — versions courtes mais cohérentes.
-- WhatsApp + Mobile Money + prix CDF quand c’est une boutique / vente.
+- Mobile Money + prix CDF quand c’est une boutique / vente (voir barème paiement).
 - window.Okapi.list/create pour listes/formulaires.
 - PAS de Flutter / Python / React Native sauf demande explicite.
 - Garde chaque fichier raisonnablement court pour finir le JSON sans coupure.`
@@ -171,7 +174,7 @@ function buildSystem(large: boolean, engine: string, agentBlock: string) {
 - README.md: architecture + how to run Preview Okapi AND local Next/Flutter/Python.
 - When Flutter is useful: ALWAYS include both main.dart AND pubspec.yaml — real screens (Material), not hello-world.
 - When Python backend is useful: ALWAYS include main.py AND requirements.txt — usable FastAPI/Flask skeleton.
-- Think end-to-end: list → detail → form → empty states → WhatsApp / Mobile Money hooks when useful.
+- Think end-to-end: list → detail → form → empty states → Mobile Money CDF/USSD when useful.
 - Stay on the supported stack (HTML/React/Next/Flutter/Python/SQL) — never invent Java/C#/Go project files.`
       : `SCALE — projet standard:
 - Complete, lean product: solid HTML + React + SQL + API + README + package.json.
@@ -187,18 +190,23 @@ STACK LOCK (non-negotiable):
 - If the user asks Java, C#, Go, PHP, Ruby, Rust, Kotlin (hors Flutter), Swift, etc.: do NOT invent fake Studio files for that language. In "note", say honestly in French that Okapi livre HTML · React · Next · Flutter · Python · SQL — for that language you can explain later in Chat, but this Créer run should ship the closest supported equivalent (usually HTML Preview + React/Next). Never claim Preview runs Java/C#.
 - Preview live = app.html only. React/Next/Flutter/Python = edit + ZIP export.
 
-QUALITY (projets robustes — non-négociable):
-- Ship a REAL product skeleton, not a demo wireframe. Depth > breadth of languages.
-- app.html: production-feel SPA — clear nav, ≥2–3 real screens (large: ≥4–6), CDF/WhatsApp/Mobile Money when relevant.
-- States: empty + loading + error (toast or banner) + success feedback on create/update.
-- Forms: basic validation (required fields, phone/email when relevant) before Okapi.create.
-- Data: window.Okapi.list/create/update/remove with try/catch; never silent failures; seed 1–2 rows if empty.
-- schema.sql: real tables matching UI collections, PK/FK or clear relations, indexes, RLS comments/policies — not a single toy table.
-- api.ts: CRUD stubs aligned with schema + HTML collections (same names).
-- App.tsx + app/page.tsx: mirror the same modules (typed props, components) — not hello-world stubs.
-- Flutter when included: real screens in main.dart + valid pubspec.yaml.
-- package.json: valid JSON with name + scripts dev/build + deps.
-- README: how to test Preview Okapi + run Next/Flutter/Python locally.
+QUALITY (plateformes robustes — non-négociable):
+- Tu livres une VRAIE plateforme métier, pas une démo fil-de-fer. Profondeur > liste de langages.
+- Avant d’écrire le JSON: mentalement fige public, rôles, modules, données — le brief a déjà été clarifié.
+- app.html: SPA production — nav claire, ≥2–3 écrans réels (large: ≥4–6), CDF + Mobile Money si vente.
+- ${OKAPI_MOBILE_MONEY_UX}
+- Parcours métier bout-en-bout: liste → détail → formulaire → succès ; au moins un CRUD complet (créer / lire / modifier ou supprimer).
+- States: empty + loading + error (toast ou bandeau) + feedback succès sur create/update.
+- Forms: validation (champs requis, téléphone/email si pertinent) avant Okapi.create.
+- Data: window.Okapi.list/create/update/remove avec try/catch ; jamais d’échec silencieux ; seed 1–2 lignes si vide.
+- Cohérence noms: mêmes collections HTML ↔ schema.sql ↔ api.ts ↔ React/Next.
+- schema.sql: tables réelles liées (PK/FK ou relations claires), indexes, commentaires RLS — pas une table jouet.
+- api.ts: stubs CRUD alignés schéma + collections HTML.
+- App.tsx + app/page.tsx: mêmes modules (props typées, composants) — pas de hello-world.
+- Flutter inclus: vrais écrans main.dart + pubspec.yaml valide.
+- package.json: JSON valide name + scripts dev/build + deps.
+- README: comment tester Preview Okapi + Next/Flutter/Python en local.
+- Robustesse UI: nav qui change vraiment de vue, ids cohérents, pas d’onclick cassés, mobile-first RDC.
 - Prefer depth on the supported stack over inventing unsupported languages.
 
 If WORKSPACE CONTEXT already has files, extend / replace coherently — do not ignore existing product names or data shapes unless asked.
@@ -308,16 +316,17 @@ async function runStudioProject(opts: {
   const total = 4;
   const delta = onDelta ? makeDeltaBatcher(onDelta) : null;
 
-  const user = `Build a COMPLETE Okapi Studio project from this brief.
-Aim for coach-level quality: coherent modules, real UI, SQL + API aligned with the product.
+  const user = `Build a COMPLETE, ROBUST Okapi Studio platform from this clarified brief.
+Think like a tech lead for an RDC SME: coherent modules, real UI, SQL + API aligned, end-to-end CRUD path.
+Do NOT ship a thin demo. Prefer a solid product skeleton the user can Accept and run in Preview.
 Active métier agent: ${agentLabel}
 
-BRIEF:
+BRIEF (already discussed / ready to build):
 -----
 ${instruction}
 -----
 ${hintTitle ? `Suggested title: ${hintTitle}` : ""}
-Mode: ${large ? "GRAND PROJET" : "projet standard"} · engine=${engine}
+Mode: ${large ? "GRAND PROJET / PLATEFORME" : "plateforme standard"} · engine=${engine}
 
 AGENT HISTORY (recent):
 ${formatStudioHistory(history)}
