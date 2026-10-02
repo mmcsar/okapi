@@ -26,6 +26,24 @@ function rawMessage(err: unknown) {
 }
 
 /**
+ * Certains modèles collent un verdict de filtre après le texte utile.
+ * On ne montre jamais ces lignes.
+ */
+export function stripModelSafetyFooter(text: string) {
+  return text
+    .replace(
+      /[ \t]*(?:User|Response|Assistant)\s+Safety\s*:\s*[A-Za-z]+[ \t]*/gi,
+      "",
+    )
+    .replace(
+      /[ \t]*(?:User|Response|Assistant)\s+Safety\s*:?\s*$/i,
+      "",
+    )
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
  * Messages visibles par l’utilisateur final.
  * Ne jamais citer OpenAI, Gemini, clés API, Vercel, etc.
  */

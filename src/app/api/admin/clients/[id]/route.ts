@@ -4,6 +4,7 @@ import {
   rowToClient,
   type AdminClientRow,
 } from "@/lib/admin-clients-map";
+import { assertBodySize, assertSameOrigin } from "@/lib/security";
 import {
   getSupabaseAdmin,
   isSupabaseAdminConfigured,
@@ -15,8 +16,14 @@ export const runtime = "nodejs";
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, ctx: Ctx) {
+  const badOrigin = assertSameOrigin(request);
+  if (badOrigin) return badOrigin;
+
   const auth = await requireAdmin();
   if ("error" in auth) return auth.error;
+
+  const tooBig = assertBodySize(request, 64_000);
+  if (tooBig) return tooBig;
 
   if (!isSupabaseAdminConfigured()) {
     return NextResponse.json(
@@ -92,7 +99,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_request: Request, ctx: Ctx) {
+export async function DELETE(request: Request, ctx: Ctx) {
+  const badOrigin = assertSameOrigin(request);
+  if (badOrigin) return badOrigin;
+
   const auth = await requireAdmin();
   if ("error" in auth) return auth.error;
 

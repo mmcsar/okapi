@@ -5,6 +5,7 @@ import {
   rowToClient,
   type AdminClientRow,
 } from "@/lib/admin-clients-map";
+import { assertBodySize, assertSameOrigin } from "@/lib/security";
 import {
   getSupabaseAdmin,
   isSupabaseAdminConfigured,
@@ -59,8 +60,14 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const badOrigin = assertSameOrigin(request);
+  if (badOrigin) return badOrigin;
+
   const auth = await requireAdmin();
   if ("error" in auth) return auth.error;
+
+  const tooBig = assertBodySize(request, 64_000);
+  if (tooBig) return tooBig;
 
   if (!isSupabaseAdminConfigured()) {
     return missingSetup(

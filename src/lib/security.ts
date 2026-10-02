@@ -107,6 +107,30 @@ export function clientIpFromRequest(request: Request) {
   );
 }
 
+/**
+ * Bloque les appels cross-site vers les routes mutantes (cookie admin).
+ * Autorise same-origin et les appels sans Origin (curl / webhook serveur).
+ */
+export function assertSameOrigin(request: Request): NextResponse | null {
+  const origin = request.headers.get("origin");
+  if (!origin) return null;
+
+  let expected: string | null = null;
+  try {
+    expected = new URL(request.url).origin;
+  } catch {
+    return null;
+  }
+
+  if (origin !== expected) {
+    return NextResponse.json(
+      { error: "Origine non autorisée." },
+      { status: 403 },
+    );
+  }
+  return null;
+}
+
 /** Reject oversized JSON bodies early (bytes estimate from Content-Length). */
 export function assertBodySize(
   request: Request,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
-import { assertBodySize } from "@/lib/security";
+import { assertBodySize, assertSameOrigin } from "@/lib/security";
 import {
   getSupabaseAdmin,
   isSupabaseAdminConfigured,
@@ -10,6 +10,9 @@ export const runtime = "nodejs";
 
 /** Valider ou refuser une identité utilisateur (MMC). */
 export async function PATCH(request: Request) {
+  const badOrigin = assertSameOrigin(request);
+  if (badOrigin) return badOrigin;
+
   const gate = await requireAdmin();
   if ("error" in gate) return gate.error;
 

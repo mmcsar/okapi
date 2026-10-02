@@ -2,32 +2,53 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   ADMIN_SESSION_MAX_AGE_SEC,
+  adminCodeLooksStrong,
   aesConfigured,
   createAdminSessionToken,
   safeEqualString,
   verifyAdminSessionToken,
 } from "@/lib/crypto-aes";
-import { ADMIN_COOKIE } from "@/lib/admin-auth";
-import { assertBodySize, checkRateLimit, clientIpFromRequest } from "@/lib/security";
+import { ADMIN_COOKIE, ADMIN_COOKIE_LEGACY } from "@/lib/admin-auth";
+import {
+  assertBodySize,
+  assertSameOrigin,
+  checkRateLimit,
+  clientIpFromRequest,
+  isProduction,
+} from "@/lib/security";
 
 export const runtime = "nodejs";
 
 function sessionCookieOptions(maxAge: number) {
+  const secure = isProduction();
   return {
     httpOnly: true,
     sameSite: "strict" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge,
   };
+}
+
+function clearAdminCookies(res: NextResponse) {
+  const opts = sessionCookieOptions(0);
+  res.cookies.set(ADMIN_COOKIE, "", opts);
+  // Toujours nettoyer l’ancien nom (migration __Host-)
+  res.cookies.set(ADMIN_COOKIE_LEGACY, "", {
+    ...opts,
+    secure: isProduction(),
+  });
 }
 
 export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 8_000);
   if (tooBig) return tooBig;
 
+  const badOrigin = assertSameOrigin(request);
+  if (badOrigin) return badOrigin;
+
   const ip = clientIpFromRequest(request);
-  const hit = checkRateLimit(`admin-login:${ip}`, 8, 15 * 60_000);
+  const hit = checkRateLimit(`admin-login:${ip}`, 5, 15 * 60_000);
   if (!hit.ok) {
     return NextResponse.json(
       {
@@ -53,17 +74,35 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!aesConfigured()) {
+  if (!adminCodeLooksStrong(expected)) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Chiffrement AES non configuré (OKAPI_AES_KEY).",
+        error: "Code admin trop court (12 caractères minimum).",
       },
       { status: 500 },
     );
   }
 
-  if (!provided || !safeEqualString(provided, expected)) {
+  if (!aesConfigured()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Chiffrement AES non configuré. Pose OKAPI_AES_KEY (ou OKAPI_SESSION_SECRET) — distinct du code admin.",
+      },
+      { status: 500 },
+    );
+  }
+
+  const match =
+    Boolean(provided) &&
+    provided.length === expected.length &&
+    safeEqualString(provided, expected);
+
+  if (!match) {
+    // Frein uniforme anti timing / brute-force
+    await new Promise((r) => setTimeout(r, 400 + Math.floor(Math.random() * 200)));
     return NextResponse.json(
       { ok: false, error: "Code incorrect." },
       { status: 401 },
@@ -80,7 +119,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const res = NextResponse.json({ ok: true, encrypted: true, algo: "AES-256-GCM" });
+  const res = NextResponse.json({ ok: true });
+  clearAdminCookies(res);
   res.cookies.set(
     ADMIN_COOKIE,
     token,
@@ -91,16 +131,16 @@ export async function POST(request: Request) {
 
 export async function DELETE() {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(ADMIN_COOKIE, "", sessionCookieOptions(0));
+  clearAdminCookies(res);
   return res;
 }
 
 export async function GET() {
   const jar = await cookies();
-  const token = jar.get(ADMIN_COOKIE)?.value;
+  const token =
+    jar.get(ADMIN_COOKIE)?.value || jar.get(ADMIN_COOKIE_LEGACY)?.value;
   const session = verifyAdminSessionToken(token);
   return NextResponse.json({
     ok: Boolean(session),
-    encrypted: Boolean(session),
   });
 }

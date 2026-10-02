@@ -1,4 +1,4 @@
-import { friendlyLlmError } from "@/lib/llm-errors";
+import { friendlyLlmError, stripModelSafetyFooter } from "@/lib/llm-errors";
 import type { OkapiEngine } from "@/lib/okapi-engine";
 
 type ChatMessage = {
@@ -272,6 +272,7 @@ export async function openRouterComplete(opts: {
     if (text && opts.onChunk) opts.onChunk(text);
   }
 
+  text = stripModelSafetyFooter(text);
   if (!text) throw new Error("Okapi a renvoyé une réponse vide.");
   return text;
 }

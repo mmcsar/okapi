@@ -54,14 +54,27 @@ function hashFor(id: NavId) {
 
 function HomeApp() {
   const { user, displayName, signOut, ready } = useAuth();
-  const [activeNav, setActiveNav] = useState<NavId>("home");
+  const [activeNav, setActiveNav] = useState<NavId>(() =>
+    typeof window !== "undefined" ? parseHash() : "home",
+  );
   const [resetKey, setResetKey] = useState(0);
   const [studioKick, setStudioKick] = useState(0);
   const [openProject, setOpenProject] = useState<OkapiProject | null>(null);
-  const [openInStudio, setOpenInStudio] = useState(false);
+  const [openInStudio, setOpenInStudio] = useState(
+    () => typeof window !== "undefined" && parseHash() === "studio",
+  );
 
   useEffect(() => {
-    const apply = () => setActiveNav(parseHash());
+    const apply = () => {
+      const nav = parseHash();
+      setActiveNav(nav);
+      if (nav === "studio") {
+        setOpenInStudio(true);
+        setStudioKick((k) => k + 1);
+      } else {
+        setOpenInStudio(false);
+      }
+    };
     apply();
     window.addEventListener("hashchange", apply);
     return () => window.removeEventListener("hashchange", apply);

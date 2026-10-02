@@ -363,7 +363,7 @@ export function OkapiStudio({
     step: number;
     total: number;
   } | null>(null);
-  /** Code en train d’être écrit — visible dans l’Agent (comme Cursor). */
+  /** Code en train d’être écrit — visible dans l’Agent en direct. */
   const [aiLiveCode, setAiLiveCode] = useState("");
   const [aiLiveLabel, setAiLiveLabel] = useState("Code");
   const liveCodeEndRef = useRef<HTMLPreElement>(null);
@@ -1414,7 +1414,7 @@ export function OkapiStudio({
           {
             role: "assistant",
             content:
-              "Je construis le projet — le code défile ici en direct (comme Cursor).",
+              "Je construis le projet — le code défile ici en direct.",
           },
         ]);
 
@@ -1976,9 +1976,6 @@ export function OkapiStudio({
   const pendingFile = pending
     ? files.find((f) => f.id === pending.fileId)
     : null;
-  const pendingDelta = pending
-    ? countLines(pending.after) - countLines(pending.before)
-    : 0;
   const pendingStats = pending
     ? diffStats(pending.before, pending.after)
     : { added: 0, removed: 0 };
@@ -2069,26 +2066,25 @@ export function OkapiStudio({
             type="button"
             title={
               studioMode === "simple"
-                ? "Mode Simple (Lovable) → passer en Pro"
-                : "Mode Pro → revenir en Simple"
+                ? "Mode Simple — Preview + Agent. Cliquer pour Pro (fichiers, diffs)."
+                : "Mode Pro — Explorateur & diffs. Cliquer pour Simple."
             }
             onClick={() =>
               setStudioModeAndLayout(studioMode === "simple" ? "pro" : "simple")
             }
-            className={`mt-0 flex h-7 items-center justify-center rounded px-1 text-[8px] font-bold uppercase tracking-wider transition lg:mt-1 lg:w-full ${
+            className={`ml-auto mt-0 flex h-8 min-w-[2.25rem] flex-col items-center justify-center rounded-md px-1 transition lg:ml-0 lg:mt-auto lg:mb-1 lg:w-[calc(100%-4px)] lg:self-center ${
               studioMode === "pro"
-                ? "bg-[#e8892a]/20 text-[#ffd7a8]"
-                : "text-[#5f766a] hover:bg-white/5 hover:text-[#d5e4db]"
+                ? "bg-[#e8892a]/25 text-[#ffd7a8] ring-1 ring-[#e8892a]/40"
+                : "bg-[#1b4f3a]/35 text-[#9fd4b5] ring-1 ring-[#3d8f68]/35"
             }`}
           >
-            {studioMode === "simple" ? "Sim" : "Pro"}
+            <span className="text-[8px] font-bold uppercase leading-none tracking-wide">
+              {studioMode === "simple" ? "Sim" : "Pro"}
+            </span>
+            <span className="mt-0.5 hidden text-[6px] font-medium uppercase leading-none opacity-70 lg:block">
+              {studioMode === "simple" ? "facile" : "expert"}
+            </span>
           </button>
-          <div
-            className="ml-auto hidden px-1 text-center text-[7px] font-bold uppercase leading-tight tracking-wider text-[#5f766a] lg:ml-0 lg:mt-auto lg:block lg:pb-1"
-            title="Okapi Studio — pas de Git / Extensions VS Code (ZIP via barre Preview)"
-          >
-            OK
-          </div>
         </div>
 
         {/* Explorer — overlay mobile, rail fixe desktop */}
@@ -2259,59 +2255,32 @@ export function OkapiStudio({
                     +
                   </button>
                 </div>
-                {hasPendingHere ? (
-                  <div className="flex items-center gap-1.5 border-l border-white/10 px-2">
-                    {!splitDiff ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setDiffView("before")}
-                          className={`rounded px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide ${
-                            diffView === "before"
-                              ? "bg-white/12 text-white"
-                              : "text-[#7d9588] hover:text-white"
-                          }`}
-                        >
-                          Original
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDiffView("after")}
-                          className={`rounded px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide ${
-                            diffView === "after"
-                              ? "bg-[#e8892a]/25 text-[#ffd7a8]"
-                              : "text-[#7d9588] hover:text-white"
-                          }`}
-                        >
-                          Proposé
-                        </button>
-                      </>
-                    ) : null}
+                {hasPendingHere && !splitDiff ? (
+                  <div className="flex items-center gap-0.5 border-l border-white/10 px-1.5">
                     <button
                       type="button"
-                      onClick={acceptPending}
-                      className="rounded bg-[#2f6b4f] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#3a7d5c]"
+                      onClick={() => setDiffView("before")}
+                      className={`rounded px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide ${
+                        diffView === "before"
+                          ? "bg-white/12 text-white"
+                          : "text-[#7d9588] hover:text-white"
+                      }`}
                     >
-                      Accepter
+                      Avant
                     </button>
-                    {pendingList.length > 1 ? (
-                      <button
-                        type="button"
-                        onClick={acceptAllPending}
-                        className="rounded bg-[#e8892a] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#d67a1f]"
-                      >
-                        Tout ({pendingList.length})
-                      </button>
-                    ) : null}
                     <button
                       type="button"
-                      onClick={rejectPending}
-                      className="rounded border border-white/15 px-2.5 py-1 text-[11px] font-semibold text-[#c8ddd2] hover:bg-white/5"
+                      onClick={() => setDiffView("after")}
+                      className={`rounded px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide ${
+                        diffView === "after"
+                          ? "bg-[#e8892a]/25 text-[#ffd7a8]"
+                          : "text-[#7d9588] hover:text-white"
+                      }`}
                     >
-                      Refuser
+                      Après
                     </button>
                   </div>
-                ) : (
+                ) : !hasPendingHere ? (
                   <button
                     type="button"
                     onClick={() => setQuickOpen(true)}
@@ -2322,14 +2291,14 @@ export function OkapiStudio({
                       Ctrl+P
                     </span>
                   </button>
-                )}
+                ) : null}
               </div>
 
               {hasPendingHere && pending ? (
-                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e8892a]/30 bg-[#121c18] px-3 py-2">
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#e8892a]/35 bg-gradient-to-r from-[#1a1510] via-[#121c18] to-[#0f1a15] px-3 py-2">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="rounded bg-[#e8892a]/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
-                      Review
+                    <span className="rounded bg-[#e8892a]/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
+                      À valider
                     </span>
                     <span className="truncate font-mono text-[12px] text-[#eef6f1]">
                       {active.label}
@@ -2340,20 +2309,44 @@ export function OkapiStudio({
                     <span className="font-mono text-[11px] text-red-300/90">
                       −{pendingStats.removed}
                     </span>
-                    {pendingDelta !== 0 ? (
+                    {pendingList.length > 1 ? (
                       <span className="text-[10px] text-[#7d9588]">
-                        ({pendingDelta > 0 ? "+" : ""}
-                        {pendingDelta} lignes)
+                        {pendingList.length} fichiers
                       </span>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSplitDiff((v) => !v)}
-                    className="shrink-0 rounded border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold text-[#c8ddd2] hover:border-[#e8892a]/40 hover:text-[#ffd7a8]"
-                  >
-                    {splitDiff ? "Vue unique" : "Côte à côte"}
-                  </button>
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSplitDiff((v) => !v)}
+                      className="rounded border border-white/12 bg-white/[0.04] px-2 py-1 text-[10px] font-semibold text-[#c8ddd2] hover:border-[#e8892a]/40 hover:text-[#ffd7a8]"
+                    >
+                      {splitDiff ? "Vue unique" : "Comparer"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={acceptPending}
+                      className="rounded-md bg-[#2f6b4f] px-3 py-1.5 text-[11px] font-bold text-white shadow-sm shadow-black/20 hover:bg-[#3a7d5c]"
+                    >
+                      Accepter
+                    </button>
+                    {pendingList.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={acceptAllPending}
+                        className="rounded-md bg-[#e8892a] px-2.5 py-1.5 text-[11px] font-bold text-[#1a1008] hover:bg-[#f0a04a]"
+                      >
+                        Tout ({pendingList.length})
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={rejectPending}
+                      className="rounded-md border border-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-[#c8ddd2] hover:bg-white/5"
+                    >
+                      Refuser
+                    </button>
+                  </div>
                 </div>
               ) : null}
 
@@ -2361,14 +2354,14 @@ export function OkapiStudio({
                 {!editorValue.trim() && !hasPendingHere ? (
                   <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6">
                     <div className="max-w-sm text-center">
-                      <p className="text-[13px] font-medium text-[#5f766a]/80">
+                      <p className="font-[family-name:var(--font-syne)] text-[15px] font-semibold text-[#7d9588]">
                         {visibleFiles.length === 0
-                          ? "En attente d’un projet"
+                          ? "Ton Studio est prêt"
                           : "Fichier vide"}
                       </p>
-                      <p className="mt-1 text-[11px] leading-snug text-[#5f766a]/55">
+                      <p className="mt-2 text-[12px] leading-relaxed text-[#5f766a]">
                         {visibleFiles.length === 0
-                          ? "Ctrl+L · demande à l’Agent"
+                          ? "Écris à droite dans Créer — ou Ctrl+L pour ouvrir l’Agent."
                           : active.emptyHint}
                       </p>
                     </div>
@@ -2718,7 +2711,11 @@ export function OkapiStudio({
 
         {/* Agent Okapi — rail droit (intention Trae : Créer | Chat) */}
         {aiOpen ? (
-          <aside className="okapi-studio-panel flex max-h-[min(48vh,360px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:w-[min(36%,360px)] lg:border-l lg:border-t-0">
+          <aside className={`okapi-studio-panel flex max-h-[min(52vh,420px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:border-l lg:border-t-0 ${
+            studioMode === "simple"
+              ? "lg:w-[min(42%,400px)]"
+              : "lg:w-[min(36%,360px)]"
+          }`}>
             <div className="flex h-8 items-center justify-between gap-2 border-b border-white/10 px-1.5">
               <div className="flex min-w-0 items-center gap-0.5">
                 {(
@@ -2756,9 +2753,20 @@ export function OkapiStudio({
                   </select>
                 ) : null}
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <span className="rounded border border-[#e8892a]/30 bg-[#e8892a]/10 px-1.5 py-px font-mono text-[8px] uppercase text-[#ffd7a8]">
-                  Pro
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span
+                  className={`rounded px-1.5 py-px text-[8px] font-bold uppercase tracking-wide ${
+                    studioMode === "pro"
+                      ? "border border-[#e8892a]/35 bg-[#e8892a]/15 text-[#ffd7a8]"
+                      : "border border-[#3d8f68]/35 bg-[#1b4f3a]/30 text-[#9fd4b5]"
+                  }`}
+                  title={
+                    studioMode === "simple"
+                      ? "Simple : applique direct + Preview"
+                      : "Pro : tu valides les diffs"
+                  }
+                >
+                  {studioMode === "simple" ? "Simple" : "Pro"}
                 </span>
                 <button
                   type="button"
@@ -2773,32 +2781,47 @@ export function OkapiStudio({
 
             <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2.5 py-3">
               {aiMessages.length <= 1 && !aiBusy && !pending ? (
-                <div className="space-y-3 px-0.5">
+                <div className="space-y-4 px-0.5 pt-1">
                   <div>
-                    <p className="text-[13px] font-semibold text-[#eef6f1]">
-                      {aiLane === "creer"
-                        ? "Okapi · mode Créer"
-                        : "Okapi · mode Chat"}
+                    <p className="font-[family-name:var(--font-syne)] text-[15px] font-bold tracking-tight text-[#eef6f1]">
+                      {aiLane === "creer" ? "Créer une app" : "Parler au code"}
                     </p>
                     <p className="mt-1.5 text-[12px] leading-relaxed text-[#9bb0a4]">
                       {aiLane === "creer"
                         ? studioMode === "simple"
-                          ? "Décris une app — Okapi applique les fichiers et ouvre la Preview HTML (sans Accepter)."
-                          : "Stack : HTML · React · Next · Flutter · Python · SQL. Mode Pro : diffs à Accepter / Voir l’app."
+                          ? "Décris ton idée — Okapi écrit les fichiers et ouvre la Preview."
+                          : "Décris le projet — tu revois chaque diff avant d’accepter."
                         : studioMode === "simple"
-                          ? "Demande une modif — appliquée tout de suite. Passe en Pro pour revoir les diffs."
-                          : "Pose une question sur le code, ou une correction — diffs à Accepter."}
+                          ? "Une modif, une question — appliquée tout de suite."
+                          : "Question ou correction — diffs à valider dans l’éditeur."}
                     </p>
                   </div>
-                  <div className="rounded-lg border border-[#e8892a]/25 bg-[#e8892a]/8 px-3 py-2.5">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#ffd7a8]">
-                      Astuce
-                    </p>
-                    <p className="mt-1 text-[11px] leading-snug text-[#c9b896]">
-                      {aiLane === "creer"
-                        ? "Ex. « boutique : catalogue, panier, WhatsApp, Mobile Money CDF ». Puis « rends le header vert »."
-                        : "Joins un logo / maquette depuis Accueil Agent si tu veux un visuel."}
-                    </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(aiLane === "creer"
+                      ? [
+                          "Boutique WhatsApp + Mobile Money",
+                          "Landing café Kinshasa",
+                          "Gestion stock boutique",
+                        ]
+                      : [
+                          "Rends le header plus clair",
+                          "Ajoute un bouton WhatsApp",
+                          "Explique ce fichier",
+                        ]
+                    ).map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        disabled={aiBusy}
+                        onClick={() => {
+                          setAiPrompt(chip);
+                          window.setTimeout(() => aiInputRef.current?.focus(), 40);
+                        }}
+                        className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-[#c8ddd2] transition hover:border-[#e8892a]/40 hover:bg-[#e8892a]/10 hover:text-[#ffd7a8] disabled:opacity-50"
+                      >
+                        {chip}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ) : (
@@ -2826,11 +2849,11 @@ export function OkapiStudio({
               )}
 
               {pending && pendingFile ? (
-                <div className="overflow-hidden rounded border border-[#e8892a]/35 bg-[#121a16]">
-                  <div className="flex items-center justify-between gap-2 border-b border-[#e8892a]/25 bg-[#e8892a]/10 px-2 py-1">
+                <div className="overflow-hidden rounded-xl border border-[#e8892a]/35 bg-[#121a16]">
+                  <div className="flex items-center justify-between gap-2 border-b border-[#e8892a]/25 bg-[#e8892a]/10 px-2.5 py-1.5">
                     <div className="min-w-0">
                       <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-[#ffd7a8]">
-                        Review
+                        Proposition
                         {pendingList.length > 1
                           ? ` · ${pendingList.length}`
                           : ""}
@@ -2900,37 +2923,28 @@ export function OkapiStudio({
                         ))}
                       </pre>
                     ) : null}
-                    <div className="mt-2 flex flex-wrap gap-1">
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       <button
                         type="button"
                         onClick={() => {
                           if (pending.fileId !== active.id) openFile(pending.fileId);
                           setSplitDiff(true);
                         }}
-                        className="rounded border border-white/12 px-2 py-1 text-[10px] font-semibold text-[#c8ddd2] hover:bg-white/5"
+                        className="rounded-md bg-[#e8892a]/20 px-2.5 py-1 text-[10px] font-bold text-[#ffd7a8] ring-1 ring-[#e8892a]/35 hover:bg-[#e8892a]/30"
                       >
-                        Voir
+                        Voir le diff
                       </button>
                       <button
                         type="button"
                         onClick={acceptPending}
-                        className="rounded bg-[#2f6b4f] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#3a7d5c]"
+                        className="rounded-md border border-[#3d8f68]/40 px-2.5 py-1 text-[10px] font-semibold text-[#9fd4b5] hover:bg-[#1b4f3a]/40"
                       >
                         Accepter
                       </button>
-                      {pendingList.length > 1 ? (
-                        <button
-                          type="button"
-                          onClick={acceptAllPending}
-                          className="rounded bg-[#e8892a] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#d67a1f]"
-                        >
-                          Tout ({pendingList.length})
-                        </button>
-                      ) : null}
                       <button
                         type="button"
                         onClick={rejectPending}
-                        className="rounded border border-white/12 px-2.5 py-1 text-[10px] font-semibold text-[#d5e4db] hover:bg-white/5"
+                        className="rounded-md border border-white/10 px-2.5 py-1 text-[10px] font-semibold text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
                       >
                         Refuser
                       </button>
@@ -3008,7 +3022,7 @@ export function OkapiStudio({
                   aiLane === "chat" ? { forceEdit: true } : undefined,
                 )
               }
-              className="border-t border-white/10 p-2.5"
+              className="border-t border-white/10 bg-[#0a1410]/60 p-3"
             >
               <textarea
                 ref={aiInputRef}
@@ -3023,32 +3037,29 @@ export function OkapiStudio({
                     );
                   }
                 }}
-                rows={3}
+                rows={studioMode === "simple" ? 4 : 3}
                 disabled={aiBusy}
                 placeholder={
                   pendingList.length
-                    ? "Accepte / Refuse, ou nouvelle demande…"
+                    ? "Valide le diff à gauche, ou nouvelle demande…"
                     : aiLane === "creer"
-                      ? "Ex. Crée une boutique : catalogue, panier, WhatsApp, Mobile Money…"
+                      ? "Ex. Boutique : catalogue, panier, WhatsApp, Mobile Money CDF…"
                       : "Ex. Explique ce fichier · corrige le formulaire · ajoute un bouton…"
                 }
-                className="w-full resize-none rounded-lg border border-white/10 bg-[#06100c]/80 px-3 py-2.5 text-[13px] leading-relaxed text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#e8892a]/50 disabled:opacity-50"
+                className="w-full resize-none rounded-xl border border-white/10 bg-[#06100c] px-3.5 py-3 text-[13px] leading-relaxed text-[#eef6f1] outline-none placeholder:text-[#5f766a] focus:border-[#e8892a]/55 focus:ring-1 focus:ring-[#e8892a]/25 disabled:opacity-50"
               />
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2.5 flex items-center gap-2">
                 <span className="hidden text-[10px] text-[#5f766a] sm:inline">
-                  {aiLane === "creer" ? "Contexte projet" : "Fichier actif"}
+                  Entrée · envoyer · Maj+Entrée · ligne
                 </span>
                 <button
                   type="submit"
                   disabled={aiBusy || !aiPrompt.trim()}
-                  className="ml-auto rounded-lg bg-[#e8892a] px-3.5 py-2 text-[12px] font-bold text-[#1a1008] transition hover:bg-[#f0a04a] disabled:opacity-45"
+                  className="ml-auto rounded-xl bg-[#e8892a] px-4 py-2 text-[12px] font-bold text-[#1a1008] shadow-sm shadow-black/25 transition hover:bg-[#f0a04a] disabled:opacity-45"
                 >
                   {aiBusy ? "…" : aiLane === "creer" ? "Créer" : "Envoyer"}
                 </button>
               </div>
-              <p className="mt-1.5 text-[10px] leading-snug text-[#5f766a]">
-                Okapi peut se tromper — vérifie avant prod.
-              </p>
             </form>
           </aside>
         ) : (
@@ -3073,16 +3084,18 @@ export function OkapiStudio({
       {/* Status bar — pleine largeur workbench */}
       <div className="flex h-5 shrink-0 items-center justify-between gap-3 border-t border-white/10 bg-[#0a1410] px-2 text-[10px] text-[#8aa89a]">
         <div className="flex min-w-0 items-center gap-2.5 overflow-x-auto">
-          <span className="shrink-0 font-semibold text-[#c8ddd2]">Okapi</span>
+          <span className="shrink-0 font-semibold text-[#c8ddd2]">Okapi Studio</span>
           <button
             type="button"
             onClick={() => openTerminal("problems")}
             className={`shrink-0 rounded px-0.5 font-semibold hover:bg-white/10 hover:text-[#eef6f1] ${
               problemsBadge > 0 ? "text-[#ffd7a8]" : ""
             }`}
-            title="Problems"
+            title="Problèmes"
           >
-            {problemsBadge > 0 ? `${problemsBadge} problem${problemsBadge > 1 ? "s" : ""}` : "Problems"}
+            {problemsBadge > 0
+              ? `${problemsBadge} problème${problemsBadge > 1 ? "s" : ""}`
+              : "Problèmes"}
           </button>
           <span className="shrink-0">Ln {lineCount}</span>
           <span className="shrink-0 uppercase">{active.language}</span>

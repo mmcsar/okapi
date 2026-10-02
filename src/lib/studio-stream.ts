@@ -12,7 +12,7 @@ export type StudioStreamStatus = {
   repairing?: boolean;
 };
 
-/** Live token / text chunk — Agent shows code evolving (Cursor-like). */
+/** Live token / text chunk — Agent shows code evolving. */
 export type StudioStreamDelta = {
   type: "delta";
   text: string;

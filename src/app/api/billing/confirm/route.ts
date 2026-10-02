@@ -12,7 +12,8 @@ export const runtime = "nodejs";
 
 /**
  * Confirme un paiement Mobile Money (admin MMC ou webhook PSP).
- * Auth : session admin cookie · OU header x-okapi-billing-secret · OU body.adminCode
+ * Auth : session admin cookie · OU header x-okapi-billing-secret.
+ * Le code admin dans le body n’est plus accepté (sauf OKAPI_ALLOW_BODY_ADMIN_CODE=1).
  */
 export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 32_000);
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
   const secret = process.env.OKAPI_BILLING_WEBHOOK_SECRET?.trim() || "";
   const headerSecret =
     request.headers.get("x-okapi-billing-secret")?.trim() || "";
+  const allowBodyCode = process.env.OKAPI_ALLOW_BODY_ADMIN_CODE === "1";
   const adminCode = process.env.OKAPI_ADMIN_CODE?.trim() || "";
   const bodyAdmin = body?.adminCode?.trim() || "";
 
@@ -34,7 +36,10 @@ export async function POST(request: Request) {
     secret && headerSecret && safeEqualString(headerSecret, secret),
   );
   const okAdmin = Boolean(
-    adminCode && bodyAdmin && safeEqualString(bodyAdmin, adminCode),
+    allowBodyCode &&
+      adminCode &&
+      bodyAdmin &&
+      safeEqualString(bodyAdmin, adminCode),
   );
   const session = await requireAdmin();
   const okSession = !("error" in session);

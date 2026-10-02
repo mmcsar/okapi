@@ -6,30 +6,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { AdminClientsDashboard } from "@/components/admin-clients-dashboard";
 import { AdminExecutiveDashboard } from "@/components/admin-executive-dashboard";
 import { AdminOpsDashboard } from "@/components/admin-ops-dashboard";
-import { GeminiStatus } from "@/components/gemini-status";
-import { HeygenStatus } from "@/components/heygen-status";
-import { SupabaseStatus } from "@/components/supabase-status";
-
-const stats = [
-  { label: "Utilisateurs app", value: "248", hint: "+18 cette semaine" },
-  { label: "Projets générés", value: "1 024", hint: "87 aujourd’hui" },
-  { label: "Agents actifs", value: "1", hint: "agent unique Okapi" },
-  { label: "Erreurs API", value: "3", hint: "24 h" },
-] as const;
-
-const users = [
-  { name: "Amina K.", city: "Kinshasa", plan: "Pro", projects: 6 },
-  { name: "Patrick M.", city: "Lubumbashi", plan: "Gratuit", projects: 2 },
-  { name: "Grace L.", city: "Goma", plan: "Pro", projects: 11 },
-  { name: "David T.", city: "Kinshasa", plan: "Business", projects: 19 },
-] as const;
-
-const systemRows = [
-  { name: "App publique /", status: "OK" },
-  { name: "Base Okapi", status: "OK" },
-  { name: "Moteur IA", status: "Config" },
-  { name: "PWA", status: "OK" },
-] as const;
+import { AdminSystemDashboard } from "@/components/admin-system-dashboard";
 
 type AdminTab = "ops" | "clients" | "executive" | "system";
 
@@ -214,136 +191,12 @@ export default function AdminPage() {
           ) : tab === "executive" ? (
             <AdminExecutiveDashboard />
           ) : (
-            <>
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-okapi-amber-deep">
-                Technique · secret
-              </p>
-              <h2 className="font-[family-name:var(--font-syne)] text-2xl font-bold">
-                Architecture & APIs
-              </h2>
-              <p className="mb-5 mt-1 text-sm text-okapi-ink/55">
-                Invisible pour les utilisateurs. Clés uniquement dans Vercel /
-                `.env.local` — jamais dans l’app publique.
-              </p>
-
-              <section className="mb-5 rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
-                <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
-                  Connexions API
-                </h3>
-                <p className="mt-1 text-sm text-okapi-ink/45">
-                  Provider actif côté serveur :{" "}
-                  <code className="text-okapi-forest">LLM_PROVIDER</code> (env)
-                </p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <SupabaseStatus />
-                  <GeminiStatus />
-                  <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-4 py-3 text-left">
-                    <p className="text-sm font-semibold">OpenAI</p>
-                    <p className="mt-1 text-xs text-okapi-ink/45">
-                      Variables :{" "}
-                      <code className="text-okapi-forest">OPENAI_API_KEY</code>,{" "}
-                      <code className="text-okapi-forest">LLM_PROVIDER</code>
-                    </p>
-                    <p className="mt-2 text-xs font-medium text-okapi-forest">
-                      Recommandé en RDC
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-4 py-3 text-left">
-                    <p className="text-sm font-semibold">Claude</p>
-                    <p className="mt-1 text-xs text-okapi-ink/45">
-                      Variable :{" "}
-                      <code className="text-okapi-forest">ANTHROPIC_API_KEY</code>
-                    </p>
-                    <p className="mt-2 text-xs font-medium text-okapi-ink/45">
-                      Optionnel (fallback)
-                    </p>
-                  </div>
-                  <HeygenStatus />
-                  <div className="rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-4 py-3 text-left">
-                    <p className="text-sm font-semibold">Clé service base</p>
-                    <p className="mt-1 text-xs text-okapi-ink/45">
-                      Variable serveur pour le CRM admin
-                    </p>
-                    <p className="mt-2 text-xs font-medium text-okapi-ink/45">
-                      CRM onglet Clients
-                    </p>
-                  </div>
-                </div>
-              </section>
-
-              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {stats.map((stat) => (
-                  <article
-                    key={stat.label}
-                    className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/75 p-5"
-                  >
-                    <p className="text-xs uppercase tracking-[0.12em] text-okapi-ink/40">
-                      {stat.label}
-                    </p>
-                    <p className="mt-2 font-[family-name:var(--font-syne)] text-3xl font-bold">
-                      {stat.value}
-                    </p>
-                    <p className="mt-1 text-xs text-okapi-ink/45">{stat.hint}</p>
-                  </article>
-                ))}
-              </section>
-
-              <section className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_1fr]">
-                <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
-                  <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
-                    Utilisateurs app récents
-                  </h2>
-                  <ul className="mt-4 space-y-2">
-                    {users.map((user) => (
-                      <li
-                        key={user.name}
-                        className="flex items-center justify-between rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/50 px-4 py-3"
-                      >
-                        <div>
-                          <p className="text-sm font-semibold">{user.name}</p>
-                          <p className="text-xs text-okapi-ink/45">
-                            {user.city} · {user.projects} projets
-                          </p>
-                        </div>
-                        <span className="rounded-full bg-okapi-forest/10 px-2.5 py-1 text-[10px] font-semibold uppercase text-okapi-forest">
-                          {user.plan}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/75 p-5">
-                  <h2 className="font-[family-name:var(--font-syne)] text-lg font-bold">
-                    Stack
-                  </h2>
-                  <ul className="mt-3 space-y-2">
-                    {systemRows.map((row) => (
-                      <li
-                        key={row.name}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span className="text-okapi-ink/65">{row.name}</span>
-                        <span
-                          className={
-                            row.status === "OK"
-                              ? "font-medium text-okapi-forest"
-                              : "font-medium text-okapi-amber-deep"
-                          }
-                        >
-                          {row.status}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </section>
-            </>
+            <AdminSystemDashboard />
           )}
 
           <p className="mt-6 text-[11px] text-okapi-ink/40">
-            Accès protégé par `OKAPI_ADMIN_CODE`. Invisible dans le menu
-            utilisateur.
+            Accès protégé par `OKAPI_ADMIN_CODE` (≥ 12 car.) + session AES
+            (`OKAPI_AES_KEY`). Invisible dans le menu utilisateur.
           </p>
         </div>
       </div>

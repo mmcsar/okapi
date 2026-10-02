@@ -11,7 +11,6 @@ function masterKeyBytes(): Buffer {
   const raw =
     process.env.OKAPI_AES_KEY?.trim() ||
     process.env.OKAPI_SESSION_SECRET?.trim() ||
-    process.env.OKAPI_ADMIN_CODE?.trim() ||
     "";
 
   if (!raw) {
@@ -28,8 +27,7 @@ function masterKeyBytes(): Buffer {
 export function aesConfigured() {
   return Boolean(
     process.env.OKAPI_AES_KEY?.trim() ||
-      process.env.OKAPI_SESSION_SECRET?.trim() ||
-      process.env.OKAPI_ADMIN_CODE?.trim(),
+      process.env.OKAPI_SESSION_SECRET?.trim(),
   );
 }
 
@@ -109,10 +107,12 @@ export type AdminSessionPayload = {
   role: "admin";
   iat: number;
   exp: number;
-  v: 1;
+  /** Nonce unique — empêche la réutilisation d’un blob figé. */
+  jti: string;
+  v: 2;
 };
 
-const ADMIN_SESSION_HOURS = 12;
+const ADMIN_SESSION_HOURS = 8;
 
 export function createAdminSessionToken(
   maxAgeHours = ADMIN_SESSION_HOURS,
@@ -122,7 +122,8 @@ export function createAdminSessionToken(
     role: "admin",
     iat: now,
     exp: now + Math.floor(maxAgeHours * 3600),
-    v: 1,
+    jti: randomBytes(16).toString("hex"),
+    v: 2,
   };
   return aes256Encrypt(JSON.stringify(payload));
 }
@@ -136,9 +137,11 @@ export function verifyAdminSessionToken(
   try {
     const raw = aes256Decrypt(token.trim());
     const data = JSON.parse(raw) as AdminSessionPayload;
-    if (data?.role !== "admin" || data?.v !== 1) return null;
+    if (data?.role !== "admin" || (data?.v !== 2 && data?.v !== 1)) return null;
+    if (data.v === 2 && (!data.jti || data.jti.length < 16)) return null;
     const now = Math.floor(Date.now() / 1000);
     if (!data.exp || data.exp < now) return null;
+    if (!data.iat || data.iat > now + 60) return null;
     return data;
   } catch {
     return null;
@@ -146,3 +149,8 @@ export function verifyAdminSessionToken(
 }
 
 export const ADMIN_SESSION_MAX_AGE_SEC = ADMIN_SESSION_HOURS * 3600;
+
+/** Code admin : longueur mini pour freiner le brute-force. */
+export function adminCodeLooksStrong(code: string) {
+  return code.trim().length >= 12;
+}

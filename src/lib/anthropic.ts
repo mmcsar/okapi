@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { stripModelSafetyFooter } from "@/lib/llm-errors";
 
 export function anthropicConfigured() {
   return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
@@ -35,8 +36,9 @@ export async function claudeComplete(opts: {
       .map((block) => block.text)
       .join("")
       .trim();
-    if (!text) throw new Error("empty_response");
-    return text;
+    const clean = stripModelSafetyFooter(text);
+    if (!clean) throw new Error("empty_response");
+    return clean;
   }
 
   const stream = anthropic.messages.stream(params);
@@ -50,7 +52,7 @@ export async function claudeComplete(opts: {
       opts.onChunk(event.delta.text);
     }
   }
-  const text = assembled.trim();
+  const text = stripModelSafetyFooter(assembled);
   if (!text) throw new Error("empty_response");
   return text;
 }

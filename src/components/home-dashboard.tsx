@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
+import { stripModelSafetyFooter } from "@/lib/llm-errors";
 import { UserMenu } from "@/components/user-menu";
 import { useOkapiAudio } from "@/hooks/use-okapi-audio";
 import {
@@ -1152,13 +1153,13 @@ export function HomeDashboard({
           } else if (!(answer && answer.endsWith(chunk))) {
             answer += chunk;
           }
-          setAssistant(answer || "…");
+          setAssistant(stripModelSafetyFooter(answer) || "…");
         }
 
-        if (!answer.trim()) {
+        if (!stripModelSafetyFooter(answer)) {
           throw new Error("Réponse vide.");
         }
-        let finalAnswer = answer.trim();
+        let finalAnswer = stripModelSafetyFooter(answer);
         // Coupe une éventuelle double copie collée bout à bout
         const half = Math.floor(finalAnswer.length / 2);
         if (

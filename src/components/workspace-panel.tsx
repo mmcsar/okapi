@@ -278,9 +278,9 @@ export function WorkspacePanel({
       }`}
     >
       {studioBleed ? (
-        <div className="okapi-studio-chrome flex h-8 shrink-0 items-center justify-between gap-1 border-b px-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-            <span className="mr-1 hidden max-w-[120px] shrink-0 truncate font-mono text-[10px] font-medium text-[#c8ddd2] sm:inline">
+        <div className="okapi-studio-chrome flex h-9 shrink-0 items-center justify-between gap-2 border-b px-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            <span className="mr-1.5 hidden max-w-[140px] shrink-0 truncate font-[family-name:var(--font-syne)] text-[12px] font-semibold text-[#eef6f1] sm:inline">
               {title || "Okapi Studio"}
             </span>
             {(
@@ -296,9 +296,9 @@ export function WorkspacePanel({
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
-                className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition ${
+                className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition ${
                   tab === id
-                    ? "bg-white/10 text-[#eef6f1]"
+                    ? "bg-white/12 text-[#eef6f1]"
                     : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
                 }`}
               >
@@ -306,12 +306,12 @@ export function WorkspacePanel({
               </button>
             ))}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1.5">
             {onNewProject ? (
               <button
                 type="button"
                 onClick={onNewProject}
-                className="hidden rounded px-2 py-0.5 text-[10px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1] sm:inline"
+                className="hidden rounded-md px-2 py-1 text-[11px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1] sm:inline"
                 title="Effacer les fichiers et démarrer un projet vide"
               >
                 Nouveau
@@ -319,17 +319,17 @@ export function WorkspacePanel({
             ) : null}
             {!accessToken ? (
               <span
-                className="hidden max-w-[160px] truncate text-[9px] text-[#9bb0a4] sm:inline"
+                className="hidden max-w-[140px] truncate text-[10px] text-[#7d9588] sm:inline"
                 title="Génération et Preview locale sans compte. Connexion pour sauver."
               >
-                Invité · essai libre
+                Invité
               </span>
             ) : null}
             {onSaveCloud ? (
               <button
                 type="button"
                 onClick={() => void onSaveCloud()}
-                className="rounded bg-[#e8892a] px-2 py-0.5 text-[10px] font-bold text-[#1a1208] hover:bg-[#f0a04a]"
+                className="rounded-md border border-[#e8892a]/45 bg-[#e8892a]/15 px-2.5 py-1 text-[11px] font-bold text-[#ffd7a8] transition hover:bg-[#e8892a]/25"
                 title={
                   accessToken
                     ? "Sauvegarder le projet sur ton compte (Ctrl+S)"
@@ -340,7 +340,7 @@ export function WorkspacePanel({
               </button>
             ) : null}
             {cloudStatus ? (
-              <span className="hidden max-w-[80px] truncate text-[9px] text-[#7d9588] sm:inline">
+              <span className="hidden max-w-[88px] truncate text-[10px] text-[#7d9588] sm:inline">
                 {cloudStatus}
               </span>
             ) : null}
@@ -348,7 +348,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 onClick={onLeaveStudio}
-                className="rounded px-2 py-0.5 text-[10px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1]"
+                className="rounded-md px-2 py-1 text-[11px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1]"
                 title="Retour Agent Accueil"
               >
                 ← Agent

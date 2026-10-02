@@ -16,21 +16,25 @@ export function middleware(request: NextRequest) {
   // Rate limit APIs (anti brute-force / scrape / vol)
   if (pathname.startsWith("/api/")) {
     const ip = clientIpFromRequest(request);
+    const isAdminApi = pathname.startsWith("/api/admin");
     const isLlm =
       pathname.startsWith("/api/chat") ||
       pathname.startsWith("/api/generate") ||
       pathname.startsWith("/api/studio-edit") ||
       pathname.startsWith("/api/studio-project");
     const isAuthHeavy =
-      pathname.startsWith("/api/admin") ||
       pathname.startsWith("/api/projects") ||
       pathname.startsWith("/api/billing") ||
       pathname.startsWith("/api/kyc") ||
       pathname.startsWith("/api/apps");
 
-    const limit = isLlm ? 40 : isAuthHeavy ? 120 : 200;
+    const limit = isAdminApi ? 40 : isLlm ? 40 : isAuthHeavy ? 120 : 200;
     const windowMs = 60_000;
-    const hit = checkRateLimit(`mw:${ip}:${isLlm ? "llm" : "api"}`, limit, windowMs);
+    const hit = checkRateLimit(
+      `mw:${ip}:${isAdminApi ? "admin" : isLlm ? "llm" : "api"}`,
+      limit,
+      windowMs,
+    );
     if (!hit.ok) {
       const res = NextResponse.json(
         {
