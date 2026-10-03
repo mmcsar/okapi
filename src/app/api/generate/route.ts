@@ -8,6 +8,10 @@ import {
 import { claudeComplete } from "@/lib/anthropic";
 import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
+  resolveEngineForPlan,
+  resolveLlmAccess,
+} from "@/lib/llm-access";
+import {
   checkAndConsumeQuota,
   quotaExceededResponse,
   quotaKeyFromRequest,
@@ -35,7 +39,7 @@ import {
   encodeGenerateStreamEvent,
   type GenerateStreamEvent,
 } from "@/lib/generate-stream";
-import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
+import type { OkapiEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
 import {
   agentSystemBlock,
@@ -425,9 +429,11 @@ export async function POST(request: Request) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
+  const access = await resolveLlmAccess(request);
   const quota = checkAndConsumeQuota(
     quotaKeyFromRequest(request),
     "generate",
+    { paid: access.paid },
   );
   if (!quota.ok) return quotaExceededResponse(quota);
 
@@ -449,7 +455,7 @@ export async function POST(request: Request) {
             : "html";
   }
 
-  const engine = resolveEngine(body?.engine);
+  const engine = resolveEngineForPlan(body?.engine, access.paid);
   const large = wantsLargeProject(message);
   // Grands projets → fullstack même sans mot "supabase"
   if (!debug && large && mode === "html" && body?.mode !== "html") {

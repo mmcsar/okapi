@@ -1,3 +1,4 @@
+import { resolveLlmAccess } from "@/lib/llm-access";
 import {
   checkAndConsumeQuota,
   quotaExceededResponse,
@@ -92,7 +93,10 @@ export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 50_000);
   if (tooBig) return tooBig;
 
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat");
+  const access = await resolveLlmAccess(request);
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat", {
+    paid: access.paid,
+  });
   if (!quota.ok) return quotaExceededResponse(quota);
 
   const body = (await request.json().catch(() => null)) as Body | null;

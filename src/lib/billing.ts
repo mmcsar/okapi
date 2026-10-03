@@ -52,9 +52,9 @@ export const OKAPI_PLANS: OkapiPlan[] = [
     priceCdf: 0,
     periodDays: 0,
     features: [
-      "Chat & génération de base",
+      "Okapi Flash (rapide)",
       "Preview + Studio",
-      "Limite quotidienne standard",
+      "Limite gratuite : 20 chat + 6 créations / jour",
     ],
   },
   {

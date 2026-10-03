@@ -2,13 +2,17 @@ import { friendlyLlmError } from "@/lib/llm-errors";
 import { claudeComplete } from "@/lib/anthropic";
 import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
+  resolveEngineForPlan,
+  resolveLlmAccess,
+} from "@/lib/llm-access";
+import {
   checkAndConsumeQuota,
   quotaExceededResponse,
   quotaKeyFromRequest,
 } from "@/lib/llm-quota";
+import type { OkapiEngine } from "@/lib/okapi-engine";
 import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
-import { resolveEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
 import {
   formatStudioHistory,
@@ -152,7 +156,7 @@ ${multiBias ? "- This request likely needs MULTI FILE (format B)." : ""}
 async function complete(opts: {
   system: string;
   user: string;
-  engine: ReturnType<typeof resolveEngine>;
+  engine: OkapiEngine;
   maxTokens: number;
   onChunk?: (text: string) => void;
 }) {
@@ -237,7 +241,10 @@ export async function POST(request: Request) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat");
+  const access = await resolveLlmAccess(request);
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat", {
+    paid: access.paid,
+  });
   if (!quota.ok) return quotaExceededResponse(quota);
 
   const body = (await request.json().catch(() => null)) as Body | null;
@@ -260,7 +267,7 @@ export async function POST(request: Request) {
   const fileLabel = body?.fileLabel?.trim() || fileId;
   const language = body?.language?.trim() || "plaintext";
   const content = (body?.content ?? "").slice(0, 400_000);
-  const engine = resolveEngine(body?.engine ?? "pro");
+  const engine = resolveEngineForPlan(body?.engine ?? "pro", access.paid);
   const workspace = sanitizeStudioWorkspace(body?.workspace);
   const history = sanitizeStudioHistory(body?.history);
   const multiBias = prefersMultiFile(instruction);

@@ -19,8 +19,8 @@ export const OKAPI_ENGINES: {
   {
     id: "pro",
     label: "Okapi Pro",
-    hint: "Niveau ChatGPT / Claude — questions, conseils, faits",
-    badge: "Conseiller",
+    hint: "Modèle avancé — réservé aux abonnés Entreprise Plus",
+    badge: "Plus",
   },
 ];
 

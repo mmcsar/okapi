@@ -4,6 +4,10 @@ import { languageInstruction } from "@/lib/i18n";
 import { friendlyLlmError, isLocationBlocked } from "@/lib/llm-errors";
 import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
+  resolveEngineForPlan,
+  resolveLlmAccess,
+} from "@/lib/llm-access";
+import {
   checkAndConsumeQuota,
   quotaExceededResponse,
   quotaKeyFromRequest,
@@ -13,7 +17,7 @@ import {
   openRouterConfigured,
   streamOpenRouterChat,
 } from "@/lib/openrouter";
-import { resolveEngine, type OkapiEngine } from "@/lib/okapi-engine";
+import type { OkapiEngine } from "@/lib/okapi-engine";
 import { normalizeImageMime } from "@/lib/image";
 import { assertBodySize } from "@/lib/security";
 import type { OkapiAgentLane } from "@/lib/intent";
@@ -125,7 +129,10 @@ export async function POST(request: Request) {
     return Response.json({ error: missingLlmMessage() }, { status: 500 });
   }
 
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat");
+  const access = await resolveLlmAccess(request);
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat", {
+    paid: access.paid,
+  });
   if (!quota.ok) return quotaExceededResponse(quota);
 
   const body = (await request.json().catch(() => null)) as ChatBody | null;
@@ -156,9 +163,11 @@ export async function POST(request: Request) {
   const language = body?.language?.trim() || "auto";
   const lane: OkapiAgentLane =
     body?.lane === "creer" ? "creer" : "conseil";
-  // Conseiller = niveau Claude/GPT → Pro. Flash free invente trop.
-  const engine =
-    lane === "conseil" ? "pro" : resolveEngine(body?.engine);
+  // Conseiller → Pro si payant. Gratuit / invité = Flash seulement (budget Opus).
+  const engine = resolveEngineForPlan(
+    lane === "conseil" ? "pro" : body?.engine,
+    access.paid,
+  );
   const liveFact = wantsLiveCurrentFact(message);
   let verifiedDirect: string | null = null;
   if (liveFact) {

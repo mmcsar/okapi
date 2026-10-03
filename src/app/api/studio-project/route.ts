@@ -2,14 +2,18 @@ import { friendlyLlmError } from "@/lib/llm-errors";
 import { claudeComplete } from "@/lib/anthropic";
 import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
+  resolveEngineForPlan,
+  resolveLlmAccess,
+} from "@/lib/llm-access";
+import {
   checkAndConsumeQuota,
   quotaExceededResponse,
   quotaKeyFromRequest,
   releaseGenerateSlot,
 } from "@/lib/llm-quota";
+import type { OkapiEngine } from "@/lib/okapi-engine";
 import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
-import { resolveEngine } from "@/lib/okapi-engine";
 import { wantsLargeProject } from "@/lib/fullstack";
 import { assertBodySize } from "@/lib/security";
 import {
@@ -89,7 +93,7 @@ function extractJsonObject(raw: string): Record<string, unknown> | null {
 async function complete(opts: {
   system: string;
   user: string;
-  engine: ReturnType<typeof resolveEngine>;
+  engine: OkapiEngine;
   maxTokens: number;
   onChunk?: (text: string) => void;
 }) {
@@ -284,7 +288,7 @@ type ProjectResult = {
 
 async function runStudioProject(opts: {
   instruction: string;
-  engine: ReturnType<typeof resolveEngine>;
+  engine: OkapiEngine;
   large: boolean;
   hintTitle?: string;
   agentBlock: string;
@@ -487,10 +491,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Instruction trop longue." }, { status: 400 });
   }
 
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate");
+  const access = await resolveLlmAccess(request);
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate", {
+    paid: access.paid,
+  });
   if (!quota.ok) return quotaExceededResponse(quota);
 
-  const engine = resolveEngine(body?.engine ?? "pro");
+  const engine = resolveEngineForPlan(body?.engine ?? "pro", access.paid);
   const large = wantsLargeProject(instruction) || engine === "pro";
   const hintTitle = body?.title?.trim();
   const workspace = sanitizeStudioWorkspace(body?.workspace);

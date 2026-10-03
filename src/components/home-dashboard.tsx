@@ -134,6 +134,8 @@ export function HomeDashboard({
   const [devMode, setDevMode] = useState(false);
   const [engine, setEngine] = useState<OkapiEngine>("flash");
   const [engineOpen, setEngineOpen] = useState(false);
+  /** Abonnement actif → Pro autorisé. Invité / free → Flash seulement. */
+  const [paidAccess, setPaidAccess] = useState(false);
   /** conseil = savoir/contenu (pas Studio) · creer = apps + handoff Studio */
   const [agentLane, setAgentLane] = useState<OkapiAgentLane>("conseil");
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -272,6 +274,40 @@ export function HomeDashboard({
     setEngine(getStoredEngine());
     setAgentLane(getStoredAgentLane());
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setPaidAccess(false);
+      setEngine("flash");
+      setStoredEngine("flash");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authFetch("/api/billing/me");
+        const data = (await res.json().catch(() => null)) as {
+          subscription?: { active?: boolean };
+        } | null;
+        if (cancelled) return;
+        const paid = Boolean(data?.subscription?.active);
+        setPaidAccess(paid);
+        if (!paid) {
+          setEngine("flash");
+          setStoredEngine("flash");
+        }
+      } catch {
+        if (!cancelled) {
+          setPaidAccess(false);
+          setEngine("flash");
+          setStoredEngine("flash");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, authFetch]);
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -2056,6 +2092,7 @@ export function HomeDashboard({
                 >
                   {OKAPI_ENGINES.map((item) => {
                     const active = engine === item.id;
+                    const locked = item.id === "pro" && !paidAccess;
                     return (
                       <button
                         key={item.id}
@@ -2063,6 +2100,14 @@ export function HomeDashboard({
                         role="option"
                         aria-selected={active}
                         onClick={() => {
+                          if (locked) {
+                            setEngineOpen(false);
+                            setStatus(
+                              "Okapi Pro est réservé aux abonnés Entreprise Plus.",
+                            );
+                            onNavigate?.("billing");
+                            return;
+                          }
                           setEngine(item.id);
                           setStoredEngine(item.id);
                           setEngineOpen(false);
@@ -2071,7 +2116,7 @@ export function HomeDashboard({
                           active
                             ? "bg-okapi-forest/10"
                             : "hover:bg-okapi-mist/80"
-                        }`}
+                        } ${locked ? "opacity-70" : ""}`}
                       >
                         <span className="flex items-center gap-2 text-xs font-semibold text-okapi-ink">
                           {item.label}
@@ -2080,9 +2125,16 @@ export function HomeDashboard({
                               {item.badge}
                             </span>
                           ) : null}
+                          {locked ? (
+                            <span className="rounded-md bg-okapi-ink/8 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-okapi-ink/45">
+                              Abonnement
+                            </span>
+                          ) : null}
                         </span>
                         <span className="text-[11px] leading-snug text-okapi-ink/45">
-                          {item.hint}
+                          {locked
+                            ? "Passe à Entreprise Plus pour débloquer Pro."
+                            : item.hint}
                         </span>
                       </button>
                     );

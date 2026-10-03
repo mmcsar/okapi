@@ -2,13 +2,17 @@ import { friendlyLlmError } from "@/lib/llm-errors";
 import { claudeComplete } from "@/lib/anthropic";
 import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
+  resolveEngineForPlan,
+  resolveLlmAccess,
+} from "@/lib/llm-access";
+import {
   checkAndConsumeQuota,
   quotaExceededResponse,
   quotaKeyFromRequest,
 } from "@/lib/llm-quota";
+import type { OkapiEngine } from "@/lib/okapi-engine";
 import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
-import { resolveEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
 import {
   formatStudioHistory,
@@ -38,7 +42,7 @@ type Body = {
 async function complete(opts: {
   system: string;
   user: string;
-  engine: ReturnType<typeof resolveEngine>;
+  engine: OkapiEngine;
 }) {
   const provider = pickWithClaude();
   if (!provider) throw new Error(missingLlmMessage());
@@ -94,7 +98,10 @@ export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 200_000);
   if (tooBig) return tooBig;
 
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat");
+  const access = await resolveLlmAccess(request);
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat", {
+    paid: access.paid,
+  });
   if (!quota.ok) return quotaExceededResponse(quota);
 
   const body = (await request.json().catch(() => null)) as Body | null;
@@ -103,7 +110,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Brief vide." }, { status: 400 });
   }
 
-  const engine = resolveEngine(body?.engine);
+  const engine = resolveEngineForPlan(body?.engine, access.paid);
   const agent = resolveOkapiAgent({
     agentId: body?.agentId,
     sector: body?.sector,

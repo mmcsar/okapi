@@ -1,10 +1,13 @@
 /**
  * Quotas LLM Okapi — protection budget / charge.
+ * Free / invité: plafonds bas. Payant: plafonds hauts.
  * Mémoire process (Vercel: best-effort par instance).
  * Prochaine étape: table usage_daily / Redis.
  */
 
 type Kind = "chat" | "generate";
+
+export type QuotaTier = "free" | "paid";
 
 type DayBucket = {
   day: string; // YYYY-MM-DD UTC
@@ -49,14 +52,28 @@ function todayUtc() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function limit(kind: Kind) {
-  const raw =
-    kind === "chat"
-      ? process.env.OKAPI_DAILY_CHAT_LIMIT
-      : process.env.OKAPI_DAILY_GENERATE_LIMIT;
-  const n = Number(raw);
+function envInt(name: string, fallback: number) {
+  const n = Number(process.env[name]);
   if (Number.isFinite(n) && n > 0) return Math.floor(n);
-  return kind === "chat" ? 80 : 40;
+  return fallback;
+}
+
+/** Free / invité — bas pour protéger le budget Opus. */
+function freeLimit(kind: Kind) {
+  return kind === "chat"
+    ? envInt("OKAPI_FREE_DAILY_CHAT_LIMIT", 20)
+    : envInt("OKAPI_FREE_DAILY_GENERATE_LIMIT", 6);
+}
+
+/** Abonnés — plafonds historiques. */
+function paidLimit(kind: Kind) {
+  return kind === "chat"
+    ? envInt("OKAPI_DAILY_CHAT_LIMIT", 80)
+    : envInt("OKAPI_DAILY_GENERATE_LIMIT", 40);
+}
+
+function limit(kind: Kind, tier: QuotaTier) {
+  return tier === "paid" ? paidLimit(kind) : freeLimit(kind);
 }
 
 function maxConcurrentGenerate() {
@@ -102,20 +119,23 @@ export function quotaKeyFromRequest(request: Request) {
 }
 
 export type QuotaDecision =
-  | { ok: true; remaining: number; limit: number }
+  | { ok: true; remaining: number; limit: number; tier: QuotaTier }
   | {
       ok: false;
       reason: "daily" | "busy";
       message: string;
       limit?: number;
       used?: number;
+      tier?: QuotaTier;
     };
 
 export function checkAndConsumeQuota(
   key: string,
   kind: Kind,
+  opts?: { paid?: boolean },
 ): QuotaDecision {
-  const lim = limit(kind);
+  const tier: QuotaTier = opts?.paid ? "paid" : "free";
+  const lim = limit(kind, tier);
   const b = bucketFor(key);
   const used = kind === "chat" ? b.chat : b.generate;
 
@@ -124,9 +144,12 @@ export function checkAndConsumeQuota(
       ok: false,
       reason: "daily",
       message:
-        "Okapi a atteint la limite du jour pour ta session. Réessaie demain, ou plus tard.",
+        tier === "free"
+          ? "Limite gratuite du jour atteinte. Passe à Entreprise Plus pour plus de requêtes, ou réessaie demain."
+          : "Okapi a atteint la limite du jour pour ta session. Réessaie demain, ou plus tard.",
       limit: lim,
       used,
+      tier,
     };
   }
 
@@ -139,6 +162,7 @@ export function checkAndConsumeQuota(
         reason: "busy",
         message:
           "Okapi est très sollicité. Réessaie dans quelques secondes.",
+        tier,
       };
     }
     s.inFlight.push({ startedAt: Date.now() });
@@ -148,7 +172,12 @@ export function checkAndConsumeQuota(
   }
 
   const nextUsed = kind === "chat" ? b.chat : b.generate;
-  return { ok: true, remaining: Math.max(0, lim - nextUsed), limit: lim };
+  return {
+    ok: true,
+    remaining: Math.max(0, lim - nextUsed),
+    limit: lim,
+    tier,
+  };
 }
 
 export function releaseGenerateSlot() {
@@ -165,6 +194,7 @@ export function quotaExceededResponse(
     {
       error: decision.message,
       code: decision.reason === "busy" ? "okapi_busy" : "okapi_quota",
+      tier: decision.tier,
     },
     {
       status: decision.reason === "busy" ? 503 : 429,

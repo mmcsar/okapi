@@ -1,3 +1,4 @@
+import { resolveLlmAccess } from "@/lib/llm-access";
 import {
   checkAndConsumeQuota,
   quotaExceededResponse,
@@ -29,7 +30,10 @@ export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 20_000);
   if (tooBig) return tooBig;
 
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate");
+  const access = await resolveLlmAccess(request);
+  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate", {
+    paid: access.paid,
+  });
   if (!quota.ok) return quotaExceededResponse(quota);
 
   if (!heygenConfigured()) {
