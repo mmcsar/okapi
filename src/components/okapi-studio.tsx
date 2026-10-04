@@ -385,6 +385,7 @@ export function OkapiStudio({
   const seenContentRef = useRef<Set<StudioFileId>>(new Set());
   const lastSeedKeyRef = useRef(0);
   const aiAbortRef = useRef<AbortController | null>(null);
+  const aiGenRef = useRef(0);
   const lastAiInstructionRef = useRef<string>("");
   const [aiCanRetry, setAiCanRetry] = useState(false);
 
@@ -1380,6 +1381,7 @@ export function OkapiStudio({
   }
 
   function cancelStudioAi() {
+    aiGenRef.current += 1;
     aiAbortRef.current?.abort();
     aiAbortRef.current = null;
     setAiBusy(false);
@@ -1409,6 +1411,7 @@ export function OkapiStudio({
     aiAbortRef.current?.abort();
     const abort = new AbortController();
     aiAbortRef.current = abort;
+    const genId = ++aiGenRef.current;
     lastAiInstructionRef.current = instruction;
     setAiCanRetry(false);
 
@@ -1782,9 +1785,12 @@ export function OkapiStudio({
         (err instanceof DOMException && err.name === "AbortError") ||
         (err instanceof Error && /abort/i.test(err.message));
       if (aborted) {
-        setAiCanRetry(Boolean(lastAiInstructionRef.current));
+        if (aiGenRef.current === genId) {
+          setAiCanRetry(Boolean(lastAiInstructionRef.current));
+        }
         return;
       }
+      if (aiGenRef.current !== genId) return;
       const msg = err instanceof Error ? err.message : "Erreur IA Studio";
       setAiError(msg);
       setAiCanRetry(Boolean(lastAiInstructionRef.current));
@@ -1792,13 +1798,14 @@ export function OkapiStudio({
         ...prev,
         {
           role: "assistant",
-          content: `${msg}\n\nTu peux Réessayer, ou préciser le brief.`,
+          content: `${msg}\n\nTu peux Réessayer, ou préciser le brief (ex. modules prioritaires).`,
         },
       ]);
       logTerm(`Erreur IA · ${msg}`, "err");
       setTerminalOpen(true);
       setTermTab("terminal");
     } finally {
+      if (aiGenRef.current !== genId) return;
       if (aiAbortRef.current === abort) aiAbortRef.current = null;
       setAiBusy(false);
       setAiProgress(null);

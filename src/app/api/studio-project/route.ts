@@ -27,6 +27,7 @@ import {
   formatStudioWorkspaceContext,
   sanitizeStudioHistory,
   sanitizeStudioWorkspace,
+  mustRepairStudioProject,
   shouldRepairStudioProject,
 } from "@/lib/studio-context";
 import {
@@ -48,7 +49,8 @@ import {
 } from "@/lib/studio-stream";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+/** Platforms often need a long first pass; avoid a second repair that hits the wall. */
+export const maxDuration = 300;
 
 const ALLOWED = STUDIO_FILE_IDS;
 
@@ -312,10 +314,13 @@ async function runStudioProject(opts: {
   } = opts;
   const maxTokens =
     large && engine === "pro"
-      ? 12000
+      ? 16000
       : large
-        ? 6000
-        : 5000;
+        ? 8000
+        : 6000;
+  /** Skip soft auto-repair after this — second LLM pass often kills the request. */
+  const REPAIR_BUDGET_MS = 55_000;
+  const startedAt = Date.now();
   const system = buildSystem(large, engine, agentBlock);
   const total = 4;
   const delta = onDelta ? makeDeltaBatcher(onDelta) : null;
@@ -383,27 +388,38 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
   let files = parsed ? parseProjectFiles(parsed) : [];
   let issues = assessStudioProjectFiles(files, { large });
 
-  const needsRepair =
+  const hardFail =
     !parsed ||
     files.length === 0 ||
-    !files.some((f) => f.fileId === "app.html") ||
-    (shouldRepairStudioProject(issues) && engine === "pro");
+    !files.some((f) => f.fileId === "app.html");
+  if (hardFail && (!parsed || files.length === 0)) {
+    issues = [
+      {
+        code: "invalid_json",
+        detail:
+          "Previous response was not valid project JSON or had no files.",
+      },
+      ...issues,
+    ];
+  }
 
-  if (needsRepair && raw.trim()) {
-    if (!parsed || files.length === 0) {
-      issues = [
-        {
-          code: "invalid_json",
-          detail:
-            "Previous response was not valid project JSON or had no files.",
-        },
-        ...issues,
-      ];
-    }
+  const elapsedAfterFirst = Date.now() - startedAt;
+  const hardNeedsRepair = hardFail || mustRepairStudioProject(issues);
+  const softNeedsRepair =
+    !hardNeedsRepair &&
+    engine === "pro" &&
+    shouldRepairStudioProject(issues);
+  const needsRepair =
+    Boolean(raw.trim()) &&
+    (hardNeedsRepair ||
+      (softNeedsRepair && elapsedAfterFirst < REPAIR_BUDGET_MS));
 
+  if (needsRepair) {
     onStatus?.({
       type: "status",
-      message: "Auto-correction du projet en cours…",
+      message: hardNeedsRepair
+        ? "Auto-correction du projet en cours…"
+        : "Amélioration rapide du scaffold…",
       step: 3,
       total,
       large,
@@ -420,7 +436,7 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
         titleHint: hintTitle,
       }),
       engine,
-      maxTokens,
+      maxTokens: hardNeedsRepair ? maxTokens : Math.min(maxTokens, 8000),
       onChunk: delta
         ? (t) => {
             delta.push(t);
@@ -429,9 +445,28 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
     });
     delta?.flush();
     repaired = true;
-    parsed = extractJsonObject(raw);
-    files = parsed ? parseProjectFiles(parsed) : [];
-    issues = assessStudioProjectFiles(files, { large });
+    const repairedParsed = extractJsonObject(raw);
+    const repairedFiles = repairedParsed
+      ? parseProjectFiles(repairedParsed)
+      : [];
+    // Keep the first pass if repair made things worse / empty.
+    if (
+      repairedParsed &&
+      repairedFiles.some((f) => f.fileId === "app.html")
+    ) {
+      parsed = repairedParsed;
+      files = repairedFiles;
+      issues = assessStudioProjectFiles(files, { large });
+    }
+  } else if (softNeedsRepair && elapsedAfterFirst >= REPAIR_BUDGET_MS) {
+    onStatus?.({
+      type: "status",
+      message: "Livraison de la base (amélioration reportée)…",
+      step: 3,
+      total,
+      large,
+      engine,
+    });
   }
 
   if (!parsed || typeof parsed !== "object") {
@@ -446,9 +481,20 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
     (typeof parsed.title === "string" && parsed.title.trim()) ||
     hintTitle ||
     "Projet Okapi";
-  const note =
+  const baseNote =
     (typeof parsed.note === "string" && parsed.note.trim()) ||
     `Projet « ${title} » · ${files.length} fichiers prêts.`;
+  const softLeft =
+    !repaired && softNeedsRepair
+      ? " Base livrée — dis « améliore le projet » pour renforcer."
+      : softNeedsRepair && repaired
+        ? ""
+        : shouldRepairStudioProject(issues)
+          ? " Tu peux encore demander des améliorations."
+          : "";
+  const note = repaired
+    ? `${baseNote} (Okapi a auto-corrigé la génération.)`
+    : `${baseNote}${softLeft}`;
 
   onStatus?.({
     type: "status",
@@ -461,9 +507,7 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
 
   return {
     title,
-    note: repaired
-      ? `${note} (Okapi a auto-corrigé la génération.)`
-      : note,
+    note,
     large,
     repaired,
     qualityIssues: issues.map((i) => i.code),
@@ -498,7 +542,8 @@ export async function POST(request: Request) {
   if (!quota.ok) return quotaExceededResponse(quota);
 
   const engine = resolveEngineForPlan(body?.engine ?? "pro", access.paid);
-  const large = wantsLargeProject(instruction) || engine === "pro";
+  // Only true “plateforme / CRM / …” briefs get the heavy large prompt — not every Pro call.
+  const large = wantsLargeProject(instruction);
   const hintTitle = body?.title?.trim();
   const workspace = sanitizeStudioWorkspace(body?.workspace);
   const history = sanitizeStudioHistory(body?.history);

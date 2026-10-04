@@ -121,7 +121,9 @@ export async function readStudioStream(
   }
 
   if (!doneEvent) {
-    throw new Error("Studio n’a pas terminé la génération.");
+    throw new Error(
+      "Studio s’est arrêté avant la fin (délai ou réseau). Réessaie — la base est souvent livrée au 2ᵉ essai.",
+    );
   }
   return doneEvent;
 }

@@ -309,6 +309,7 @@ export function assessStudioProjectFiles(
   return issues;
 }
 
+/** Soft quality gaps — may skip repair if the request is already long. */
 export function shouldRepairStudioProject(issues: StudioQualityIssue[]) {
   return issues.some(
     (i) =>
@@ -330,6 +331,20 @@ export function shouldRepairStudioProject(issues: StudioQualityIssue[]) {
         "missing_pubspec_yaml",
         "missing_requirements_txt",
         "localstorage_without_okapi",
+      ].includes(i.code) || i.code.startsWith("missing_"),
+  );
+}
+
+/** Broken / empty scaffold — repair is required when time allows. */
+export function mustRepairStudioProject(issues: StudioQualityIssue[]) {
+  return issues.some(
+    (i) =>
+      [
+        "invalid_json",
+        "html_invalid",
+        "html_truncated",
+        "html_unclosed_script",
+        "package_json_invalid",
       ].includes(i.code) || i.code.startsWith("missing_"),
   );
 }
