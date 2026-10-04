@@ -151,6 +151,8 @@ export function HomeDashboard({
   const [cloudStatus, setCloudStatus] = useState<string | null>(null);
   const [saveBusy, setSaveBusy] = useState(false);
   const [language, setLanguage] = useState<OkapiLangCode>("auto");
+  const [copiedMsgKey, setCopiedMsgKey] = useState<string | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const projectIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -954,6 +956,19 @@ export function HomeDashboard({
       setStatus(err instanceof Error ? err.message : "Partage impossible");
     } finally {
       setShareBusy(false);
+    }
+  }
+
+  async function copyMessage(text: string, key: string) {
+    const value = text.trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedMsgKey(key);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopiedMsgKey(null), 1600);
+    } catch {
+      setStatus("Impossible de copier.");
     }
   }
 
@@ -1761,14 +1776,21 @@ export function HomeDashboard({
             sending &&
             msg.role === "assistant" &&
             i === messages.length - 1;
+          const isPlaceholder =
+            /^Okapi (réfléchit|analyse|debug|Flash|Pro|travaille)/i.test(
+              msg.content,
+            );
           const canSpeak =
             supportedSpeak &&
             msg.role === "assistant" &&
             !isStreamingAssistant &&
             msg.content.trim().length > 0 &&
-            !/^Okapi (réfléchit|analyse|debug|Flash|Pro|travaille)/i.test(
-              msg.content,
-            );
+            !isPlaceholder;
+          const canCopy =
+            !isStreamingAssistant &&
+            msg.content.trim().length > 0 &&
+            !isPlaceholder;
+          const msgKey = `${msg.role}-${i}`;
           return (
             <div
               key={`${msg.role}-${i}`}
@@ -1901,14 +1923,27 @@ export function HomeDashboard({
                   …
                 </span>
               ) : null}
-              {canSpeak ? (
-                <button
-                  type="button"
-                  onClick={() => toggleSpeak(msg.content)}
-                  className="mt-1.5 block text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
-                >
-                  {speaking ? "Stop audio" : "Écouter"}
-                </button>
+              {canCopy || canSpeak ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {canCopy ? (
+                    <button
+                      type="button"
+                      onClick={() => copyMessage(msg.content, msgKey)}
+                      className="text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
+                    >
+                      {copiedMsgKey === msgKey ? "Copié" : "Copier"}
+                    </button>
+                  ) : null}
+                  {canSpeak ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleSpeak(msg.content)}
+                      className="text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
+                    >
+                      {speaking ? "Stop audio" : "Écouter"}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
               {msg.role === "assistant" &&
               !isStreamingAssistant &&

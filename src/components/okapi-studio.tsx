@@ -379,6 +379,8 @@ export function OkapiStudio({
   const termEndRef = useRef<HTMLDivElement>(null);
   const serverTimersRef = useRef<number[]>([]);
   const [aiMessages, setAiMessages] = useState<AiMsg[]>([]);
+  const [copiedAiKey, setCopiedAiKey] = useState<string | null>(null);
+  const copiedAiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aiInputRef = useRef<HTMLTextAreaElement>(null);
   const seenContentRef = useRef<Set<StudioFileId>>(new Set());
   const lastSeedKeyRef = useRef(0);
@@ -1289,6 +1291,19 @@ export function OkapiStudio({
   useEffect(() => {
     setCmdIndex(0);
   }, [cmdQuery]);
+
+  async function copyAiMessage(text: string, key: string) {
+    const value = text.trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedAiKey(key);
+      if (copiedAiTimerRef.current) clearTimeout(copiedAiTimerRef.current);
+      copiedAiTimerRef.current = setTimeout(() => setCopiedAiKey(null), 1600);
+    } catch {
+      setAiError("Impossible de copier.");
+    }
+  }
 
   function markDirty(id: StudioFileId) {
     setDirtyIds((prev) => {
@@ -2933,9 +2948,15 @@ export function OkapiStudio({
                 </div>
                 )
               ) : (
-                aiMessages.map((m, i) => (
+                aiMessages.map((m, i) => {
+                  const key = `${m.role}-${i}`;
+                  const canCopy =
+                    m.role === "assistant" &&
+                    m.content.trim().length > 0 &&
+                    !(aiBusy && i === aiMessages.length - 1);
+                  return (
                   <div
-                    key={`${m.role}-${i}`}
+                    key={key}
                     className="text-[12px] leading-snug"
                   >
                     <span
@@ -2952,8 +2973,18 @@ export function OkapiStudio({
                     >
                       {m.content}
                     </span>
+                    {canCopy ? (
+                      <button
+                        type="button"
+                        onClick={() => copyAiMessage(m.content, key)}
+                        className="mt-1 block text-[10px] font-semibold text-[#8aa899] transition hover:text-[#ffd7a8]"
+                      >
+                        {copiedAiKey === key ? "Copié" : "Copier"}
+                      </button>
+                    ) : null}
                   </div>
-                ))
+                  );
+                })
               )}
 
               {pending && pendingFile ? (
