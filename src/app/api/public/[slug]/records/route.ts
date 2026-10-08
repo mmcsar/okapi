@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { resolvePublicProjectBySlug } from "@/lib/public-project";
 import {
   assertBodySize,
+  assertSameOrigin,
   checkRateLimit,
   clientIpFromRequest,
 } from "@/lib/security";
@@ -56,11 +57,15 @@ export async function GET(request: Request, ctx: Ctx) {
 }
 
 export async function POST(request: Request, ctx: Ctx) {
-  const tooBig = assertBodySize(request, 64_000);
+  const badOrigin = assertSameOrigin(request);
+  if (badOrigin) return badOrigin;
+
+  const tooBig = assertBodySize(request, 32_000);
   if (tooBig) return tooBig;
 
   const ip = clientIpFromRequest(request);
-  const hit = checkRateLimit(`public-records:${ip}`, 40, 15 * 60_000);
+  // Create only (forms) — tight cap to limit spam / wipe-via-flood.
+  const hit = checkRateLimit(`public-records:${ip}`, 20, 15 * 60_000);
   if (!hit.ok) {
     return NextResponse.json(
       { error: "Trop de requêtes. Réessaie plus tard." },

@@ -36,13 +36,11 @@ function urlPrompt(prompt: string) {
     .slice(0, 120);
 }
 
+/** Public candidate URLs — never include API keys (visible in the browser). */
 export function imageCandidateUrls(prompt: string, seed: number) {
   const q = encodeURIComponent(urlPrompt(prompt));
-  const key = process.env.POLLINATIONS_API_KEY?.trim();
-  const keyQs = key ? `&key=${encodeURIComponent(key)}` : "";
-
   return [
-    `https://image.pollinations.ai/prompt/${q}?width=768&height=512&nologo=true&seed=${seed}${keyQs}`,
+    `https://image.pollinations.ai/prompt/${q}?width=768&height=512&nologo=true&seed=${seed}`,
     `https://pollinations.ai/p/${q}?width=768&height=512&nologo=true&seed=${seed}`,
   ];
 }
@@ -116,8 +114,7 @@ export async function POST(request: Request) {
       ? body.seed
       : Math.floor(Math.random() * 99999);
 
-  const upgradeUrls = imageCandidateUrls(prompt, seed);
-
+  // Do not return third-party upgrade URLs to the client (keys / billing abuse).
   if (openRouterConfigured()) {
     const generated = await generateOpenRouterImage(prompt, {
       timeoutMs: 55_000,
@@ -126,8 +123,6 @@ export async function POST(request: Request) {
       return Response.json({
         ok: true,
         url: generated.dataUrl,
-        upgradeUrls,
-        fallbackUrls: upgradeUrls,
         prompt,
         seed,
         mode: "okapi",
@@ -143,8 +138,6 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       url: fallbackSvgDataUrl(prompt, safeNote.slice(0, 90)),
-      upgradeUrls,
-      fallbackUrls: upgradeUrls,
       prompt,
       seed,
       mode: "fallback",
@@ -159,8 +152,6 @@ export async function POST(request: Request) {
       prompt,
       "Service image Okapi non configuré — contacte l’admin MMC.",
     ),
-    upgradeUrls,
-    fallbackUrls: upgradeUrls,
     prompt,
     seed,
     mode: "fallback",

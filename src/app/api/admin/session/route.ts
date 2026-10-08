@@ -129,7 +129,10 @@ export async function POST(request: Request) {
   return res;
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  const badOrigin = assertSameOrigin(request);
+  if (badOrigin) return badOrigin;
+
   const res = NextResponse.json({ ok: true });
   clearAdminCookies(res);
   return res;

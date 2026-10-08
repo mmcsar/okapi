@@ -1170,8 +1170,6 @@ export function HomeDashboard({
           url?: string;
           prompt?: string;
           error?: string;
-          fallbackUrls?: string[];
-          upgradeUrls?: string[];
           mode?: string;
           note?: string;
         } | null;
@@ -1188,49 +1186,8 @@ export function HomeDashboard({
                 "Image IA temporairement indisponible — réessaie dans un instant."
               }`,
           imgData.url,
-          imgData.fallbackUrls,
         );
         setStatus(null);
-
-        // Upgrade navigateur seulement si pas déjà une vraie image Okapi
-        if (imgData.mode === "okapi" || imgData.mode === "openrouter") return;
-
-        const upgrades = imgData.upgradeUrls || imgData.fallbackUrls || [];
-        void (async () => {
-          for (const candidate of upgrades) {
-            const ok = await new Promise<boolean>((resolve) => {
-              const img = new window.Image();
-              const timer = window.setTimeout(() => {
-                img.src = "";
-                resolve(false);
-              }, 10_000);
-              img.onload = () => {
-                window.clearTimeout(timer);
-                resolve(true);
-              };
-              img.onerror = () => {
-                window.clearTimeout(timer);
-                resolve(false);
-              };
-              img.referrerPolicy = "no-referrer";
-              img.src = candidate;
-            });
-            if (!ok) continue;
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last?.role === "assistant") {
-                next[next.length - 1] = {
-                  ...last,
-                  imageUrl: candidate,
-                  content: `Voici ton image${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. Clique pour agrandir · télécharge si tu veux.`,
-                };
-              }
-              return next;
-            });
-            break;
-          }
-        })();
         return;
       }
 

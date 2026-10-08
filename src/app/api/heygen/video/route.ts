@@ -12,6 +12,7 @@ import {
   startHeygenVideo,
 } from "@/lib/heygen";
 import { assertBodySize, sanitizePublicError } from "@/lib/security";
+import { getUserFromAuthHeader } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -29,6 +30,11 @@ function fail(message: string, status = 500) {
 export async function POST(request: Request) {
   const tooBig = assertBodySize(request, 20_000);
   if (tooBig) return tooBig;
+
+  const session = await getUserFromAuthHeader(request);
+  if (!session) {
+    return fail("Connexion requise pour créer une vidéo.", 401);
+  }
 
   const access = await resolveLlmAccess(request);
   const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate", {
@@ -67,6 +73,11 @@ export async function POST(request: Request) {
 
 /** Une passe de suivi : session, puis URL dès que le rendu est prêt. */
 export async function GET(request: Request) {
+  const sessionUser = await getUserFromAuthHeader(request);
+  if (!sessionUser) {
+    return fail("Connexion requise pour suivre une vidéo.", 401);
+  }
+
   if (!heygenConfigured()) {
     return fail("Service vidéo Okapi non configuré — contacte l’admin MMC.", 503);
   }

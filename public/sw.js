@@ -1,7 +1,6 @@
-/* Okapi PWA — cache shell only; APIs always network */
-const CACHE = "okapi-shell-v5";
+/* Okapi PWA — APIs always network; HTML navigations network-first */
+const CACHE = "okapi-shell-v6";
 const PRECACHE = [
-  "/",
   "/manifest.webmanifest",
   "/okapi-logo.png",
   "/okapi-icon.png",
@@ -9,6 +8,14 @@ const PRECACHE = [
   "/icons/icon-512.png",
   "/favicon.ico",
 ];
+
+function isSensitivePath(pathname) {
+  return (
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/api/")
+  );
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -34,7 +41,27 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api/")) return;
+  if (isSensitivePath(url.pathname)) return;
+
+  const isDocument =
+    req.mode === "navigate" ||
+    (req.headers.get("accept") || "").includes("text/html");
+
+  // HTML: network-first so deploys / auth UI are not stuck on stale shell
+  if (isDocument) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req)),
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(req).then((cached) => {
@@ -42,8 +69,7 @@ self.addEventListener("fetch", (event) => {
         .then((res) => {
           if (
             res.ok &&
-            (url.pathname === "/" ||
-              url.pathname.match(/\.(png|svg|webmanifest|ico|css|js)$/))
+            url.pathname.match(/\.(png|svg|webmanifest|ico|css|js|woff2?)$/)
           ) {
             const copy = res.clone();
             caches.open(CACHE).then((cache) => cache.put(req, copy));

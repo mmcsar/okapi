@@ -78,33 +78,10 @@ export function useOkapiPublicBridge(
           } | null;
           if (!res.ok) throw new Error(data?.error || `Erreur ${res.status}`);
           result = data?.record;
-        } else if (req.op === "update") {
-          if (!req.recordId) throw new Error("recordId manquant");
-          const res = await fetch(
-            `/api/public/${encodeURIComponent(s)}/records/${encodeURIComponent(req.recordId)}`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ data: req.data || {} }),
-            },
+        } else if (req.op === "update" || req.op === "remove") {
+          throw new Error(
+            "Lien public : lecture et ajout seulement. Modification réservée au propriétaire.",
           );
-          const data = (await res.json().catch(() => null)) as {
-            record?: unknown;
-            error?: string;
-          } | null;
-          if (!res.ok) throw new Error(data?.error || `Erreur ${res.status}`);
-          result = data?.record;
-        } else if (req.op === "remove") {
-          if (!req.recordId) throw new Error("recordId manquant");
-          const res = await fetch(
-            `/api/public/${encodeURIComponent(s)}/records/${encodeURIComponent(req.recordId)}`,
-            { method: "DELETE" },
-          );
-          const data = (await res.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          if (!res.ok) throw new Error(data?.error || `Erreur ${res.status}`);
-          result = true;
         }
 
         reply({ id: req.id, ok: true, result });
