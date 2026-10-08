@@ -1,6 +1,13 @@
 /* Okapi PWA — cache shell only; APIs always network */
-const CACHE = "okapi-shell-v3";
-const PRECACHE = ["/", "/manifest.webmanifest", "/okapi-logo.png"];
+const CACHE = "okapi-shell-v4";
+const PRECACHE = [
+  "/",
+  "/manifest.webmanifest",
+  "/okapi-logo.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/favicon.ico",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -32,7 +39,11 @@ self.addEventListener("fetch", (event) => {
     caches.match(req).then((cached) => {
       const network = fetch(req)
         .then((res) => {
-          if (res.ok && (url.pathname === "/" || url.pathname.match(/\.(png|svg|webmanifest|ico|css|js)$/))) {
+          if (
+            res.ok &&
+            (url.pathname === "/" ||
+              url.pathname.match(/\.(png|svg|webmanifest|ico|css|js)$/))
+          ) {
             const copy = res.clone();
             caches.open(CACHE).then((cache) => cache.put(req, copy));
           }

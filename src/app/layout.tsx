@@ -17,6 +17,11 @@ const syne = Syne({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      "https://www.okapi.cd",
+  ),
   title: "Okapi — Plateforme IA de MMC SARL",
   description:
     "Okapi est la plateforme IA de MMC SARL : agent multilingue qui répond et construit sites & apps pour la RDC.",
@@ -31,8 +36,13 @@ export const metadata: Metadata = {
     telephone: false,
   },
   icons: {
-    icon: [{ url: "/okapi-logo.png", type: "image/png" }],
-    apple: [{ url: "/okapi-logo.png", type: "image/png" }],
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/favicon.ico"],
   },
 };
 
