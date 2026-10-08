@@ -1,9 +1,10 @@
 /* Okapi PWA — cache shell only; APIs always network */
-const CACHE = "okapi-shell-v4";
+const CACHE = "okapi-shell-v5";
 const PRECACHE = [
   "/",
   "/manifest.webmanifest",
   "/okapi-logo.png",
+  "/okapi-icon.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/favicon.ico",

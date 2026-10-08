@@ -37,12 +37,33 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/favicon.ico", sizes: "any" },
+      { url: "/okapi-icon.png", type: "image/png", sizes: "512x512" },
+      { url: "/okapi-logo.png", type: "image/png", sizes: "1024x1024" },
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/favicon.ico", sizes: "any" },
     ],
-    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
-    shortcut: ["/favicon.ico"],
+    apple: [
+      { url: "/okapi-icon.png", sizes: "180x180", type: "image/png" },
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+    shortcut: ["/okapi-icon.png"],
+  },
+  openGraph: {
+    title: "Okapi — Plateforme IA de MMC SARL",
+    description:
+      "Okapi est la plateforme IA de MMC SARL : agent multilingue qui répond et construit sites & apps pour la RDC.",
+    siteName: "Okapi",
+    images: [{ url: "/okapi-logo.png", width: 1024, height: 1024, alt: "Logo Okapi" }],
+    type: "website",
+    locale: "fr_CD",
+  },
+  twitter: {
+    card: "summary",
+    title: "Okapi — Plateforme IA de MMC SARL",
+    description:
+      "Okapi est la plateforme IA de MMC SARL : agent multilingue qui répond et construit sites & apps pour la RDC.",
+    images: ["/okapi-logo.png"],
   },
 };
 
