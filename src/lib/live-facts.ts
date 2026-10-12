@@ -192,7 +192,7 @@ export function formatVerifiedOfficeAnswer(packet: LiveFactPacket): string | nul
   )?.[1];
   const roleFinal = roleFromNote || "gouverneur";
   return [
-    `Selon les sources Okapi, le/la ${roleFinal} du ${packet.province} est **${packet.name}**.`,
+    `Selon les sources Okapi, le/la ${roleFinal} du ${packet.province} est ${packet.name}.`,
     `Cette info vient de la base Okapi (à confirmer sur ${url}).`,
     `Okapi peut se tromper — vérifie les infos importantes.`,
   ].join("\n\n");

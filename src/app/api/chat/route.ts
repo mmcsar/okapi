@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import Anthropic from "@anthropic-ai/sdk";
-import { languageInstruction } from "@/lib/i18n";
+import { honestyClosing, languageInstruction } from "@/lib/i18n";
 import { friendlyLlmError, isLocationBlocked } from "@/lib/llm-errors";
 import { missingLlmMessage, pickWithClaude } from "@/lib/llm-provider";
 import {
@@ -21,7 +21,8 @@ import type { OkapiEngine } from "@/lib/okapi-engine";
 import { normalizeImageMime } from "@/lib/image";
 import { assertBodySize } from "@/lib/security";
 import type { OkapiAgentLane } from "@/lib/intent";
-import { wantsLiveCurrentFact } from "@/lib/intent";
+import { wantsLiveCurrentFact, wantsMathDiagram } from "@/lib/intent";
+import { diagramSystemBlock } from "@/lib/chat-diagram";
 import {
   formatUnverifiedOfficeAnswer,
   formatVerifiedOfficeAnswer,
@@ -31,6 +32,11 @@ import {
   researchGroundingSystemBlock,
   resolveResearchGrounding,
 } from "@/lib/research-grounding";
+import {
+  intelligenceSystemBlock,
+  loadUserIntelligenceContext,
+} from "@/lib/okapi-intelligence";
+import { getUserFromAuthHeader } from "@/lib/supabase";
 import {
   OKAPI_STUDIO_STACK,
   OKAPI_STUDIO_STACK_HONESTY,
@@ -62,6 +68,7 @@ LANE = CRÉATEUR (builders / apps):
 - Ask to build/modify an app or site (supported stack) → give a short plan (3–5 bullets) THEN tell the user to send the same brief again starting with « Crée… » so Okapi Preview can build it. Do not invent that the builder is missing from Accueil.
 - Never claim the app/site is already built, deployed, or live unless the user has a Preview in this session — a plan is not a finished app.
 - If the user already described catalogue/stock/panier/Mobile Money: confirm in one short sentence and ask them to type: « Crée une app boutique: catalogue, stock, panier, WhatsApp, Mobile Money CDF ».
+- Video / clip: not available in Créateur for now — do not pitch vidéo.
 - You may mention Studio only as optional next step after a preview exists — never as the first destination.
 `
       : `
@@ -77,7 +84,7 @@ LANE = CONSEILLER (savoir / contenu / recherche):
 
   return `You are Okapi, the AI platform of MMC SARL (Democratic Republic of Congo).
 You are a single autonomous AI agent for users of Okapi.
-You have NO live internet browse in this chat — your knowledge can be outdated. Never invent “current” office-holders or today’s news to fill gaps.
+You do NOT open-browse the web freely. When RESEARCH GROUNDING excerpts are present, base factual claims on those excerpts only. Without grounding, your knowledge can be outdated — never invent “current” office-holders or today’s news to fill gaps.
 
 TRUTH FIRST (non-negotiable):
 - Never invent facts, numbers, prices, laws, news, URLs, screenshots, files, or “I already did X” when you did not.
@@ -85,14 +92,15 @@ TRUTH FIRST (non-negotiable):
 - Current politics / office-holders (gouverneurs, ministres, maires en RDC): if you are not highly confident of the CURRENT name, do NOT invent or guess a person. Say you are unsure and tell the user to check the site officiel de la province or Radio Okapi / Actualite.cd. A wrong name is worse than « je ne sais pas ».
 - Do not invent capabilities Okapi does not have in this chat. Only describe what Accueil Agent / Preview / Studio can actually do.
 - Studio / Preview stack honesty: ${OKAPI_STUDIO_STACK_HONESTY}
-- Never fabricate image or video links. Image generation runs only when the user types « crée une image… ». Video generation runs only when the user types « crée une vidéo… ». Do not name the video vendor.
+- Never fabricate image or video links. Image generation runs only when the user types « crée une image… ». Do not name third-party vendors.
+- Video: temporarily unavailable in Accueil — if asked, say briefly that vidéo Okapi revient bientôt; do not invent a video URL or claim generation started.
 - Never invent that a service failed or succeeded without evidence from this conversation.
 
 Core rule: act ONLY on request. Do what is necessary, nothing more.
 - Question → answer clearly, no useless digressions.
 ${laneBlock}
 - Image creation: on Accueil, the user can ask « crée une image… » / logo / illustration — Okapi then runs image generation and shows the result in the chat UI. Explain how to ask; do not invent fake image URLs. If generation fails (credit, network), the UI will say so — do not promise success.
-- Video creation: on Accueil, « crée une vidéo… » / clip lance le rendu vidéo et l’affiche dans le chat. Do not invent a video URL or claim the video is ready before the UI shows it. Do not name the video vendor.
+- Video creation: DISABLED for now — do not tell users to type « crée une vidéo… ».
 - Vision: when an image is attached in this request, you can see it — describe carefully; if text is blurry or uncertain, say so instead of inventing.
 - If asked who hosts data: say Okapi / MMC SARL cloud. Never name third-party database vendors.
 - Do not spontaneously pitch apps, templates, or marketing menus.
@@ -105,7 +113,18 @@ ${debugBlock}
 ${languageInstruction(language)}
 
 Style: clear, concise, useful, honest. Prefer « je ne sais pas » to a lie.
-In French UI context: when giving advice/facts, once per reply max: « Okapi peut se tromper — vérifie les infos importantes ».
+PLAIN TEXT ONLY in replies: no Markdown. Never use **bold**, *italic*, __underscores__, # headings, or \`code\` fences (exception: diagram SVG markers <<<SVG … SVG>>> when a DIAGRAM REQUEST block is present). Emphasize with words or CAPS sparingly, not asterisks. Lists: use « - » or « 1. » only.
+DIAGRAMS: for axes x/y, arrows, statistical charts, curves — use the DIAGRAM REQUEST SVG markers when provided. Do not say you cannot draw; produce a clean SVG figure.
+REASONING: for calculations, logic checks, or multi-step plans — reason step by step, verify each step, then conclude. Prefer a short correct chain over a confident wrong answer.
+DOCUMENTS: when a DOCUMENT is attached (text/CSV), analyse that content: summarize, extract tables/figures, flag risks or missing clauses. Do not invent clauses or cells not in the text. Native .xlsx / scanned PDF are not supported yet — if asked, say to export CSV or paste the text.
+CAPABILITIES (only if the user asks what Okapi can do / future improvements — no invented MMC roadmap):
+- Voix: déjà disponible sur Accueil (micro + bouton Écouter).
+- Images / vision + « crée une image… » (vidéo temporairement indisponible).
+- Schémas maths/stats (axes x-y, flèches, courbes, histogrammes) en SVG dans le chat.
+- Documents texte/CSV/MD joints dans le chat.
+- Mémoire projets si l’utilisateur est connecté.
+- Ne promets pas de features inexistantes ; oriente les retours vers l’équipe Okapi.
+When giving advice/facts, once per reply max end with: « ${honestyClosing(language)} » (or the same idea in the user’s language if Auto).
 You are not a doctor or lawyer.`;
 }
 
@@ -115,6 +134,7 @@ type ChatBody = {
   language?: string;
   history?: { role: "user" | "assistant"; content: string }[];
   image?: { mimeType?: string; base64?: string; name?: string };
+  document?: { name?: string; mimeType?: string; text?: string };
   debug?: boolean;
   engine?: string;
   /** conseil = savoir/contenu · creer = apps */
@@ -145,11 +165,16 @@ export async function POST(request: Request) {
   const imageName = body?.image?.name?.trim();
   const imageMime = normalizeImageMime(imageMimeRaw, imageName);
   const hasImage = Boolean(imageBase64 && imageBase64.length > 32);
+  const docText = body?.document?.text?.replace(/\0/g, "").trim() || "";
+  const docName = body?.document?.name?.trim() || "document.txt";
+  const hasDocument = docText.length > 0;
   const message =
     body?.message?.trim() ||
     (hasImage
       ? "Décris cette image clairement et dis ce qui est utile."
-      : "");
+      : hasDocument
+        ? "Analyse ce document : résumé, points clés, risques ou prochaines actions."
+        : "");
   if (!message) {
     return Response.json({ error: "Message vide." }, { status: 400 });
   }
@@ -159,6 +184,12 @@ export async function POST(request: Request) {
         error:
           "Image illisible. Réessaie avec un JPG ou PNG (max ~8 Mo avant compression).",
       },
+      { status: 400 },
+    );
+  }
+  if (body?.document && !hasDocument) {
+    return Response.json(
+      { error: "Document vide ou illisible." },
       { status: 400 },
     );
   }
@@ -172,20 +203,19 @@ export async function POST(request: Request) {
     lane === "conseil" ? "pro" : body?.engine,
     access.paid,
   );
+  // Gouverneurs seulement : réponse figée (DB) — jamais le LLM pour inventer un nom.
+  // Ministres / maires / actu → LLM + research grounding (pas de refus « gouverneur »).
   const liveFact = wantsLiveCurrentFact(message);
   let verifiedDirect: string | null = null;
   if (liveFact) {
     const packet = await resolveLiveOfficeFact(message);
     if (packet) {
-      verifiedDirect = formatVerifiedOfficeAnswer(packet);
-    }
-    // Toujours réponse figée pour postes officiels — JAMAIS le LLM (il invente des noms)
-    if (!verifiedDirect) {
-      verifiedDirect = formatUnverifiedOfficeAnswer(message);
+      verifiedDirect =
+        formatVerifiedOfficeAnswer(packet) ??
+        formatUnverifiedOfficeAnswer(message);
     }
   }
 
-  // Fait officiel → réponse directe (vérifiée ou « je ne confirme pas »)
   if (verifiedDirect) {
     return new Response(verifiedDirect, {
       headers: {
@@ -196,27 +226,56 @@ export async function POST(request: Request) {
     });
   }
 
-  // Recherche générale (Conseiller) → ancrage sources publiques
   let researchBlock = "";
-  if (lane === "conseil" && !hasImage) {
+  if (
+    lane === "conseil" &&
+    !hasImage &&
+    !hasDocument &&
+    !wantsMathDiagram(message)
+  ) {
     const research = await resolveResearchGrounding(message);
     if (research) {
-      researchBlock = researchGroundingSystemBlock(research);
+      researchBlock = researchGroundingSystemBlock(research, language);
     }
   }
+
+  let memoryBlock = "";
+  try {
+    const session = await getUserFromAuthHeader(request);
+    if (session) {
+      const memory = await loadUserIntelligenceContext(
+        session.supabase,
+        session.user.id,
+      );
+      memoryBlock = intelligenceSystemBlock(memory);
+    }
+  } catch {
+    // Invité — chat reste ouvert sans mémoire projets
+  }
+
+  const diagramBlock =
+    !hasImage && wantsMathDiagram(message) ? diagramSystemBlock(message) : "";
 
   const system =
     buildSystem(language, Boolean(body?.debug), lane) +
     (hasImage
       ? `\n\nVISION: An image is attached — you can see it. Describe accurately in the user’s language. If something is unclear, blurry, or illegible, say so — do not invent text or details.`
       : "") +
-    researchBlock;
+    (hasDocument
+      ? `\n\nDOCUMENT ATTACHED (« ${docName} »): analyse the user message against this document text. Do not invent content absent from it.`
+      : "") +
+    diagramBlock +
+    researchBlock +
+    memoryBlock;
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
+  const docBlock = hasDocument
+    ? `\n\n--- DOCUMENT: ${docName} ---\n${docText.slice(0, 80_000)}\n--- FIN DOCUMENT ---`
+    : "";
   const userContent = sector
     ? lane === "creer"
-      ? `[Builder context (optional): ${sector}]\n\n${message}`
-      : `[Contexte métier (optionnel): ${sector}]\n\n${message}`
-    : message;
+      ? `[Builder context (optional): ${sector}]\n\n${message}${docBlock}`
+      : `[Contexte métier (optionnel): ${sector}]\n\n${message}${docBlock}`
+    : `${message}${docBlock}`;
   const image: ImagePart | null = hasImage
     ? { mimeType: imageMime, base64: imageBase64! }
     : null;

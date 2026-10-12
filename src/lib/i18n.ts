@@ -74,15 +74,56 @@ export function detectSpeechLocale(text: string, fallback = "fr-FR") {
   return fallback;
 }
 
+/** Phrase de prudence en fin de réponse (langue UI / agent). */
+export function honestyClosing(code?: string | null) {
+  const c = (code || "auto").toLowerCase();
+  if (c === "ln") {
+    return "Okapi ekoki kozanga solo — tala mwa ba info ya ntina";
+  }
+  if (c === "sw") {
+    return "Okapi inaweza kukosea — thibitisha taarifa muhimu";
+  }
+  if (c === "en") {
+    return "Okapi can be wrong — verify important information";
+  }
+  if (c === "pt") {
+    return "Okapi pode errar — verifica as informações importantes";
+  }
+  if (c === "es") {
+    return "Okapi puede equivocarse — verifica la información importante";
+  }
+  return "Okapi peut se tromper — vérifie les infos importantes";
+}
+
 /** Hint injected into LLM prompts. */
 export function languageInstruction(code?: string | null) {
   const c = (code || "auto").toLowerCase();
+  const closing = honestyClosing(c);
   if (c === "auto" || !c) {
     return `LANGUAGE (critical, like ChatGPT/Claude):
 - Detect the user's language from their latest message.
 - Reply in THAT language. If they write in English, answer in English; Français → français; Lingala → Lingala; Swahili → Swahili; etc.
 - Do not force French. Match the user. If mixed, prefer the dominant language of the latest message.
-- For UI/apps you help design: use the same language for visible copy unless they ask otherwise.`;
+- For UI/apps you help design: use the same language for visible copy unless they ask otherwise.
+- Honesty line (once max, in the reply language): « ${closing} » when advice/facts; adapt if the user wrote in another language.`;
+  }
+
+  if (c === "ln") {
+    return `LANGUAGE (critical): Lingala (ln).
+- Reply entirely in natural Lingala — not French with a few Lingala words.
+- Everyday vocabulary first; rare technical terms may have a short French gloss in parentheses.
+- Lists with « - » or numbers only. No Markdown **asterisks**.
+- Honesty line once max: « ${closing} ».
+- App/UI copy you propose should be in Lingala unless asked otherwise.`;
+  }
+
+  if (c === "sw") {
+    return `LANGUAGE (critical): Kiswahili (sw).
+- Reply entirely in natural Kiswahili — not French/English with a few Swahili words.
+- Everyday vocabulary first; rare technical terms may have a short French or English gloss in parentheses.
+- Lists with « - » or numbers only. No Markdown **asterisks**.
+- Honesty line once max: « ${closing} ».
+- App/UI copy you propose should be in Kiswahili unless asked otherwise.`;
   }
 
   const label =
@@ -90,5 +131,6 @@ export function languageInstruction(code?: string | null) {
   return `LANGUAGE (critical):
 - Preferred language: ${label} (${c}).
 - Reply primarily in this language unless the user clearly switches language in their message — then follow their latest message.
-- App/UI copy you propose should use this language unless asked otherwise.`;
+- App/UI copy you propose should use this language unless asked otherwise.
+- Honesty line once max: « ${closing} ».`;
 }

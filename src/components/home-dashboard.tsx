@@ -3,7 +3,15 @@
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
-import { stripModelSafetyFooter } from "@/lib/llm-errors";
+import {
+  dedupeRepeatedAssistantText,
+  stripChatMarkdown,
+  stripModelSafetyFooter,
+} from "@/lib/llm-errors";
+import {
+  extractSvgFromAssistant,
+  svgToDataUrl,
+} from "@/lib/chat-diagram";
 import { UserMenu } from "@/components/user-menu";
 import { useOkapiAudio } from "@/hooks/use-okapi-audio";
 import {
@@ -12,6 +20,11 @@ import {
   fileToAttachedImage,
   type AttachedImage,
 } from "@/lib/image";
+import {
+  fileToChatDocument,
+  isChatDocumentFile,
+  type AttachedChatDocument,
+} from "@/lib/chat-document";
 import { downloadTextFile, downloadProjectZip, slugifyFilename } from "@/lib/export";
 import {
   getStoredLanguage,
@@ -145,6 +158,9 @@ export function HomeDashboard({
   const [voiceOut, setVoiceOut] = useState(false);
   const [draftVoice, setDraftVoice] = useState("");
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+  const [attachedDoc, setAttachedDoc] = useState<AttachedChatDocument | null>(
+    null,
+  );
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
@@ -395,6 +411,7 @@ export function HomeDashboard({
     setSending(false);
     setDraftVoice("");
     setAttachedImage(null);
+    setAttachedDoc(null);
     setShareUrl(null);
     stopListen();
     stopSpeak();
@@ -785,16 +802,35 @@ export function HomeDashboard({
     return true;
   }
 
-  async function onPickImage(file: File | null) {
+  async function onPickAttachment(file: File | null) {
     if (!file) return;
     try {
-      setStatus("Préparation de l’image…");
-      const img = await fileToAttachedImage(file);
-      setAttachedImage(img);
-      setStatus("Image prête — Okapi pourra la lire.");
+      if (
+        file.type.startsWith("image/") ||
+        /\.(jpe?g|png|webp|gif|bmp)$/i.test(file.name)
+      ) {
+        setStatus("Préparation de l’image…");
+        const img = await fileToAttachedImage(file);
+        setAttachedDoc(null);
+        setAttachedImage(img);
+        setStatus("Image prête — Okapi pourra la lire.");
+        return;
+      }
+      if (isChatDocumentFile(file)) {
+        setStatus("Lecture du document…");
+        const doc = await fileToChatDocument(file);
+        setAttachedImage(null);
+        setAttachedDoc(doc);
+        setStatus("Document prêt — Okapi pourra l’analyser.");
+        return;
+      }
+      setStatus(
+        "Formats : image, .txt, .csv, .md, .json. Pour Excel, exporte en CSV.",
+      );
     } catch (err) {
       setAttachedImage(null);
-      setStatus(err instanceof Error ? err.message : "Image invalide");
+      setAttachedDoc(null);
+      setStatus(err instanceof Error ? err.message : "Fichier invalide");
     }
   }
 
@@ -975,31 +1011,45 @@ export function HomeDashboard({
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = (promptRef.current || prompt).trim();
-    if ((!trimmed && !attachedImage) || sending || sendingLock.current) {
-      if (!trimmed && !attachedImage) {
-        setStatus("Écris ta demande ou ajoute une image.");
+    if (
+      (!trimmed && !attachedImage && !attachedDoc) ||
+      sending ||
+      sendingLock.current
+    ) {
+      if (!trimmed && !attachedImage && !attachedDoc) {
+        setStatus("Écris ta demande ou joins une image / un document.");
       }
       return;
     }
     sendingLock.current = true;
 
     const imagePayload = attachedImage;
-    // Avec une image, on passe par l'agent vision (chat), pas le builder HTML.
+    const docPayload = attachedDoc;
+    // Image ou document → agent chat (pas le builder HTML).
     const activeLang = getStoredLanguage();
     setLanguage(activeLang);
-    const largeAsk = !imagePayload && wantsLargeProject(trimmed);
+    const largeAsk =
+      !imagePayload && !docPayload && wantsLargeProject(trimmed);
     const debug =
-      debugArmed || (!imagePayload && wantsDebug(trimmed));
+      debugArmed ||
+      (!imagePayload && !docPayload && wantsDebug(trimmed));
+    // Vidéo temporairement masquée (HeyGen) — retirer le `false &&` pour réactiver.
     const videoGen =
-      !imagePayload && Boolean(trimmed) && wantsVideoGen(trimmed);
+      false &&
+      !imagePayload &&
+      !docPayload &&
+      Boolean(trimmed) &&
+      wantsVideoGen(trimmed);
     const imageGen =
       !videoGen &&
       !imagePayload &&
+      !docPayload &&
       Boolean(trimmed) &&
       wantsImageGen(trimmed);
     // Debug + Preview = corriger l’app (les 2 lanes) ; sinon build selon lane
     const build =
       !imagePayload &&
+      !docPayload &&
       !imageGen &&
       !videoGen &&
       (wantsAppBuild(trimmed, Boolean(previewHtml), agentLane) ||
@@ -1025,7 +1075,11 @@ export function HomeDashboard({
         role: "user",
         content:
           trimmed ||
-          (imagePayload ? `Image : ${imagePayload.name}` : ""),
+          (imagePayload
+            ? `Image : ${imagePayload.name}`
+            : docPayload
+              ? `Document : ${docPayload.name}`
+              : ""),
         imageUrl: imagePayload?.dataUrl,
       },
       {
@@ -1057,6 +1111,7 @@ export function HomeDashboard({
     promptRef.current = "";
     dictateBaseRef.current = null;
     setAttachedImage(null);
+    setAttachedDoc(null);
     setDebugArmed(false);
     setStatus(null);
     setSending(true);
@@ -1067,12 +1122,16 @@ export function HomeDashboard({
       imageUrl?: string,
       imageFallbacks?: string[],
     ) => {
+      const { svg, textWithoutSvg } = extractSvgFromAssistant(content);
+      const svgUrl = svg ? svgToDataUrl(svg) : "";
+      const body = svg ? textWithoutSvg : content;
+      const finalUrl = imageUrl || (svgUrl || undefined);
       setMessages((prev) => {
         const next = [...prev];
         next[next.length - 1] = {
           role: "assistant",
-          content,
-          ...(imageUrl ? { imageUrl } : {}),
+          content: body,
+          ...(finalUrl ? { imageUrl: finalUrl } : {}),
           ...(imageFallbacks?.length ? { imageFallbacks } : {}),
         };
         return next;
@@ -1172,33 +1231,31 @@ export function HomeDashboard({
           error?: string;
           mode?: string;
           note?: string;
+          imageFallbacks?: string[];
         } | null;
         if (!imgRes.ok || !imgData?.url) {
           throw new Error(
             imgData?.error ?? `Génération image impossible (${imgRes.status})`,
           );
         }
-        setAssistant(
-          imgData.mode === "okapi" || imgData.mode === "openrouter"
-            ? `Voici ton image${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. Clique pour agrandir · télécharge si tu veux.`
-            : `Voici un aperçu${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. ${
-                imgData.note ||
-                "Image IA temporairement indisponible — réessaie dans un instant."
-              }`,
-          imgData.url,
-        );
+        const caption = imgData.note?.includes("crédit IA image")
+          ? `Voici un aperçu${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. ${imgData.note}`
+          : `Voici ton image${imgData.prompt ? ` : « ${imgData.prompt} »` : ""}. Clique pour agrandir · télécharge si tu veux.`;
+        setAssistant(caption, imgData.url, imgData.imageFallbacks);
         setStatus(null);
         return;
       }
 
       if (!build) {
-        const res = await fetch("/api/chat", {
+        const res = await authFetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message:
               trimmed ||
-              "Décris cette image clairement et dis ce qui est utile.",
+              (imagePayload
+                ? "Décris cette image clairement et dis ce qui est utile."
+                : "Analyse ce document : résumé, points clés, risques ou prochaines actions."),
             sector,
             language: activeLang,
             history: historyForChat,
@@ -1210,6 +1267,13 @@ export function HomeDashboard({
                   mimeType: imagePayload.mimeType,
                   base64: imagePayload.base64,
                   name: imagePayload.name,
+                }
+              : undefined,
+            document: docPayload
+              ? {
+                  name: docPayload.name,
+                  mimeType: docPayload.mimeType,
+                  text: docPayload.text,
                 }
               : undefined,
           }),
@@ -1243,15 +1307,9 @@ export function HomeDashboard({
         if (!stripModelSafetyFooter(answer)) {
           throw new Error("Réponse vide.");
         }
-        let finalAnswer = stripModelSafetyFooter(answer);
-        // Coupe une éventuelle double copie collée bout à bout
-        const half = Math.floor(finalAnswer.length / 2);
-        if (
-          half > 80 &&
-          finalAnswer.slice(0, half).trim() === finalAnswer.slice(half).trim()
-        ) {
-          finalAnswer = finalAnswer.slice(0, half).trim();
-        }
+        let finalAnswer = stripChatMarkdown(
+          dedupeRepeatedAssistantText(stripModelSafetyFooter(answer)),
+        );
         if (
           /\[Erreur Okapi\]|no credits|platform\.openai|OPENAI_API_KEY|insufficient_quota|429 You/i.test(
             finalAnswer,
@@ -1456,10 +1514,13 @@ export function HomeDashboard({
         }
 
         setAssistant(finalAnswer);
+        // Ne jamais remonter toute la réponse sous le composeur (doublon UI).
         setStatus(
-          /indisponible|saturé|recharge/i.test(finalAnswer)
-            ? finalAnswer
-            : "Prêt",
+          /temporairement indisponible\. Recharge la page|crédit IA Okapi est épuisé|très sollicité/i.test(
+            finalAnswer,
+          )
+            ? "Réessaie dans un instant."
+            : null,
         );
         if (voiceOutRef.current) speak(finalAnswer);
         return;
@@ -1869,7 +1930,15 @@ export function HomeDashboard({
                   <span />
                 </span>
               ) : (
-                msg.content
+                msg.role === "assistant"
+                  ? stripChatMarkdown(
+                      isStreamingAssistant &&
+                        msg.content.includes("<<<SVG") &&
+                        !msg.content.includes("SVG>>>")
+                        ? `${msg.content.split("<<<SVG")[0]?.trim() || ""}\n\nSchéma en cours…`
+                        : msg.content,
+                    )
+                  : msg.content
               )}
               {isStreamingAssistant &&
               msg.content.trim() &&
@@ -1885,7 +1954,14 @@ export function HomeDashboard({
                   {canCopy ? (
                     <button
                       type="button"
-                      onClick={() => copyMessage(msg.content, msgKey)}
+                      onClick={() =>
+                        copyMessage(
+                          msg.role === "assistant"
+                            ? stripChatMarkdown(msg.content)
+                            : msg.content,
+                          msgKey,
+                        )
+                      }
                       className="text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
                     >
                       {copiedMsgKey === msgKey ? "Copié" : "Copier"}
@@ -1894,7 +1970,9 @@ export function HomeDashboard({
                   {canSpeak ? (
                     <button
                       type="button"
-                      onClick={() => toggleSpeak(msg.content)}
+                      onClick={() =>
+                        toggleSpeak(stripChatMarkdown(msg.content))
+                      }
                       className="text-[11px] font-semibold text-okapi-forest/80 hover:text-okapi-forest"
                     >
                       {speaking ? "Stop audio" : "Écouter"}
@@ -1974,12 +2052,45 @@ export function HomeDashboard({
             </div>
           </div>
         ) : null}
+        {attachedDoc ? (
+          <div className="mb-2 flex items-center gap-3 rounded-xl border border-[var(--okapi-stroke)] bg-okapi-mist/60 px-3 py-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-okapi-forest/10 text-[11px] font-bold text-okapi-forest">
+              DOC
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-okapi-ink/70">
+                {attachedDoc.name}
+              </p>
+              <p className="text-[10px] text-okapi-ink/40">
+                {attachedDoc.text.length.toLocaleString("fr-FR")} caractères
+              </p>
+              <div className="mt-1">
+                <button
+                  type="button"
+                  onClick={() => setAttachedDoc(null)}
+                  className="text-[11px] font-semibold text-okapi-ink/45"
+                >
+                  Retirer
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <textarea
           value={prompt}
           onChange={(e) => {
             setDraftVoice("");
             promptRef.current = e.target.value;
             setPrompt(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
+              return;
+            }
+            e.preventDefault();
+            if (!sending) {
+              composerFormRef.current?.requestSubmit();
+            }
           }}
           rows={formSplit ? 2 : 3}
           placeholder={
@@ -1990,14 +2101,18 @@ export function HomeDashboard({
                 : agentLane === "conseil"
                   ? attachedImage
                     ? "Que faire avec cette image ?"
-                    : "Question, conseil… ou « crée une image / une vidéo… »"
+                    : attachedDoc
+                      ? "Que faire avec ce document ?"
+                      : "Question, conseil… ou joins un CSV / texte"
                   : devMode
                     ? "Demande un conseil — le code s’édite dans Studio…"
                     : attachedImage
                       ? "Que faire avec cette image ?"
-                      : previewHtml
-                        ? "Modifie, debug, ou dis ce qu’il faut changer…"
-                        : "App, site… ou « crée une image / une vidéo… »"
+                      : attachedDoc
+                        ? "Que faire avec ce document ?"
+                        : previewHtml
+                          ? "Modifie, debug, ou dis ce qu’il faut changer…"
+                          : "App, site… ou « crée une image… »"
           }
           className="min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none placeholder:text-okapi-ink/35"
         />
@@ -2056,10 +2171,10 @@ export function HomeDashboard({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,.txt,.csv,.tsv,.md,.markdown,.json,.log,text/plain,text/csv,application/json"
               className="hidden"
               onChange={(e) => {
-                void onPickImage(e.target.files?.[0] ?? null);
+                void onPickAttachment(e.target.files?.[0] ?? null);
                 e.target.value = "";
               }}
             />
@@ -2182,8 +2297,8 @@ export function HomeDashboard({
               onClick={() => fileInputRef.current?.click()}
               disabled={sending}
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 transition hover:bg-white disabled:opacity-60"
-              title="Ajouter une image"
-              aria-label="Ajouter une image"
+              title="Joindre image ou document (.txt, .csv, .md)"
+              aria-label="Joindre image ou document"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -2191,10 +2306,10 @@ export function HomeDashboard({
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                <rect x="3" y="5" width="18" height="14" rx="2" />
-                <circle cx="9" cy="10" r="1.5" />
-                <path d="M21 16l-5-5-8 8" />
+                <path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 01-7.78-7.78l8.49-8.49a3.5 3.5 0 014.95 4.95l-8.2 8.19a1.5 1.5 0 01-2.12-2.12l7.07-7.07" />
               </svg>
             </button>
             {supportedListen ? (
@@ -2256,7 +2371,7 @@ export function HomeDashboard({
               ? "· Debug : colle l’erreur puis Envoyer."
               : agentLane === "creer"
                 ? "· Créateur : Preview ici · Studio via menu."
-                : "· Conseiller : chat & contenus — pas Studio."}
+                : "· Conseiller : chat, CSV/texte, micro — pas Studio."}
           </span>
         </p>
       )}
@@ -2426,8 +2541,8 @@ export function HomeDashboard({
                     </h1>
                     <p className="mt-1 text-sm text-okapi-ink/50">
                       {agentLane === "creer"
-                        ? "Décris l’app à créer — Preview ici, Studio seulement si tu l’ouvres."
-                        : "Questions, conseils, contenus — Okapi peut se tromper."}
+                        ? "Décris l’app — Preview ici. Joins une image si besoin."
+                        : "Questions, docs CSV/texte, voix — Okapi peut se tromper."}
                     </p>
                   </div>
                 </div>

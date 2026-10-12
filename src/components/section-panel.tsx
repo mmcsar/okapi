@@ -50,7 +50,7 @@ const copy: Record<
     subtitle: "Nouveautés Okapi pour la RDC",
     items: [
       { title: "Templates Mining & Université", meta: "Nouveau" },
-      { title: "Support Lingala / Swahili (bientôt)", meta: "Roadmap" },
+      { title: "Support Lingala / Swahili", meta: "Actif" },
       { title: "Connecteur Mobile Money", meta: "À venir" },
     ],
     actions: [{ id: "learn", label: "En savoir plus" }],
@@ -105,9 +105,9 @@ const copy: Record<
     subtitle: "Langue de l’interface Okapi",
     items: [
       { title: "Français", meta: "Actif" },
-      { title: "Lingala", meta: "Bientôt" },
-      { title: "Swahili", meta: "Bientôt" },
-      { title: "English", meta: "Bientôt" },
+      { title: "Lingala", meta: "Actif" },
+      { title: "Swahili", meta: "Actif" },
+      { title: "English", meta: "Actif" },
     ],
     actions: [{ id: "settings", label: "Ouvrir Paramètres" }],
   },

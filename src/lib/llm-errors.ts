@@ -43,6 +43,68 @@ export function stripModelSafetyFooter(text: string) {
     .trim();
 }
 
+/** Enlève **gras** / titres MD trop visibles dans le chat Accueil. */
+export function stripChatMarkdown(text: string) {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/`([^`\n]+)`/g, "$1");
+}
+
+/**
+ * Certains flux collent la même réponse deux fois bout à bout.
+ * Garde une seule copie.
+ */
+export function dedupeRepeatedAssistantText(text: string) {
+  const t = text.replace(/\r\n/g, "\n").trim();
+  if (t.length < 120) return t;
+
+  const half = Math.floor(t.length / 2);
+  const left = t.slice(0, half).trim();
+  const right = t.slice(half).trim();
+  if (left.length > 80 && left === right) return left;
+
+  const norm = (s: string) =>
+    s
+      .replace(/\*\*/g, "")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+  // Même ouverture répétée plus loin (copie collée)
+  const opener = t.split("\n").find((l) => l.trim().length >= 24)?.trim();
+  if (opener) {
+    const second = t.indexOf(opener, opener.length + 8);
+    if (second > 80) {
+      const a = t.slice(0, second).trim();
+      const b = t.slice(second).trim();
+      const na = norm(a);
+      const nb = norm(b);
+      if (
+        na.length > 80 &&
+        nb.length > 80 &&
+        (na === nb ||
+          (Math.abs(na.length - nb.length) < Math.max(na.length, nb.length) * 0.2 &&
+            na.slice(0, 120) === nb.slice(0, 120)))
+      ) {
+        return a;
+      }
+    }
+  }
+
+  // Blocs séparés par ligne vide : 1re moitié = 2e moitié
+  const blocks = t.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  if (blocks.length >= 2 && blocks.length % 2 === 0) {
+    const mid = blocks.length / 2;
+    const a = blocks.slice(0, mid).join("\n\n");
+    const b = blocks.slice(mid).join("\n\n");
+    if (norm(a).length > 80 && norm(a) === norm(b)) return a;
+  }
+
+  return t;
+}
+
 /**
  * Messages visibles par l’utilisateur final.
  * Ne jamais citer OpenAI, Gemini, clés API, Vercel, etc.

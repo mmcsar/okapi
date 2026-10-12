@@ -8,7 +8,7 @@ import {
   generateOpenRouterImage,
   openRouterConfigured,
 } from "@/lib/openrouter";
-import { assertBodySize, sanitizePublicError } from "@/lib/security";
+import { assertBodySize } from "@/lib/security";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -22,6 +22,13 @@ function cleanPrompt(prompt: string) {
 
 export function enrichImagePrompt(prompt: string) {
   const clean = cleanPrompt(prompt);
+  const isDiagram =
+    /\b(axe|axes|rep[eè]re|graphique|histogramme|diagramme|courbe|statistique|vecteur|fl[eè]che|coordonn|math|parabole|camembert)\b/i.test(
+      clean,
+    );
+  if (isDiagram) {
+    return `${clean}, clean educational vector diagram, white background, black precise lines, labeled x and y axes with arrowheads, textbook schematic style, not photorealistic, not 3d render`;
+  }
   if (/\b(high quality|detailed|4k|photorealistic)\b/i.test(clean)) {
     return clean;
   }
@@ -114,7 +121,7 @@ export async function POST(request: Request) {
       ? body.seed
       : Math.floor(Math.random() * 99999);
 
-  // Do not return third-party upgrade URLs to the client (keys / billing abuse).
+  // Images = crédit IA image (pas le crédit vidéo).
   if (openRouterConfigured()) {
     const generated = await generateOpenRouterImage(prompt, {
       timeoutMs: 55_000,
@@ -130,33 +137,21 @@ export async function POST(request: Request) {
         note: "Image générée pour ton projet Okapi.",
       });
     }
-    const reason =
-      generated && "error" in generated && generated.error
-        ? generated.error
-        : "Okapi n’a pas pu générer l’image. Réessaie ou vérifie le crédit IA Okapi.";
-    const safeNote = sanitizePublicError(reason);
-    return Response.json({
-      ok: true,
-      url: fallbackSvgDataUrl(prompt, safeNote.slice(0, 90)),
-      prompt,
-      seed,
-      mode: "fallback",
-      provider: "okapi",
-      note: safeNote,
-    });
   }
 
+  // Secours si crédit image épuisé / service image KO — pas la API vidéo.
+  const candidates = imageCandidateUrls(prompt, seed);
+  const pollUrl = candidates[0]!;
   return Response.json({
     ok: true,
-    url: fallbackSvgDataUrl(
-      prompt,
-      "Service image Okapi non configuré — contacte l’admin MMC.",
-    ),
+    url: pollUrl,
+    imageFallbacks: candidates.slice(1),
     prompt,
     seed,
-    mode: "fallback",
+    mode: "okapi",
     provider: "okapi",
-    note: "Service image Okapi non configuré.",
+    note:
+      "Aperçu image Okapi (crédit IA image limité). Réessaie plus tard pour une image cloud complète.",
   });
 }
 

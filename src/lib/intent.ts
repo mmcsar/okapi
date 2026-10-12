@@ -68,6 +68,22 @@ export function wantsLiveCurrentFact(message: string): boolean {
 const METIER_BUILD_RE =
   /\b(boutique|catalogue|stock|panier|checkout|commande|mobile\s*money|m[- ]?pesa|airtel\s*money|orange\s*money|whatsapp|restaurant|menu|clinique|patient|rendez[- ]?vous|ecole|eleve|crm|clients?|dashboard|marketplace|facture|caisse|flotte|livraison)\b/i;
 
+/**
+ * Schéma maths / stats (axes x-y, flèches, courbes, histogrammes…).
+ * Mieux en SVG chat qu’en image photo.
+ */
+export function wantsMathDiagram(message: string): boolean {
+  const norm = stripAccents(message);
+  const topic =
+    /\b(axe|axes|repere|coordonnee|coordonnees|graphique|histogramme|diagramme|courbe|nuage de points|fonction|parabole|vecteur|fleche|origine|ordonnee|abscisse|camembert|boxplot)\b/.test(
+      norm,
+    ) || /\b(x\s*[,/]\s*y|axe\s*x|axe\s*y)\b/.test(norm);
+  if (!topic) return false;
+  return /\b(dessine|trace|schema|montre|cree|creer|genere|fais|illustre|figure|representation|visualise)\b/.test(
+    norm,
+  );
+}
+
 /** Demande d’image seule (pas une app avec photos). */
 export function wantsImageGen(message: string): boolean {
   const m = message
@@ -78,8 +94,13 @@ export function wantsImageGen(message: string): boolean {
   // « limage » / « l image » / fautes fréquentes
   const norm = m.replace(/\bl\s*image\b/g, " image ").replace(/\s+/g, " ");
 
+  // Schéma maths/stats → pas le pipeline image photo (SVG chat)
+  if (wantsMathDiagram(message) && !/\b(photo|logo|illustration realist)\b/.test(norm)) {
+    return false;
+  }
+
   const imageAsk =
-    /\b(cree|creer|gener[eè]e?|fabrique|fais|dessine|illustre|montre)\b.{0,60}\b(image|illustration|photo|logo|visuel|dessin|picture|picto)\b/.test(
+    /\b(cree|creer|gener[eè]e?|fabrique|fais|dessine|illustre|montre)\b.{0,60}\b(image|illustration|photo|logo|visuel|dessin|picture|picto|schema|graphique|diagramme)\b/.test(
       norm,
     ) ||
     /\b(image|illustration|photo|logo|visuel|dessin)\b.{0,40}\b(de|d |du|des|pour|avec|qui|un|une)\b/.test(
@@ -123,25 +144,29 @@ function stripAccents(message: string) {
 
 /**
  * Vidéo seule (« crée une vidéo… ») — /api/heygen/video, pas le builder.
- * « vidéo » sans accent après normalisation.
+ * OK aussi en Créateur : « vidéo pour ma boutique » = vidéo, pas une app.
  */
 export function wantsVideoGen(message: string): boolean {
   const norm = stripAccents(message);
-  const videoAsk =
+  const createsVideo =
     /\b(cree|creer|genere|fabrique|fais|tourne)\b.{0,50}\b(video|clip|avatar)\b/.test(
       norm,
     ) ||
+    /\bcree[- ]?video\b/.test(norm) ||
     /\b(une?|un|la|le) (courte? |belle? )?(video|clip)\b/.test(norm) ||
     /\bvideo (de|d |du|pour|avec|sur|avatar)\b/.test(norm);
 
-  if (!videoAsk) return false;
-  if (
-    /\b(app|application|site|page web|boutique|dashboard)\b/.test(norm) &&
-    !/\b(juste|seulement|uniquement).{0,24}\b(video|clip)\b/.test(norm)
-  ) {
-    return false;
-  }
-  return true;
+  if (!createsVideo) return false;
+
+  // App + vidéo intégrée → builder ; sinon priorité vidéo (HeyGen)
+  const buildsAppWithVideo =
+    /\b(cree|creer|genere|fabrique|fais|construire|build)\b.{0,48}\b(app|application|site|page web|dashboard|crm)\b/.test(
+      norm,
+    ) &&
+    /\b(video|clip|avatar)\b/.test(norm) &&
+    !/\b(juste|seulement|uniquement).{0,24}\b(video|clip|avatar)\b/.test(norm);
+
+  return !buildsAppWithVideo;
 }
 
 export function extractVideoPrompt(message: string): string {

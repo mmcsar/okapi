@@ -537,7 +537,7 @@ export async function generateOpenRouterImage(
         if (imgRes.status === 402) {
           return {
             error:
-              "Le crédit image Okapi est épuisé. Recharge le crédit IA Okapi puis réessaie.",
+              "Crédit IA image épuisé (pas le crédit vidéo). Okapi tentera un aperçu image de secours.",
           };
         }
       }
@@ -581,7 +581,7 @@ export async function generateOpenRouterImage(
         if (chatRes.status === 402) {
           return {
             error:
-              "Le crédit image Okapi est épuisé. Recharge le crédit IA Okapi puis réessaie.",
+              "Crédit IA image épuisé (pas le crédit vidéo). Okapi tentera un aperçu image de secours.",
           };
         }
       }
