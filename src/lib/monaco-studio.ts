@@ -137,7 +137,7 @@ export function monacoEditorOptions(readOnly: boolean) {
       strings: true,
     },
     parameterHints: { enabled: true },
-    hover: { enabled: true, delay: 280 },
+    hover: { enabled: "on" as const, delay: 280 },
     scrollbar: {
       verticalScrollbarSize: 10,
       horizontalScrollbarSize: 10,
