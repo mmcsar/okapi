@@ -7,6 +7,7 @@ import { HomeDashboard } from "@/components/home-dashboard";
 import { LoginPanel } from "@/components/login-panel";
 import { ProjectsPanel } from "@/components/projects-panel";
 import { ScheduledTasksPanel } from "@/components/scheduled-tasks-panel";
+import { PwaInstallBanner } from "@/components/pwa-install-banner";
 import { SettingsPanel } from "@/components/settings-panel";
 import { Sidebar } from "@/components/sidebar";
 import type { OkapiProject } from "@/lib/supabase";
@@ -285,6 +286,15 @@ function HomeApp() {
           />
         ) : null}
       </div>
+
+      <PwaInstallBanner
+        hidden={
+          studioLayout ||
+          activeNav === "settings" ||
+          activeNav === "login" ||
+          activeNav === "billing"
+        }
+      />
     </div>
   );
 }

@@ -928,6 +928,27 @@ body::before {
     linear-gradient(180deg, #0d1814 0%, #0a1410 100%);
 }
 
+@keyframes okapi-pwa-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.okapi-pwa-banner > div {
+  animation: okapi-pwa-in 0.45s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .okapi-pwa-banner > div {
+    animation: none;
+  }
+}
+
 /* Monaco — thème okapi-forest, coins et focus alignés Studio */
 .okapi-studio-code .monaco-editor,
 .okapi-studio-code .monaco-editor .overflow-guard {

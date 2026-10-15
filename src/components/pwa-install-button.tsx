@@ -1,52 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
+import { usePwaInstall } from "@/hooks/use-pwa-install";
 
 export function PwaInstallButton() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
-    null,
-  );
-  const [installed, setInstalled] = useState(false);
-
-  useEffect(() => {
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      // iOS Safari
-      ("standalone" in navigator &&
-        Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
-    if (standalone) {
-      setInstalled(true);
-      return;
-    }
-
-    function onBip(e: Event) {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-    }
-    function onInstalled() {
-      setInstalled(true);
-      setDeferred(null);
-    }
-
-    window.addEventListener("beforeinstallprompt", onBip);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBip);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
-  }, []);
-
-  async function install() {
-    if (!deferred) return;
-    await deferred.prompt();
-    await deferred.userChoice;
-    setDeferred(null);
-  }
+  const { installed, canPrompt, iosHint, install } = usePwaInstall();
 
   if (installed) {
     return (
@@ -56,15 +13,28 @@ export function PwaInstallButton() {
     );
   }
 
-  if (!deferred) {
+  if (!canPrompt) {
     return (
       <p className="text-sm text-okapi-ink/50">
-        Sur mobile : menu du navigateur →{" "}
-        <span className="font-medium text-okapi-ink/70">
-          Ajouter à l’écran d’accueil
-        </span>
-        . Sur Chrome desktop, l’icône d’installation apparaît dans la barre
-        d’adresse.
+        {iosHint ? (
+          <>
+            Sur Safari : bouton{" "}
+            <span className="font-medium text-okapi-ink/70">Partager</span> →{" "}
+            <span className="font-medium text-okapi-ink/70">
+              Sur l’écran d’accueil
+            </span>
+            .
+          </>
+        ) : (
+          <>
+            Sur mobile : menu du navigateur →{" "}
+            <span className="font-medium text-okapi-ink/70">
+              Ajouter à l’écran d’accueil
+            </span>
+            . Sur Chrome desktop, l’icône d’installation apparaît dans la barre
+            d’adresse.
+          </>
+        )}
       </p>
     );
   }
