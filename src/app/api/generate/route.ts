@@ -487,6 +487,7 @@ export async function POST(request: Request) {
       const memory = await loadUserIntelligenceContext(
         session.supabase,
         session.user.id,
+        session.user,
       );
       memoryBlock = intelligenceSystemBlock(memory);
     }

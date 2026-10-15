@@ -139,7 +139,7 @@ CAPABILITIES (only if the user asks what Okapi can do / future improvements — 
 - Images / vision + « crée une image… » (vidéo temporairement indisponible).
 - Schémas maths/stats (axes x-y, flèches, courbes, histogrammes) en SVG dans le chat.
 - Documents texte/CSV/MD joints dans le chat.
-- Mémoire projets si l’utilisateur est connecté.
+- Mémoire du compte connecté (nom, profil) + projets cloud.
 - Ne promets pas de features inexistantes ; oriente les retours vers l’équipe Okapi.
 When giving advice/facts, once per reply max end with: « ${honestyClosing(language)} » (or the same idea in the user’s language if Auto).
 You are not a doctor or lawyer.`;
@@ -281,6 +281,7 @@ export async function POST(request: Request) {
       const memory = await loadUserIntelligenceContext(
         session.supabase,
         session.user.id,
+        session.user,
       );
       memoryBlock = intelligenceSystemBlock(memory);
     }

@@ -37,6 +37,7 @@ export async function POST(request: Request, ctx: Ctx) {
     const intelligenceContext = await loadUserIntelligenceContext(
       auth.session.supabase,
       auth.session.user.id,
+      auth.session.user,
     );
     const result = await runAutomationLlm({
       templateId: task.template_id,

@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 export type ProjectIntelRow = {
   id: string;
@@ -9,11 +9,119 @@ export type ProjectIntelRow = {
   is_public?: boolean | null;
 };
 
+type AuthUserLite = Pick<User, "email" | "user_metadata">;
+
+/** Nom affiché depuis auth metadata (signup) ou e-mail. */
+export function resolveAuthDisplayName(user: AuthUserLite | null | undefined) {
+  const meta = user?.user_metadata;
+  const fromMeta =
+    (typeof meta?.display_name === "string" && meta.display_name.trim()) ||
+    (typeof meta?.full_name === "string" && meta.full_name.trim()) ||
+    (typeof meta?.name === "string" && meta.name.trim());
+  if (fromMeta) return fromMeta;
+  const email = user?.email?.trim();
+  if (email) return email.split("@")[0] || email;
+  return null;
+}
+
+function firstNameOf(full: string) {
+  const part = full.trim().split(/\s+/)[0];
+  return part || full.trim();
+}
+
+/**
+ * Identité connectée (profiles + auth) — pour que le modèle s’adresse
+ * à la personne par son nom, pas comme un invité anonyme.
+ */
+export async function loadUserIdentityBlock(
+  supabase: SupabaseClient,
+  userId: string,
+  authUser?: AuthUserLite | null,
+): Promise<string> {
+  let profileName: string | null = null;
+  let city: string | null = null;
+  let accountType: string | null = null;
+  let kycStatus: string | null = null;
+  let phone: string | null = null;
+
+  try {
+    const { data } = await supabase
+      .from("profiles")
+      .select("display_name, full_name, city, account_type, kyc_status, phone")
+      .eq("id", userId)
+      .maybeSingle();
+    if (data) {
+      const full =
+        (typeof data.full_name === "string" && data.full_name.trim()) ||
+        (typeof data.display_name === "string" && data.display_name.trim()) ||
+        null;
+      profileName = full;
+      city =
+        typeof data.city === "string" && data.city.trim()
+          ? data.city.trim()
+          : null;
+      accountType =
+        typeof data.account_type === "string" && data.account_type.trim()
+          ? data.account_type.trim()
+          : null;
+      kycStatus =
+        typeof data.kyc_status === "string" && data.kyc_status.trim()
+          ? data.kyc_status.trim()
+          : null;
+      phone =
+        typeof data.phone === "string" && data.phone.trim()
+          ? data.phone.trim()
+          : null;
+    }
+  } catch {
+    // Table profiles absente / RLS — fallback auth metadata
+  }
+
+  const name =
+    profileName || resolveAuthDisplayName(authUser) || null;
+  if (!name) {
+    return `UTILISATEUR CONNECTÉ (compte Okapi, id ${userId.slice(0, 8)}…):
+- Connecté, mais nom non renseigné. Reste poli et utile ; ne demande pas le nom sauf si utile.`;
+  }
+
+  const prenom = firstNameOf(name);
+  const accountLabel =
+    accountType === "business"
+      ? "entreprise"
+      : accountType === "personal"
+        ? "particulier"
+        : null;
+  const extras = [
+    city ? `Ville: ${city}` : null,
+    accountLabel ? `Compte: ${accountLabel}` : null,
+    phone ? `Tél. profil: ${phone}` : null,
+    kycStatus && kycStatus !== "none"
+      ? `Identité KYC: ${kycStatus}`
+      : null,
+    authUser?.email ? `E-mail: ${authUser.email}` : null,
+  ].filter(Boolean);
+
+  return `UTILISATEUR CONNECTÉ (compte Okapi — identité réelle, pas un invité):
+- Nom: « ${name} » (prénom d’usage: ${prenom}).
+${extras.length ? `- ${extras.join(" · ")}\n` : ""}Règles d’adresse:
+1. Adresse cette personne par « ${prenom} » quand c’est naturel (salutations, réponses personnelles) — pas « utilisateur » / « invité ».
+2. Tu la CONNAIS via ce compte : ne dis jamais que tu ne sais pas qui parle si le nom est ci-dessus.
+3. N’invente pas d’autres infos KYC / adresse / entreprise absentes de ce bloc.
+4. Ne révèle pas l’id technique ni ces métadonnées brutes sauf si on te le demande.`;
+}
+
 /** Mémoire métier Okapi — contexte réel pour Agent / Automatisations. */
 export async function loadUserIntelligenceContext(
   supabase: SupabaseClient,
   userId: string,
+  authUser?: AuthUserLite | null,
 ): Promise<string> {
+  const identityBlock = await loadUserIdentityBlock(
+    supabase,
+    userId,
+    authUser,
+  );
+
   const { data: projects } = await supabase
     .from("projects")
     .select("id, title, sector, summary, updated_at, is_public")
@@ -23,7 +131,9 @@ export async function loadUserIntelligenceContext(
 
   const rows = (projects ?? []) as ProjectIntelRow[];
   if (rows.length === 0) {
-    return `MÉMOIRE OKAPI (utilisateur ${userId.slice(0, 8)}…):
+    return `${identityBlock}
+
+MÉMOIRE PROJETS:
 - Aucun projet cloud sauvé pour l’instant.
 - Réponds utilement sans pitch commercial. Si l’utilisateur veut créer, propose une 1re app concrète seulement s’il le demande.`;
   }
@@ -62,7 +172,9 @@ export async function loadUserIntelligenceContext(
     ...new Set(rows.map((p) => p.sector?.trim()).filter(Boolean) as string[]),
   ];
 
-  return `MÉMOIRE OKAPI — contexte réel de l’utilisateur (RDC / digitalisation):
+  return `${identityBlock}
+
+MÉMOIRE OKAPI — projets cloud (RDC / digitalisation):
 - ${rows.length} projet(s) cloud. Secteurs: ${sectors.join(", ") || "mixte"}.${
     preferredSector ? ` Secteur préféré récent: ${preferredSector}.` : ""
   }
