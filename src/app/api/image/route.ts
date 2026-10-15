@@ -121,7 +121,8 @@ export async function POST(request: Request) {
       ? body.seed
       : Math.floor(Math.random() * 99999);
 
-  // Images = crédit IA image (pas le crédit vidéo).
+  // Images = modèles image dédiés (Gemini / Flux) — pas Opus (texte seul).
+  let openRouterNote: string | undefined;
   if (openRouterConfigured()) {
     const generated = await generateOpenRouterImage(prompt, {
       timeoutMs: 55_000,
@@ -137,22 +138,47 @@ export async function POST(request: Request) {
         note: "Image générée pour ton projet Okapi.",
       });
     }
+    if (generated?.error) openRouterNote = generated.error;
   }
 
-  // Secours si crédit image épuisé / service image KO — pas la API vidéo.
+  // Secours : télécharger un aperçu côté serveur (évite CORS navigateur).
   const candidates = imageCandidateUrls(prompt, seed);
-  const pollUrl = candidates[0]!;
-  return Response.json({
-    ok: true,
-    url: pollUrl,
-    imageFallbacks: candidates.slice(1),
-    prompt,
-    seed,
-    mode: "okapi",
-    provider: "okapi",
-    note:
-      "Aperçu image Okapi (crédit IA image limité). Réessaie plus tard pour une image cloud complète.",
-  });
+  for (const candidate of candidates) {
+    try {
+      const res = await fetch(candidate, {
+        signal: AbortSignal.timeout(28_000),
+        headers: { Accept: "image/*,*/*" },
+        cache: "no-store",
+      });
+      if (!res.ok) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 800) continue;
+      const ct = (res.headers.get("content-type") || "image/jpeg").split(";")[0]!;
+      if (!ct.startsWith("image/")) continue;
+      return Response.json({
+        ok: true,
+        url: `data:${ct};base64,${buf.toString("base64")}`,
+        prompt,
+        seed,
+        mode: "okapi",
+        provider: "okapi",
+        note:
+          openRouterNote ||
+          "Aperçu image Okapi. Réessaie plus tard pour une image cloud complète.",
+      });
+    } catch {
+      /* try next */
+    }
+  }
+
+  return Response.json(
+    {
+      error:
+        openRouterNote ||
+        "Impossible de générer l’image pour le moment. Vérifie le crédit IA image Okapi, puis réessaie « crée une image… ».",
+    },
+    { status: 503 },
+  );
 }
 
 export async function GET(request: Request) {

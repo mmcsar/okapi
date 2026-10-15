@@ -29,7 +29,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error:
-          "Base Okapi non configurée (clé service manquante).",
+          "Clé secrète Supabase manquante. Pose SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local.",
         setupRequired: true,
       },
       { status: 503 },
@@ -110,7 +110,7 @@ export async function DELETE(request: Request, ctx: Ctx) {
     return NextResponse.json(
       {
         error:
-          "Base Okapi non configurée (clé service manquante).",
+          "Clé secrète Supabase manquante. Pose SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local.",
         setupRequired: true,
       },
       { status: 503 },

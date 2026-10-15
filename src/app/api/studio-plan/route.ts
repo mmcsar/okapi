@@ -68,6 +68,7 @@ async function complete(opts: {
       user: opts.user,
       maxTokens: 900,
       engine: opts.engine,
+      reasoningEffort: opts.engine === "pro" ? "high" : "medium",
     });
   }
   throw new Error(missingLlmMessage());

@@ -53,6 +53,49 @@ export function stripChatMarkdown(text: string) {
 }
 
 /**
+ * Coupe les ouvertures « chatbot » et les digressions méta (capacité / Accueil).
+ * Garde le fond utile.
+ */
+export function polishAssistantProse(text: string) {
+  let t = text.replace(/\r\n/g, "\n").trim();
+  if (!t) return t;
+
+  // Prefaces trop polies / vides
+  t = t.replace(
+    /^(je\s+comprends\s+(votre|ta)\s+demande[^.!?\n]*[.!?]\s*)+/i,
+    "",
+  );
+  t = t.replace(
+    /^(bien\s+s[uû]r[!]?|absolument[!]?|excellente\s+question[!]?|avec\s+plaisir[!]?)\s*/i,
+    "",
+  );
+  t = t.replace(
+    /^okapi\s+\(mmc\s+sarl\)\s+[^.!?\n]*[.!?]\s*/i,
+    "",
+  );
+
+  // Paragraphes méta « connectez-vous / plateforme gère / je dois être honnête sur mes capacités »
+  const lines = t.split(/\n+/);
+  const filtered = lines.filter((line) => {
+    const n = line
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "");
+    if (!n.trim()) return true;
+    if (
+      /\b(je dois etre honnete sur mes capacites|cette fonctionnalite est geree|connectez[- ]vous sur|consulter le calendrier|affichera? automatiquement|n.hesitez pas a preciser)\b/.test(
+        n,
+      )
+    ) {
+      return false;
+    }
+    return true;
+  });
+  t = filtered.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return t;
+}
+
+/**
  * Certains flux collent la même réponse deux fois bout à bout.
  * Garde une seule copie.
  */

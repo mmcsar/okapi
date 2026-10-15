@@ -31,8 +31,11 @@ import {
   assessGenerateQuality,
   buildGenerateRepairPrompt,
   maxGenerateRepairAttempts,
+  maxRepairAttemptsForIssues,
   OKAPI_PRODUCT_DESIGN,
+  OKAPI_VITRINE_DESIGN,
   shouldRepairGenerate,
+  wantsVitrineBrief,
 } from "@/lib/generate-quality";
 import { ensureReadmeArtifact } from "@/lib/project-artifacts";
 import {
@@ -74,11 +77,12 @@ Generate ONE complete web app as a single HTML file ONLY when asked.
 ${agentBlock}
 Rules:
 1. ONLY the HTML document (start with <!DOCTYPE html> and ALWAYS end with </html>). No markdown.
-2. Do only what was requested — no useless bonus sections. Prefer a complete short page over a truncated long one.
+2. Do only what was requested — no useless bonus sections. Prefer a complete short page over a truncated long one. Never stop mid-tag or mid-script — close </script></body></html>.
 3. Mobile-first. RDC context (WhatsApp / Mobile Money) when asked or clearly useful.
 4. Tailwind CDN: https://cdn.tailwindcss.com + inline JS if needed.
 5. Header with project name. Clean design, not generic purple.
 6. ${OKAPI_PRODUCT_DESIGN}
+6b. Vitrine / landing briefs: ${OKAPI_VITRINE_DESIGN}
 7. On edit: return the FULL updated HTML, always closed with </html>.
 8. Never mention third-party AI vendors in the generated UI.
 9. Finish the document. A website or app that cuts off mid-page is a failed generation.
@@ -136,6 +140,7 @@ Setup steps in the user's language. Call the database "base Okapi" — never nam
 Rules:
 1. HTML is mobile-first, Tailwind CDN, RDC-friendly (WhatsApp / Mobile Money when useful).
 2. ${OKAPI_PRODUCT_DESIGN}
+2b. Vitrine / landing briefs: ${OKAPI_VITRINE_DESIGN}
 3. Always include HTML + REACT + NEXT + SQL + API + README (all sections, even on edits).
 4. React/Next must be real runnable stubs aligned with the HTML product — not empty placeholders.
 5. SQL: enable RLS, sensible policies, multiple related tables when the product needs them.
@@ -354,6 +359,7 @@ async function generateWithFallback(
       user: prompt,
       maxTokens,
       engine,
+      reasoningEffort: engine === "pro" ? "xhigh" : "high",
     });
     onChunk?.(text);
     return text;
@@ -403,6 +409,7 @@ async function generateWithFallback(
         user: prompt,
         maxTokens,
         engine,
+        reasoningEffort: engine === "pro" ? "xhigh" : "high",
       });
       onChunk?.(text);
       return text;
@@ -468,7 +475,10 @@ export async function POST(request: Request) {
   const wantStream = body?.stream !== false;
 
   const agent = resolveOkapiAgent({ sector, instruction: message });
-  const agentBlock = agentSystemBlock(agent);
+  let agentBlock = agentSystemBlock(agent);
+  if (wantsVitrineBrief(message) || agent.id === "vitrine") {
+    agentBlock += `\n\nVITRINE MODE ACTIVE:\n${OKAPI_VITRINE_DESIGN}\nPrefer a polished one-page marketing site (hero + sections + WhatsApp CTA).`;
+  }
 
   let memoryBlock = "";
   try {
@@ -587,9 +597,12 @@ export async function POST(request: Request) {
       artifacts.html = ensureHtmlDocument(artifacts.html);
       const issues = assessGenerateQuality(artifacts, { mode, raw });
       if (!shouldRepairGenerate(issues)) break;
+      if (attempt >= maxRepairAttemptsForIssues(issues)) break;
 
       opts.onStatus?.(
-        "Okapi vérifie la génération et corrige automatiquement…",
+        attempt === 0
+          ? "Okapi vérifie la génération et corrige automatiquement…"
+          : "Okapi finalise le HTML tronqué…",
       );
 
       const repairPrompt = buildGenerateRepairPrompt({

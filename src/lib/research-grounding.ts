@@ -1,6 +1,6 @@
 /**
  * Ancrage recherche — sources publiques pour réponses exactes (Conseiller).
- * Priorité RDC : Wikipedia FR + DuckDuckGo + fil Radio Okapi (RSS).
+ * Priorité RDC : Radio Okapi + Actualite.cd + Wikipedia FR + DuckDuckGo.
  * Pas d’invention : le modèle doit s’appuyer sur le contexte injecté.
  */
 
@@ -36,8 +36,15 @@ function isRdcTopic(message: string) {
 }
 
 function wantsNews(message: string) {
-  return /\b(dernieres? nouvelles?|actu(alite)?s?|ce qui se passe|breaking|aujourd hui|en ce moment)\b/i.test(
+  return /\b(dernieres? nouvelles?|actu(alite)?s?|ce qui se passe|breaking|aujourd hui|en ce moment|info du jour)\b/i.test(
     normalize(message),
+  );
+}
+
+function wantsFactQuestion(message: string) {
+  const m = normalize(message);
+  return /\b(qui|quel|quelle|quels|quelles|combien|quand|ou|pourquoi|comment|c est quoi|quest[- ]ce|explique|recherche|renseigne|inform|difference|defini|definition|histoire de|capitale|population|superficie|gouverneur|ministre|president|maire)\b/.test(
+    m,
   );
 }
 
@@ -105,6 +112,15 @@ function stripXml(s: string) {
     .trim();
 }
 
+function ddgAnswerText(answer: unknown): string {
+  if (typeof answer === "string") return answer.trim();
+  if (answer && typeof answer === "object") {
+    const o = answer as { Text?: string; text?: string; result?: string };
+    return (o.Text || o.text || o.result || "").trim();
+  }
+  return "";
+}
+
 async function fromDuckDuckGo(query: string) {
   const url =
     `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}` +
@@ -114,7 +130,7 @@ async function fromDuckDuckGo(query: string) {
     AbstractURL?: string;
     AbstractSource?: string;
     Heading?: string;
-    Answer?: string | { result?: string };
+    Answer?: string | { Text?: string; text?: string; result?: string };
     Definition?: string;
     DefinitionURL?: string;
     RelatedTopics?: Array<{ Text?: string; FirstURL?: string } | string>;
@@ -122,16 +138,11 @@ async function fromDuckDuckGo(query: string) {
   if (!data) return [] as ResearchPacket["snippets"];
 
   const out: ResearchPacket["snippets"] = [];
-  const answer =
-    typeof data.Answer === "string"
-      ? data.Answer
-      : data.Answer && typeof data.Answer === "object"
-        ? ""
-        : "";
-  if (answer.trim()) {
+  const answer = ddgAnswerText(data.Answer);
+  if (answer) {
     out.push({
       title: data.Heading || "Réponse courte",
-      text: answer.trim().slice(0, 1200),
+      text: answer.slice(0, 1200),
       url: data.AbstractURL,
     });
   }
@@ -166,7 +177,7 @@ async function fromDuckDuckGo(query: string) {
 async function fromWikipediaFr(query: string) {
   const searchUrl =
     `https://fr.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}` +
-    `&limit=2&namespace=0&format=json&origin=*`;
+    `&limit=3&namespace=0&format=json&origin=*`;
   const search = (await fetchJson(searchUrl)) as
     | [string, string[], string[], string[]]
     | null;
@@ -175,7 +186,7 @@ async function fromWikipediaFr(query: string) {
   if (!titles.length) return [] as ResearchPacket["snippets"];
 
   const out: ResearchPacket["snippets"] = [];
-  for (let i = 0; i < Math.min(titles.length, 2); i++) {
+  for (let i = 0; i < Math.min(titles.length, 3); i++) {
     const title = titles[i];
     const pageUrl = pageUrls[i];
     const sumUrl = `https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
@@ -187,25 +198,32 @@ async function fromWikipediaFr(query: string) {
     if (!sum?.extract?.trim()) continue;
     out.push({
       title: sum.title || title,
-      text: sum.extract.trim().slice(0, 1800),
+      text: sum.extract.trim().slice(0, 2000),
       url: sum.content_urls?.desktop?.page || pageUrl,
     });
   }
   return out;
 }
 
-/** Fil actualité RDC — titres récents, filtrés par mots de la question. */
-async function fromRadioOkapiRss(query: string) {
-  const xml = await fetchText(
-    "https://feeds.feedburner.com/radiookapi/actu?format=xml",
-  );
+/** Parse un fil RSS générique → snippets scorés vs query. */
+async function fromNewsRss(
+  feedUrl: string,
+  sourceLabel: string,
+  sourceHome: string,
+  query: string,
+  opts?: { maxItems?: number; take?: number },
+) {
+  const xml = await fetchText(feedUrl);
   if (!xml) return [] as ResearchPacket["snippets"];
 
-  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].slice(0, 40);
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].slice(
+    0,
+    opts?.maxItems ?? 50,
+  );
   const tokens = normalize(query)
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length >= 4)
-    .slice(0, 8);
+    .slice(0, 10);
 
   const scored: { score: number; snip: ResearchPacket["snippets"][0] }[] = [];
   for (const m of items) {
@@ -225,24 +243,48 @@ async function fromRadioOkapiRss(query: string) {
     for (const t of tokens) {
       if (hay.includes(t)) score += 1;
     }
-    // Actualité générale RDC : garder quelques titres même sans match fort
-    if (score === 0 && wantsNews(query)) score = 0.2;
+    if (score === 0 && wantsNews(query)) score = 0.25;
     if (score <= 0) continue;
     scored.push({
       score,
       snip: {
-        title: `Radio Okapi — ${title}`,
-        text: (desc || title).slice(0, 900),
-        url: link || "https://www.radiookapi.net/",
+        title: `${sourceLabel} — ${title}`,
+        text: (desc || title).slice(0, 1000),
+        url: link || sourceHome,
       },
     });
   }
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, 3).map((s) => s.snip);
+  return scored.slice(0, opts?.take ?? 3).map((s) => s.snip);
 }
 
-/** Questions de recherche / faits (pas rédaction créative pure). */
+async function fromRadioOkapiRss(query: string) {
+  return fromNewsRss(
+    "https://feeds.feedburner.com/radiookapi/actu?format=xml",
+    "Radio Okapi",
+    "https://www.radiookapi.net/",
+    query,
+    { take: 3 },
+  );
+}
+
+/** Actualite.cd — 2e source presse RDC (souvent plus de titres nationaux). */
+async function fromActualiteCdRss(query: string) {
+  // Flux WordPress standard ; si down, on retourne [] sans bloquer.
+  return fromNewsRss(
+    "https://actualite.cd/feed",
+    "Actualite.cd",
+    "https://actualite.cd/",
+    query,
+    { take: 3 },
+  );
+}
+
+/**
+ * Questions de recherche / faits.
+ * Lieu RDC seul (« bonjour Kinshasa ») ≠ recherche — il faut question, actu ou verbe de fait.
+ */
 export function wantsResearchGrounding(message: string): boolean {
   const m = normalize(message);
   if (m.length < 8) return false;
@@ -250,19 +292,16 @@ export function wantsResearchGrounding(message: string): boolean {
     /\b(redige|ecris|ecrire|draft|poste linkedin|script|discours|lettre|poeme|slogan)\b/.test(
       m,
     ) &&
-    !/\b(qui|quel|quelle|combien|quand|ou|c est quoi|quest ce|recherche|renseigne)\b/.test(
-      m,
-    )
+    !wantsFactQuestion(message)
   ) {
     return false;
   }
-  return (
-    /\b(qui|quel|quelle|quels|quelles|combien|quand|ou|pourquoi|comment|c est quoi|quest[- ]ce|explique|recherche|renseigne|inform|difference|defini|definition|histoire de|capitale|population|superficie)\b/.test(
-      m,
-    ) ||
-    isRdcTopic(message) ||
-    wantsNews(message)
-  );
+  if (wantsNews(message) || wantsFactQuestion(message)) return true;
+  // Lieu RDC + intention informative (pas salutation seule)
+  if (isRdcTopic(message) && !/^(salut|bonjour|bonsoir|merci|ok|oui|non)\b/.test(m)) {
+    return wantsFactQuestion(message) || m.length >= 24;
+  }
+  return false;
 }
 
 /**
@@ -276,23 +315,27 @@ export async function resolveResearchGrounding(
   if (query.length < 3) return null;
 
   const shaped = shapeQuery(query);
-  const rdcOrNews = isRdcTopic(message) || wantsNews(message);
+  const newsMode = wantsNews(message) || isRdcTopic(message);
 
-  const [ddg, wiki, radio] = await Promise.all([
+  const [ddg, wiki, radio, actualite] = await Promise.all([
     fromDuckDuckGo(shaped),
     fromWikipediaFr(shaped),
-    rdcOrNews ? fromRadioOkapiRss(query) : Promise.resolve([]),
+    newsMode ? fromRadioOkapiRss(query) : Promise.resolve([]),
+    newsMode ? fromActualiteCdRss(query) : Promise.resolve([]),
   ]);
 
   const seen = new Set<string>();
   const snippets: ResearchPacket["snippets"] = [];
-  // Radio Okapi d’abord pour l’actu RDC
-  for (const s of [...radio, ...wiki, ...ddg]) {
+  // Actu RDC d’abord, puis encyclopédie / DDG
+  const ordered = newsMode
+    ? [...radio, ...actualite, ...wiki, ...ddg]
+    : [...wiki, ...ddg, ...radio, ...actualite];
+  for (const s of ordered) {
     const key = s.text.slice(0, 80);
     if (seen.has(key)) continue;
     seen.add(key);
     snippets.push(s);
-    if (snippets.length >= 6) break;
+    if (snippets.length >= 8) break;
   }
 
   if (!snippets.length) {
@@ -308,7 +351,7 @@ export async function resolveResearchGrounding(
     ok: true,
     query: shaped,
     snippets,
-    note: "Sources publiques (Wikipedia / DuckDuckGo / Radio Okapi) — s’appuyer uniquement sur ces extraits pour les faits.",
+    note: "Sources publiques (presse RDC / Wikipedia / DuckDuckGo) — s’appuyer uniquement sur ces extraits pour les faits.",
   };
 }
 
@@ -340,9 +383,9 @@ RESEARCH GROUNDING (verified public excerpts — answer from THESE only for fact
 Query: ${packet.query}
 ${lines}
 
+DEPTH: give a useful answer (about 8–12 dense lines or short bullets). Lead with the fact, then 1–2 source URLs when present (prefer Radio Okapi / Actualite.cd / Wikipedia).
 RULES:
 - For facts/numbers/names/dates: use only the excerpts above. If missing, say you cannot confirm.
 - Explain in the user’s preferred language (see LANGUAGE). Do not force French if they use Lingala, Swahili, or English.
-- Cite 1–2 source URLs when present (prefer Radio Okapi / Wikipedia when relevant).
 - Never invent. End once with: « ${closing} ».`;
 }

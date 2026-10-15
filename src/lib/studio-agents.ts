@@ -1,6 +1,9 @@
 /** Vrais agents métier Okapi — prompts branchés sur Studio / generate. */
 
-import { OKAPI_MOBILE_MONEY_UX } from "@/lib/generate-quality";
+import {
+  OKAPI_MOBILE_MONEY_UX,
+  OKAPI_VITRINE_DESIGN,
+} from "@/lib/generate-quality";
 
 export type OkapiAgentId =
   | "general"
@@ -9,7 +12,8 @@ export type OkapiAgentId =
   | "clinique"
   | "ecole"
   | "crm"
-  | "design";
+  | "design"
+  | "vitrine";
 
 export type OkapiAgentDef = {
   id: OkapiAgentId;
@@ -115,6 +119,19 @@ Product rules:
 - Une composition claire, peu de cards inutiles, CTA évident.
 - Cohérence couleurs / spacing avec la marque du brief.`,
   },
+  {
+    id: "vitrine",
+    label: "Vitrine",
+    sector: "Vitrine",
+    short: "Site & landing",
+    systemAddon: `AGENT MÉTIER: Site vitrine / landing (RDC).
+Product rules:
+- ${OKAPI_VITRINE_DESIGN}
+- Écrans: une page scroll (Accueil · Offre · Galerie · Contact) via ancres nav.
+- SQL léger optionnel: leads / messages contact.
+- API: window.Okapi.create('leads') pour le formulaire contact si présent.
+- Pas de panier / stock sauf si le brief le demande explicitement.`,
+  },
 ] as const;
 
 const BY_ID = Object.fromEntries(
@@ -142,6 +159,13 @@ export function resolveOkapiAgent(opts: {
     .normalize("NFD")
     .replace(/\p{M}/gu, "");
 
+  if (
+    /\b(vitrine|landing|portfolio|showcase|site (web )?presentation|one[- ]?page|page vitrine)\b/.test(
+      blob,
+    )
+  ) {
+    return BY_ID.vitrine;
+  }
   if (
     /\b(restaurant|menu|plat|commande|table|traiteur|bar|cafe|café)\b/.test(
       blob,

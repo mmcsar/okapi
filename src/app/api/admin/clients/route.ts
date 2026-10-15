@@ -27,7 +27,7 @@ export async function GET() {
 
   if (!isSupabaseAdminConfigured()) {
     return missingSetup(
-      "Base Okapi non configurée (clé service manquante).",
+      "Clé secrète Supabase manquante. Pose SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local.",
     );
   }
 
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
 
   if (!isSupabaseAdminConfigured()) {
     return missingSetup(
-      "Base Okapi non configurée (clé service manquante).",
+      "Clé secrète Supabase manquante. Pose SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local.",
     );
   }
 

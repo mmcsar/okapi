@@ -24,7 +24,8 @@ export async function GET() {
   if (!isSupabaseAdminConfigured()) {
     return NextResponse.json(
       {
-        error: "Base Okapi non configurée (clé service manquante).",
+        error:
+          "Clé secrète Supabase manquante. Pose SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local — Dashboard → API Keys.",
         setupRequired: true,
       },
       { status: 503 },

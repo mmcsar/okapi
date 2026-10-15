@@ -11,14 +11,17 @@
   --okapi-glass: rgba(255, 255, 255, 0.78);
   --okapi-stroke: rgba(20, 38, 28, 0.09);
   --okapi-glow: rgba(232, 137, 42, 0.28);
-  /* Studio / back sombre — canopée, pas noir générique */
-  --okapi-studio-ink: #06100c;
+  /* Studio / back sombre — canopée, hiérarchie claire */
+  --okapi-studio-ink: #050e0a;
   --okapi-studio-base: #0a1410;
-  --okapi-studio-chrome: #101c17;
-  --okapi-studio-panel: #0d1814;
-  --okapi-studio-code: #0c1612;
-  --okapi-studio-text: #d8e8df;
+  --okapi-studio-chrome: #12201a;
+  --okapi-studio-panel: #0e1a15;
+  --okapi-studio-code: #0b1511;
+  --okapi-studio-text: #e2efe8;
   --okapi-studio-muted: #8aa89a;
+  --okapi-studio-border: rgba(232, 137, 42, 0.14);
+  --okapi-studio-border-soft: rgba(255, 255, 255, 0.07);
+  --okapi-studio-elevated: #15241d;
   --background: #e7ece8;
   --foreground: #14261c;
 }
@@ -242,9 +245,331 @@ body::before {
   animation: glow-pulse 4s ease-in-out infinite;
 }
 
-/* Composer Agent — dense, sans glow marketing */
+/* Menu latéral — relief 3D (ombres / dégradés, pas de transform sur le rail) */
+.okapi-nav-shell {
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.88) 0%,
+    rgba(243, 246, 243, 0.92) 55%,
+    rgba(232, 238, 233, 0.9) 100%
+  );
+  border: 1px solid rgba(20, 38, 28, 0.1);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 -12px 28px rgba(20, 38, 28, 0.04) inset,
+    0 18px 40px rgba(20, 38, 28, 0.12),
+    0 4px 12px rgba(20, 38, 28, 0.06),
+    6px 8px 0 rgba(20, 38, 28, 0.05);
+  backdrop-filter: blur(18px);
+}
+
+.okapi-nav-shell--compact {
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 248, 0.96) 0%,
+    rgba(236, 242, 237, 0.94) 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    4px 0 24px rgba(20, 38, 28, 0.06);
+}
+
+.okapi-nav-item {
+  border: 1px solid transparent;
+  box-shadow: 0 1px 0 transparent;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.okapi-nav-item:not(.okapi-nav-item--active):hover {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(20, 38, 28, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 4px 10px rgba(20, 38, 28, 0.07);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .okapi-nav-item:not(.okapi-nav-item--active):hover {
+    transform: translateY(-1px);
+  }
+}
+
+.okapi-nav-item--active {
+  background: linear-gradient(
+    145deg,
+    #2a6b4f 0%,
+    var(--okapi-forest) 45%,
+    #143d2c 100%
+  );
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.22) inset,
+    0 -8px 16px rgba(8, 28, 18, 0.28) inset,
+    0 8px 16px rgba(20, 38, 28, 0.2),
+    0 2px 4px rgba(20, 38, 28, 0.12);
+}
+
+.okapi-nav-new {
+  background: linear-gradient(
+    145deg,
+    #f0a04a 0%,
+    var(--okapi-amber) 45%,
+    var(--okapi-amber-deep) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 -6px 12px rgba(107, 58, 40, 0.18) inset,
+    0 10px 18px rgba(200, 107, 20, 0.28),
+    0 2px 4px rgba(20, 38, 28, 0.1);
+  transition: filter 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.okapi-nav-new:hover {
+  filter: brightness(1.04);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 -6px 12px rgba(107, 58, 40, 0.16) inset,
+    0 14px 24px rgba(200, 107, 20, 0.32),
+    0 3px 6px rgba(20, 38, 28, 0.12);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .okapi-nav-new:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.okapi-nav-menu-btn {
+  background: linear-gradient(165deg, #fff 0%, #f3f6f3 100%);
+  border: 1px solid rgba(20, 38, 28, 0.1);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 8px 18px rgba(20, 38, 28, 0.12),
+    0 2px 4px rgba(20, 38, 28, 0.06),
+    3px 4px 0 rgba(20, 38, 28, 0.06);
+}
+
+.okapi-nav-user {
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.75) 0%,
+    rgba(243, 246, 243, 0.65) 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 6px 14px rgba(20, 38, 28, 0.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .okapi-nav-item:hover,
+  .okapi-nav-new:hover {
+    transform: none;
+  }
+}
+
+/* Composer Agent — verre + relief moderne */
 .okapi-composer {
   position: relative;
+}
+
+.okapi-composer-shell {
+  border-radius: 1.15rem;
+  border: 1px solid rgba(20, 38, 28, 0.1);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.97) 0%,
+    rgba(247, 250, 247, 0.94) 100%
+  );
+  padding: 0.7rem;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 32px rgba(20, 38, 28, 0.1),
+    0 4px 10px rgba(20, 38, 28, 0.05);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.okapi-composer-shell:focus-within {
+  border-color: rgba(27, 79, 58, 0.28);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 0 0 3px rgba(27, 79, 58, 0.1),
+    0 18px 36px rgba(20, 38, 28, 0.12);
+}
+
+.okapi-send-3d {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: linear-gradient(145deg, #f0a04a 0%, var(--okapi-amber) 45%, var(--okapi-amber-deep) 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 -6px 12px rgba(107, 58, 40, 0.2) inset,
+    0 8px 16px rgba(200, 107, 20, 0.28),
+    0 2px 4px rgba(20, 38, 28, 0.12);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  animation: okapi-send-breathe 2.8s ease-in-out infinite;
+}
+
+.okapi-send-3d::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 65%
+  );
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+
+.okapi-send-3d:hover:not(:disabled)::after {
+  animation: okapi-send-shine 0.7s ease forwards;
+}
+
+.okapi-send-3d:hover:not(:disabled) {
+  filter: brightness(1.05);
+  transform: translateY(-2px) scale(1.02);
+  animation: none;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 -6px 12px rgba(107, 58, 40, 0.18) inset,
+    0 14px 26px rgba(200, 107, 20, 0.36),
+    0 4px 8px rgba(20, 38, 28, 0.14);
+}
+
+.okapi-send-3d:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 4px 8px rgba(200, 107, 20, 0.2);
+}
+
+.okapi-send-3d:disabled {
+  animation: none;
+}
+
+.okapi-send-3d__icon {
+  display: inline-flex;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.okapi-send-3d:hover:not(:disabled) .okapi-send-3d__icon {
+  transform: translateX(3px);
+}
+
+.okapi-send-3d--busy {
+  animation: okapi-send-pulse 0.9s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.okapi-send-3d--busy .okapi-send-3d__icon {
+  animation: okapi-send-spin 0.85s linear infinite;
+}
+
+@keyframes okapi-send-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.35) inset,
+      0 -6px 12px rgba(107, 58, 40, 0.2) inset,
+      0 8px 16px rgba(200, 107, 20, 0.28),
+      0 2px 4px rgba(20, 38, 28, 0.12);
+  }
+  50% {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.4) inset,
+      0 -6px 12px rgba(107, 58, 40, 0.18) inset,
+      0 10px 22px rgba(200, 107, 20, 0.38),
+      0 3px 6px rgba(20, 38, 28, 0.14);
+  }
+}
+
+@keyframes okapi-send-shine {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes okapi-send-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+    transform: scale(1);
+  }
+  50% {
+    filter: brightness(1.08);
+    transform: scale(1.015);
+  }
+}
+
+@keyframes okapi-send-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.okapi-chat-actions button {
+  border-radius: 999px;
+  border: 1px solid rgba(20, 38, 28, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  padding: 0.2rem 0.65rem;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--okapi-forest);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 2px 6px rgba(20, 38, 28, 0.05);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.okapi-chat-actions button:hover {
+  background: rgba(27, 79, 58, 0.08);
+  color: var(--okapi-ink);
+  transform: translateY(-1px);
+}
+
+.okapi-chat-bubble--enter {
+  animation: okapi-bubble-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes okapi-bubble-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .okapi-chat-bubble--enter {
+    animation: none;
+  }
+  .okapi-send-3d {
+    animation: none;
+  }
+  .okapi-send-3d:hover:not(:disabled),
+  .okapi-send-3d:active:not(:disabled),
+  .okapi-send-3d--busy {
+    transform: none;
+    animation: none;
+  }
+  .okapi-send-3d:hover:not(:disabled)::after,
+  .okapi-send-3d--busy .okapi-send-3d__icon {
+    animation: none;
+  }
 }
 
 .fade-up {
@@ -272,6 +597,87 @@ body::before {
     0 18px 40px rgba(20, 38, 28, 0.08),
     0 4px 12px rgba(20, 38, 28, 0.04);
   /* pas de transform 3D ici : ça capturait les clics du menu latéral */
+}
+
+/* --- Bulles chat en relief 3D --- */
+.okapi-chat-thread {
+  perspective: 1200px;
+}
+
+.okapi-chat-bubble {
+  position: relative;
+  transform-style: preserve-3d;
+  transition:
+    transform 0.28s ease,
+    box-shadow 0.28s ease;
+  will-change: transform;
+  backdrop-filter: blur(8px);
+}
+
+.okapi-chat-bubble--user {
+  background: linear-gradient(
+    145deg,
+    #2a6b4f 0%,
+    var(--okapi-forest) 42%,
+    #143d2c 100%
+  );
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.22) inset,
+    0 -10px 22px rgba(8, 28, 18, 0.35) inset,
+    0 10px 18px rgba(20, 38, 28, 0.22),
+    0 3px 6px rgba(20, 38, 28, 0.14),
+    4px 4px 0 rgba(20, 38, 28, 0.12);
+}
+
+.okapi-chat-bubble--assistant {
+  background: linear-gradient(
+    165deg,
+    #ffffff 0%,
+    #f7faf7 55%,
+    #eef3ef 100%
+  );
+  color: var(--okapi-ink);
+  border: 1px solid rgba(20, 38, 28, 0.1);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 -8px 18px rgba(20, 38, 28, 0.04) inset,
+    0 12px 24px rgba(20, 38, 28, 0.1),
+    0 4px 8px rgba(20, 38, 28, 0.05),
+    -3px 5px 0 rgba(20, 38, 28, 0.05);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .okapi-chat-bubble--user:hover {
+    transform: translate3d(-2px, -3px, 0) rotateX(2deg) rotateY(-3deg);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.28) inset,
+      0 -10px 22px rgba(8, 28, 18, 0.32) inset,
+      0 16px 28px rgba(20, 38, 28, 0.28),
+      0 6px 10px rgba(20, 38, 28, 0.16),
+      6px 8px 0 rgba(20, 38, 28, 0.1);
+  }
+
+  .okapi-chat-bubble--assistant:hover {
+    transform: translate3d(2px, -3px, 0) rotateX(2deg) rotateY(3deg);
+    box-shadow:
+      0 1px 0 #fff inset,
+      0 -8px 18px rgba(20, 38, 28, 0.05) inset,
+      0 18px 32px rgba(20, 38, 28, 0.12),
+      0 6px 12px rgba(20, 38, 28, 0.06),
+      -5px 8px 0 rgba(20, 38, 28, 0.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .okapi-chat-bubble {
+    transition: none;
+  }
+  .okapi-chat-bubble--user:hover,
+  .okapi-chat-bubble--assistant:hover {
+    transform: none;
+  }
 }
 
 /* --- Légère ambiance 3D --- */
@@ -460,31 +866,26 @@ body::before {
   animation-delay: 0.3s;
 }
 
-/* Fond Studio / back — forêt profonde + lueur ambre */
+/* Fond Studio — forêt profonde, plans distincts (chrome / panel / code) */
 .okapi-studio-shell {
   color: var(--okapi-studio-text);
   background-color: var(--okapi-studio-ink);
   background-image:
     radial-gradient(
-      ellipse 75% 55% at 100% -5%,
-      rgba(232, 137, 42, 0.11),
+      ellipse 70% 50% at 100% -8%,
+      rgba(232, 137, 42, 0.14),
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse 60% 48% at -8% 108%,
+      rgba(47, 107, 79, 0.32),
       transparent 52%
-    ),
-    radial-gradient(
-      ellipse 65% 50% at -5% 105%,
-      rgba(47, 107, 79, 0.28),
-      transparent 55%
-    ),
-    radial-gradient(
-      ellipse 45% 35% at 55% 40%,
-      rgba(27, 79, 58, 0.14),
-      transparent 70%
     ),
     linear-gradient(
       168deg,
-      #0e1a15 0%,
-      #0a1410 42%,
-      #07110d 100%
+      #0c1813 0%,
+      #08120e 48%,
+      #050e0a 100%
     );
 }
 
@@ -492,39 +893,184 @@ body::before {
   background:
     linear-gradient(
       180deg,
-      rgba(27, 79, 58, 0.22) 0%,
-      rgba(16, 28, 23, 0.96) 100%
+      rgba(47, 107, 79, 0.28) 0%,
+      rgba(18, 32, 26, 0.98) 100%
     ),
     var(--okapi-studio-chrome);
-  border-color: rgba(232, 137, 42, 0.18);
+  border-color: var(--okapi-studio-border);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 8px 20px rgba(0, 0, 0, 0.22);
 }
 
 .okapi-studio-panel {
   background:
     linear-gradient(
       165deg,
-      rgba(27, 79, 58, 0.12) 0%,
-      rgba(13, 24, 20, 0.98) 55%
+      rgba(27, 79, 58, 0.16) 0%,
+      rgba(14, 26, 21, 0.98) 50%,
+      rgba(10, 18, 14, 0.99) 100%
     ),
     var(--okapi-studio-panel);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    4px 0 24px rgba(0, 0, 0, 0.18);
 }
 
 .okapi-studio-code {
   color: var(--okapi-studio-text);
   background:
     radial-gradient(
-      ellipse 80% 60% at 0% 0%,
-      rgba(47, 107, 79, 0.12),
+      ellipse 70% 50% at 0% 0%,
+      rgba(47, 107, 79, 0.1),
       transparent 55%
     ),
-    linear-gradient(180deg, #0e1a15 0%, #0b1511 100%);
+    linear-gradient(180deg, #0d1814 0%, #0a1410 100%);
+}
+
+/* Monaco — thème okapi-forest, coins et focus alignés Studio */
+.okapi-studio-code .monaco-editor,
+.okapi-studio-code .monaco-editor .overflow-guard {
+  background-color: var(--okapi-studio-code) !important;
+}
+.okapi-studio-code .monaco-editor .margin {
+  background-color: var(--okapi-studio-code) !important;
+}
+.okapi-studio-code .monaco-editor .scroll-decoration {
+  box-shadow: #00000055 0 6px 6px -6px inset;
 }
 
 .okapi-studio-activity {
   background:
     linear-gradient(
       180deg,
-      #0a1511 0%,
-      #06100c 100%
+      #0c1713 0%,
+      #060f0b 100%
     );
+  box-shadow: 1px 0 0 var(--okapi-studio-border-soft);
+}
+
+/* Onglets / items Studio — relief léger */
+.okapi-studio-tab {
+  border-radius: 0.4rem;
+  border: 1px solid transparent;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.okapi-studio-tab--active {
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(27, 79, 58, 0.45) 100%
+  );
+  color: #eef6f1;
+  border-color: rgba(232, 137, 42, 0.28);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.okapi-studio-tab:not(.okapi-studio-tab--active):hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #d5e4db;
+}
+
+.okapi-studio-btn-amber {
+  border-radius: 0.4rem;
+  border: 1px solid rgba(232, 137, 42, 0.45);
+  background: linear-gradient(
+    145deg,
+    rgba(240, 160, 74, 0.35) 0%,
+    rgba(232, 137, 42, 0.18) 100%
+  );
+  color: #ffd7a8;
+  font-weight: 700;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 4px 12px rgba(200, 107, 20, 0.18);
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.okapi-studio-btn-amber:hover {
+  filter: brightness(1.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.16) inset,
+    0 6px 16px rgba(200, 107, 20, 0.28);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .okapi-studio-btn-amber:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.okapi-studio-status {
+  background: linear-gradient(
+    180deg,
+    #0c1713 0%,
+    #070f0b 100%
+  );
+  border-top: 1px solid var(--okapi-studio-border);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.okapi-studio-status::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #e8892a, #1b4f3a);
+}
+
+.okapi-studio-activity-btn {
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.okapi-studio-activity-btn--on {
+  background: rgba(27, 79, 58, 0.55);
+  color: #e8f2ec;
+  box-shadow:
+    inset 0 -2px 0 #e8f2ec,
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+@media (min-width: 1024px) {
+  .okapi-studio-activity-btn--on {
+    box-shadow:
+      inset 2px 0 0 #e8f2ec,
+      0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+}
+
+.okapi-studio-activity-btn--agent {
+  background: rgba(232, 137, 42, 0.28);
+  color: #ffd7a8;
+  box-shadow:
+    inset 0 -2px 0 #ffd7a8,
+    0 2px 8px rgba(200, 107, 20, 0.2);
+}
+
+@media (min-width: 1024px) {
+  .okapi-studio-activity-btn--agent {
+    box-shadow:
+      inset 2px 0 0 #ffd7a8,
+      0 2px 8px rgba(200, 107, 20, 0.2);
+  }
+}
+
+.okapi-studio-file-active {
+  background: rgba(27, 79, 58, 0.4);
+  box-shadow: inset 2px 0 0 #e8892a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .okapi-studio-btn-amber:hover {
+    transform: none;
+  }
 }

@@ -14,15 +14,43 @@ type ChatMessage = {
       >;
 };
 
+/** Niveau de raisonnement OpenRouter (Opus 5.5 = adaptive thinking). */
+export type OkapiReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
 /** Route gratuite OpenRouter — utilisée si le modèle payant n’a pas de crédit. */
 const FREE_FALLBACK_MODEL = "openrouter/free";
-/** Pro par défaut (payant) — retombe sur FREE_FALLBACK_MODEL si 402. */
+/** Pro / Flash par défaut : Opus 5.5 (Flash = effort plus bas, pas un modèle faible). */
 const DEFAULT_PRO_MODEL = "anthropic/claude-opus-5.5";
-/** Flash par défaut : gratuit pour RDC sans crédit. */
-const DEFAULT_FLASH_MODEL = FREE_FALLBACK_MODEL;
+const DEFAULT_FLASH_MODEL = "anthropic/claude-opus-5.5";
 /** Fallback vision (doit supporter les images). */
 const FREE_VISION_FALLBACK =
   process.env.OPENROUTER_MODEL_VISION_FREE?.trim() || "openrouter/free";
+
+function isReasoningModel(model: string) {
+  return /claude-opus|claude-sonnet-5|anthropic\/claude/i.test(model);
+}
+
+function isFreeModel(model: string) {
+  return /:free$/i.test(model) || model === FREE_FALLBACK_MODEL;
+}
+
+/** Effort chat : Pro plus profond ; questions dures → monter d’un cran. */
+export function resolveChatReasoningEffort(opts: {
+  engine: OkapiEngine;
+  message: string;
+  hard?: boolean;
+}): OkapiReasoningEffort {
+  const hard =
+    opts.hard ||
+    /\b(analyse|comparer?|explique|pourquoi|strategie|preuve|calcule|debug|corrige|architecture|juridique|contrat|etape|raisonne|detail|approfond|optimise|refacto)\b/i.test(
+      opts.message
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, ""),
+    );
+  if (opts.engine === "pro") return hard ? "xhigh" : "high";
+  return hard ? "high" : "medium";
+}
 
 export function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
@@ -97,19 +125,28 @@ async function openRouterFetch(opts: {
   maxTokens: number;
   stream?: boolean;
   temperature?: number;
+  reasoningEffort?: OkapiReasoningEffort;
 }) {
+  const reasoning = isReasoningModel(opts.model);
+  // Opus 5.5 : temperature non supportée (400 / dégradé). Effort = le levier qualité.
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    messages: opts.messages,
+    max_tokens: opts.maxTokens,
+    stream: opts.stream === true,
+  };
+  if (reasoning) {
+    body.reasoning = {
+      effort: opts.reasoningEffort ?? "medium",
+      exclude: true,
+    };
+  } else if (typeof opts.temperature === "number") {
+    body.temperature = opts.temperature;
+  }
   return fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: openRouterHeaders(opts.key),
-    body: JSON.stringify({
-      model: opts.model,
-      messages: opts.messages,
-      max_tokens: opts.maxTokens,
-      stream: opts.stream === true,
-      ...(typeof opts.temperature === "number"
-        ? { temperature: opts.temperature }
-        : {}),
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -191,21 +228,28 @@ export async function openRouterComplete(opts: {
   user: string;
   maxTokens?: number;
   engine?: OkapiEngine;
+  reasoningEffort?: OkapiReasoningEffort;
   onChunk?: (text: string) => void;
 }) {
   const key = requireOpenRouterKey();
 
-  const primary = openRouterModel(opts.engine ?? "flash");
+  const engine = opts.engine ?? "flash";
+  const primary = openRouterModel(engine);
   const messages: ChatMessage[] = [
     { role: "system", content: opts.system },
     { role: "user", content: opts.user },
   ];
   // Free models: plafonner — trop de tokens → refus / réponse vide fréquente
+  // Opus : thinking + réponse partagent max_tokens → marge haute (Studio JSON).
   const rawMax = opts.maxTokens ?? 8192;
-  const maxTokens =
-    /:free$/i.test(primary) || primary === FREE_FALLBACK_MODEL
-      ? Math.min(rawMax, 6000)
+  const maxTokens = isFreeModel(primary)
+    ? Math.min(rawMax, 6000)
+    : isReasoningModel(primary)
+      ? Math.min(Math.max(rawMax, 16_000), 48_000)
       : rawMax;
+  const reasoningEffort: OkapiReasoningEffort =
+    opts.reasoningEffort ??
+    (engine === "pro" ? "high" : "medium");
   const wantStream = Boolean(opts.onChunk);
 
   async function once(model: string, stream: boolean): Promise<string> {
@@ -215,6 +259,7 @@ export async function openRouterComplete(opts: {
       messages,
       maxTokens,
       stream,
+      reasoningEffort: isReasoningModel(model) ? reasoningEffort : undefined,
     });
 
     if (!res.ok) {
@@ -284,25 +329,37 @@ export async function streamOpenRouterChat(opts: {
   messages: ChatMessage[];
   vision?: boolean;
   temperature?: number;
+  reasoningEffort?: OkapiReasoningEffort;
 }): Promise<Response> {
   const key = requireOpenRouterKey();
 
   const vision = Boolean(opts.vision);
-  const primary = openRouterModel(opts.engine ?? "flash", { vision });
+  const engine = opts.engine ?? "flash";
+  const primary = openRouterModel(engine, { vision });
   const fallback = vision ? FREE_VISION_FALLBACK : FREE_FALLBACK_MODEL;
   const messages: ChatMessage[] = [
     { role: "system", content: opts.system },
     ...opts.messages,
   ];
   const temperature = opts.temperature ?? 0.4;
+  const reasoningEffort =
+    opts.reasoningEffort ??
+    (engine === "pro" ? "high" : "medium");
+  // Thinking + réponse : Opus a besoin de marge sinon réponse coupée.
+  const maxTokens = isReasoningModel(primary)
+    ? engine === "pro"
+      ? 24_000
+      : 16_000
+    : 8192;
 
   let upstream = await openRouterFetch({
     key,
     model: primary,
     messages,
-    maxTokens: 8192,
+    maxTokens,
     stream: true,
     temperature,
+    reasoningEffort,
   });
 
   if (!upstream.ok) {
@@ -322,9 +379,12 @@ export async function streamOpenRouterChat(opts: {
         key,
         model: fallback,
         messages,
-        maxTokens: 8192,
+        maxTokens: isFreeModel(fallback) ? 6000 : maxTokens,
         stream: true,
         temperature,
+        reasoningEffort: isReasoningModel(fallback)
+          ? reasoningEffort
+          : undefined,
       });
     } else {
       throw new Error(
@@ -417,15 +477,17 @@ export async function streamOpenRouterChat(opts: {
   });
 }
 
-/** Modèles image à essayer (ordre). Surcharge : OPENROUTER_IMAGE_MODEL. */
+/** Modèles image à essayer (ordre). Opus = texte seulement — images = modèles dédiés. */
 export function openRouterImageModels(): string[] {
   const primary = process.env.OPENROUTER_IMAGE_MODEL?.trim();
   const list = [
     primary,
-    "google/gemini-2.5-flash-image-preview",
-    "google/gemini-2.0-flash-exp:free",
+    // Catalogue Image API OpenRouter (Opus / Claude ne génèrent pas d’images)
+    "google/gemini-2.5-flash-image",
+    "google/gemini-3.1-flash-image",
+    "google/gemini-3.1-flash-lite-image",
     "black-forest-labs/flux.2-flex",
-    "openai/gpt-4o",
+    "black-forest-labs/flux.2-pro",
   ].filter((m): m is string => Boolean(m));
   return [...new Set(list)];
 }
@@ -439,19 +501,39 @@ function extractImageDataUrl(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
   const root = payload as Record<string, unknown>;
 
-  // /api/v1/images → data[].b64_json | url
+  // /api/v1/images → data[].b64_json | url | b64
   const data = root.data;
   if (Array.isArray(data) && data[0] && typeof data[0] === "object") {
     const first = data[0] as Record<string, unknown>;
-    if (typeof first.b64_json === "string" && first.b64_json.length > 32) {
+    const b64 =
+      (typeof first.b64_json === "string" && first.b64_json) ||
+      (typeof first.b64 === "string" && first.b64) ||
+      null;
+    if (b64 && b64.length > 32) {
       const mt =
         typeof first.media_type === "string"
           ? first.media_type
-          : "image/png";
-      return `data:${mt};base64,${first.b64_json}`;
+          : typeof first.mime_type === "string"
+            ? first.mime_type
+            : "image/png";
+      return `data:${mt};base64,${b64}`;
     }
     if (typeof first.url === "string" && /^https?:|^data:/.test(first.url)) {
       return first.url;
+    }
+    // Certains providers : { image_url: { url } }
+    const nested = (first as { image_url?: { url?: string } }).image_url?.url;
+    if (nested && /^https?:|^data:/.test(nested)) return nested;
+  }
+
+  // Racine images[]
+  const topImages = root.images;
+  if (Array.isArray(topImages)) {
+    for (const im of topImages) {
+      if (!im || typeof im !== "object") continue;
+      const url = (im as { image_url?: { url?: string }; url?: string }).image_url
+        ?.url || (im as { url?: string }).url;
+      if (url && /^https?:|^data:/.test(url)) return url;
     }
   }
 

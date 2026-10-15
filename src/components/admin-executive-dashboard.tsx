@@ -260,7 +260,7 @@ export function AdminExecutiveDashboard() {
           {error}
           {setupRequired ? (
             <span className="mt-1 block text-xs">
-              Vérifie la clé service Supabase et les migrations SQL.
+              Vérifie SUPABASE_SECRET_KEY (sb_secret_…) et les migrations SQL.
             </span>
           ) : null}
         </div>

@@ -24,15 +24,19 @@ export async function loadUserIntelligenceContext(
   const rows = (projects ?? []) as ProjectIntelRow[];
   if (rows.length === 0) {
     return `MÉMOIRE OKAPI (utilisateur ${userId.slice(0, 8)}…):
-- Aucun projet cloud encore. Encourage à générer une 1re app métier RDC (boutique, école, clinique…).
-- Propose WhatsApp + Mobile Money quand pertinent.
-- Parle français simple, actions concrètes.`;
+- Aucun projet cloud sauvé pour l’instant.
+- Réponds utilement sans pitch commercial. Si l’utilisateur veut créer, propose une 1re app concrète seulement s’il le demande.`;
   }
+
+  const preferredSector =
+    rows.find((p) => p.sector?.trim())?.sector?.trim() || null;
 
   const lines = rows.map((p, i) => {
     const sec = p.sector?.trim() || "Général";
+    // 2 premiers projets : résumé plus riche pour continuité métier
+    const maxSum = i < 2 ? 400 : 120;
     const sum = p.summary?.trim()
-      ? p.summary.trim().slice(0, 120)
+      ? p.summary.trim().slice(0, maxSum)
       : "sans résumé";
     const pub = p.is_public ? "public" : "privé";
     const when = p.updated_at
@@ -41,7 +45,6 @@ export async function loadUserIntelligenceContext(
     return `${i + 1}. « ${p.title} » · ${sec} · ${pub} · maj ${when} — ${sum}`;
   });
 
-  // Compte léger des records sur le projet le plus récent (si table dispo)
   let recordsHint = "";
   const topId = rows[0]?.id;
   if (topId) {
@@ -60,15 +63,18 @@ export async function loadUserIntelligenceContext(
   ];
 
   return `MÉMOIRE OKAPI — contexte réel de l’utilisateur (RDC / digitalisation):
-- ${rows.length} projet(s) cloud. Secteurs: ${sectors.join(", ") || "mixte"}.
-- Projets récents:
+- ${rows.length} projet(s) cloud. Secteurs: ${sectors.join(", ") || "mixte"}.${
+    preferredSector ? ` Secteur préféré récent: ${preferredSector}.` : ""
+  }
+- Projets récents (détail plus riche sur les 2 premiers):
 ${lines.join("\n")}${recordsHint}
 
 Règles d’intelligence:
-1. Appuie-toi sur CES projets (noms, secteurs) — ne invente pas d’autres business.
-2. Priorise la prochaine action utile (sauver, publier, stock, clients, WhatsApp).
+1. Appuie-toi sur CES projets (noms, secteurs, résumés) — n’invente pas d’autres business.
+2. Priorise la prochaine action utile (sauver, publier, stock, clients, WhatsApp, Mobile Money).
 3. Français clair, concret, pour un entrepreneur congolais.
-4. Si une automatisation: briefing actionnable, pas de blabla.`;
+4. Si une automatisation: briefing actionnable, pas de blabla.
+5. Si l’utilisateur parle d’un projet nommé ci-dessus, reste cohérent avec son résumé.`;
 }
 
 /** Bloc court injecté dans les system prompts (generate / studio). */

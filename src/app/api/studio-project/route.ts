@@ -14,11 +14,13 @@ import {
 import type { OkapiEngine } from "@/lib/okapi-engine";
 import { openAiComplete } from "@/lib/openai";
 import { openRouterComplete } from "@/lib/openrouter";
-import { wantsLargeProject } from "@/lib/fullstack";
+import { ensureHtmlDocument, wantsLargeProject } from "@/lib/fullstack";
 import { assertBodySize } from "@/lib/security";
 import {
   OKAPI_MOBILE_MONEY_UX,
   OKAPI_PRODUCT_DESIGN,
+  OKAPI_VITRINE_DESIGN,
+  wantsVitrineBrief,
 } from "@/lib/generate-quality";
 import {
   assessStudioProjectFiles,
@@ -92,6 +94,65 @@ function extractJsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
+/** JSON coupé (max_tokens / réseau) — braces non fermées ou HTML tronqué. */
+function looksTruncatedStudioOutput(raw: string): boolean {
+  const t = stripFences(raw);
+  if (t.length < 40) return true;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i]!;
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (ch === "\\") {
+        esc = true;
+        continue;
+      }
+      if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === "{") depth += 1;
+    else if (ch === "}") depth -= 1;
+  }
+  if (inStr || depth > 0) return true;
+  if (/app\.html/i.test(t) && !/<\/html>/i.test(t)) return true;
+  return false;
+}
+
+function buildStudioContinuePrompt(opts: {
+  instruction: string;
+  previousRaw: string;
+  hintTitle?: string;
+}) {
+  const tail = opts.previousRaw.slice(-1600);
+  return `CONTINUE MODE — the previous Okapi Studio JSON was CUT OFF before finishing.
+Return ONE COMPLETE valid JSON object now (title, note, files). No markdown fences.
+CRITICAL ORDER:
+1) Finish files.app.html as a FULL <!DOCTYPE html>…</html> document (Preview depends on it).
+2) Then compact package.json, schema.sql, api.ts, App.tsx, app/page.tsx, README.md — short but coherent.
+Never leave open JSON strings. Prefer a solid finished Preview over incomplete extra files.
+Original brief:
+${opts.instruction}
+${opts.hintTitle ? `Suggested title: ${opts.hintTitle}` : ""}
+
+Incomplete output so far (rewrite into one complete JSON — keep good parts of app.html if usable):
+-----
+${opts.previousRaw.slice(0, 28000)}
+-----
+Last characters were:
+-----
+${tail}
+-----`;
+}
+
 async function complete(opts: {
   system: string;
   user: string;
@@ -125,6 +186,7 @@ async function complete(opts: {
       user: opts.user,
       maxTokens: opts.maxTokens,
       engine: opts.engine,
+      reasoningEffort: opts.engine === "pro" ? "xhigh" : "high",
       onChunk: opts.onChunk,
     });
   }
@@ -162,6 +224,11 @@ function makeDeltaBatcher(onDelta: (text: string) => void) {
 
 function buildSystem(large: boolean, engine: string, agentBlock: string) {
   const leanFlash = large && engine === "flash";
+  const finishRule = `FINISH RULE (non-negotiable):
+- Output ONE complete JSON object only. Never stop mid-string or mid-file.
+- files.app.html must be a full HTML document that ends with </html>.
+- Prefer finishing a solid compact scaffold over an unfinished long one.
+- Order files: app.html, package.json, schema.sql, api.ts, App.tsx, app/page.tsx, README.md (then optional).`;
   const scale = leanFlash
     ? `SCALE — PROJET MÉTIER COMPLET mais COMPACT (engine=flash):
 - Priorité: app.html utilisable en Preview (3–5 écrans max), Tailwind CDN, mobile-first RDC.
@@ -190,6 +257,8 @@ function buildSystem(large: boolean, engine: string, agentBlock: string) {
   return `You are Okapi Studio (MMC SARL) — senior product engineer and coding coach for builders in DR Congo.
 You plan like a tech lead, then deliver a complete multi-file project the user can Accept in Studio.
 ${agentBlock}
+
+${finishRule}
 
 STACK LOCK (non-negotiable):
 - Full projects ONLY in: HTML · React · Next · Flutter · Python · SQL (plus api.ts / package.json / README / manifests).
@@ -243,6 +312,7 @@ Rules:
 1. ${scale}
 2. app.html must be a full document (DOCTYPE … </html>), Tailwind CDN, RDC-friendly UX.
 3. ${OKAPI_PRODUCT_DESIGN}
+3b. If the brief is a vitrine / landing / portfolio: ${OKAPI_VITRINE_DESIGN}
 4. Never invent real API keys. Prefer window.Okapi.list/create for live Preview data (Okapi cloud). Optional stubs in api.ts may mirror the same collections.
 5. Never mention third-party AI or database vendor brand names in UI or README — say « base Okapi » / Okapi / MMC SARL.
 6. UI copy in the user's language (French if they write French).
@@ -273,7 +343,15 @@ function parseProjectFiles(
   for (const id of ALLOWED) {
     const value = (filesRaw as Record<string, unknown>)[id];
     if (typeof value === "string" && value.trim()) {
-      files.push({ fileId: id, content: value.trim() });
+      let content = value.trim();
+      // Preview = app.html : fermer proprement si le LLM a coupé la fin.
+      if (id === "app.html") {
+        const openScript = (content.match(/<script\b/gi) || []).length;
+        const closeScript = (content.match(/<\/script>/gi) || []).length;
+        if (openScript > closeScript) content += "\n</script>";
+        content = ensureHtmlDocument(content);
+      }
+      files.push({ fileId: id, content });
     }
   }
   return files;
@@ -312,16 +390,25 @@ async function runStudioProject(opts: {
     onStatus,
     onDelta,
   } = opts;
+  // Opus / grands scaffolds : plus de tokens pour éviter JSON coupé mid-stream.
+  // Flash large aussi en 16k (Opus) — 12k coupait trop souvent app.html.
   const maxTokens =
     large && engine === "pro"
-      ? 16000
+      ? 24_000
       : large
-        ? 8000
-        : 6000;
+        ? 16_000
+        : engine === "pro"
+          ? 12_000
+          : 8000;
   /** Skip soft auto-repair after this — second LLM pass often kills the request. */
-  const REPAIR_BUDGET_MS = 55_000;
+  const REPAIR_BUDGET_MS = 90_000;
+  const CONTINUE_BUDGET_MS = 140_000;
   const startedAt = Date.now();
-  const system = buildSystem(large, engine, agentBlock);
+  const system =
+    buildSystem(large, engine, agentBlock) +
+    (wantsVitrineBrief(instruction)
+      ? `\n\nVITRINE MODE ACTIVE:\n${OKAPI_VITRINE_DESIGN}\nPrefer a polished one-page marketing site over a multi-screen app.`
+      : "");
   const total = 4;
   const delta = onDelta ? makeDeltaBatcher(onDelta) : null;
 
@@ -343,7 +430,11 @@ ${formatStudioHistory(history)}
 EXISTING WORKSPACE (extend coherently if present):
 ${formatStudioWorkspaceContext(workspace)}
 
-Return JSON only with title, note, and files map. Include all mandatory files.`;
+Return ONLY one complete JSON object with title, note, and files map.
+CRITICAL — finish the JSON: no truncated strings.
+PRIORITY #1: files.app.html = full <!DOCTYPE html>…</html> with working nav + at least 2 screens + window.Okapi for data. This is what Preview runs.
+PRIORITY #2: keep App.tsx, app/page.tsx, schema.sql, api.ts, package.json, README compact but coherent so the JSON completes.
+Put app.html first in the files map. Prefer a finished Preview over incomplete extra files.`;
 
   onStatus?.({
     type: "status",
@@ -375,6 +466,44 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
   delta?.flush();
   let repaired = false;
 
+  // Reprise si le stream a coupé le JSON (symptôme : « le code ne finit pas »).
+  if (
+    looksTruncatedStudioOutput(raw) ||
+    !extractJsonObject(raw)
+  ) {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < CONTINUE_BUDGET_MS) {
+      onStatus?.({
+        type: "status",
+        message: "Reprise — le code a été coupé, Okapi termine…",
+        step: 2,
+        total,
+        large,
+        engine,
+        repairing: true,
+      });
+      const continued = await complete({
+        system,
+        user: buildStudioContinuePrompt({
+          instruction,
+          previousRaw: raw,
+          hintTitle,
+        }),
+        engine,
+        maxTokens,
+        onChunk: delta ? (t) => delta.push(t) : undefined,
+      });
+      delta?.flush();
+      const contOk = extractJsonObject(continued);
+      const contHasHtml = /<\/html>/i.test(continued);
+      if (contHasHtml || contOk) {
+        raw = continued;
+      } else if (continued.trim().length > raw.trim().length * 0.5) {
+        raw = continued;
+      }
+    }
+  }
+
   onStatus?.({
     type: "status",
     message: "Vérification qualité du scaffold…",
@@ -405,10 +534,16 @@ Return JSON only with title, note, and files map. Include all mandatory files.`;
 
   const elapsedAfterFirst = Date.now() - startedAt;
   const hardNeedsRepair = hardFail || mustRepairStudioProject(issues);
+  // Soft repair: Pro toujours ; Flash si HTML trop mince (tronqué = déjà en hard).
   const softNeedsRepair =
     !hardNeedsRepair &&
-    engine === "pro" &&
-    shouldRepairStudioProject(issues);
+    shouldRepairStudioProject(issues) &&
+    (engine === "pro" ||
+      issues.some((i) =>
+        ["html_too_short", "html_weak_navigation", "html_missing_states"].includes(
+          i.code,
+        ),
+      ));
   const needsRepair =
     Boolean(raw.trim()) &&
     (hardNeedsRepair ||

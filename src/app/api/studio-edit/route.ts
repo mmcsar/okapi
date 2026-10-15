@@ -186,6 +186,7 @@ async function complete(opts: {
       user: opts.user,
       maxTokens: opts.maxTokens,
       engine: opts.engine,
+      reasoningEffort: opts.engine === "pro" ? "xhigh" : "high",
       onChunk: opts.onChunk,
     });
   }

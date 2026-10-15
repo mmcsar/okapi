@@ -269,7 +269,7 @@ export function AdminClientsDashboard() {
           {setupError}
           <p className="mt-1 text-xs text-okapi-ink/50">
             SQL : <code>20260309_admin_clients.sql</code> · Env :{" "}
-            <code>SUPABASE_SERVICE_ROLE_KEY</code>
+            <code>SUPABASE_SECRET_KEY</code> (sb_secret_…)
           </p>
         </div>
       ) : null}

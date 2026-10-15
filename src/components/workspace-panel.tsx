@@ -278,9 +278,9 @@ export function WorkspacePanel({
       }`}
     >
       {studioBleed ? (
-        <div className="okapi-studio-chrome flex h-9 shrink-0 items-center justify-between gap-2 border-b px-2">
+        <div className="okapi-studio-chrome flex h-10 shrink-0 items-center justify-between gap-2 border-b px-2.5">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            <span className="mr-1.5 hidden max-w-[140px] shrink-0 truncate font-[family-name:var(--font-syne)] text-[12px] font-semibold text-[#eef6f1] sm:inline">
+            <span className="mr-2 hidden max-w-[140px] shrink-0 truncate font-[family-name:var(--font-syne)] text-[12px] font-bold tracking-tight text-[#eef6f1] sm:inline">
               {title || "Okapi Studio"}
             </span>
             {(
@@ -296,10 +296,10 @@ export function WorkspacePanel({
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
-                className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition ${
+                className={`okapi-studio-tab shrink-0 px-2.5 py-1 text-[11px] font-medium ${
                   tab === id
-                    ? "bg-white/12 text-[#eef6f1]"
-                    : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
+                    ? "okapi-studio-tab--active"
+                    : "text-[#7d9588]"
                 }`}
               >
                 {label}
@@ -311,7 +311,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 onClick={onNewProject}
-                className="hidden rounded-md px-2 py-1 text-[11px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1] sm:inline"
+                className="okapi-studio-tab hidden px-2 py-1 text-[11px] font-medium text-[#9bb0a4] sm:inline"
                 title="Effacer les fichiers et démarrer un projet vide"
               >
                 Nouveau
@@ -329,7 +329,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 onClick={() => void onSaveCloud()}
-                className="rounded-md border border-[#e8892a]/45 bg-[#e8892a]/15 px-2.5 py-1 text-[11px] font-bold text-[#ffd7a8] transition hover:bg-[#e8892a]/25"
+                className="okapi-studio-btn-amber px-2.5 py-1 text-[11px]"
                 title={
                   accessToken
                     ? "Sauvegarder le projet sur ton compte (Ctrl+S)"
@@ -348,7 +348,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 onClick={onLeaveStudio}
-                className="rounded-md px-2 py-1 text-[11px] font-medium text-[#9bb0a4] transition hover:bg-white/5 hover:text-[#eef6f1]"
+                className="okapi-studio-tab px-2 py-1 text-[11px] font-medium text-[#9bb0a4]"
                 title="Retour Agent Accueil"
               >
                 ← Agent

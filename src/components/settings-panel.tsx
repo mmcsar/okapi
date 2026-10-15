@@ -11,9 +11,14 @@ import {
 type SettingsPanelProps = {
   onBack?: () => void;
   onOpenBilling?: () => void;
+  onNavigate?: (id: string) => void;
 };
 
-export function SettingsPanel({ onBack, onOpenBilling }: SettingsPanelProps) {
+export function SettingsPanel({
+  onBack,
+  onOpenBilling,
+  onNavigate,
+}: SettingsPanelProps) {
   const [name, setName] = useState("Christian");
   const [city, setCity] = useState("Kinshasa");
   const [email, setEmail] = useState("christian@okapi.cd");
@@ -140,6 +145,31 @@ export function SettingsPanel({ onBack, onOpenBilling }: SettingsPanelProps) {
                   className="w-full rounded-2xl border border-[var(--okapi-stroke)] bg-okapi-mist/80 px-4 py-2.5 text-sm text-okapi-ink/70 outline-none"
                 />
               </label>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-[var(--okapi-stroke)] bg-white/70 p-5 backdrop-blur-md">
+            <h2 className="font-[family-name:var(--font-syne)] text-base font-bold">
+              Projets & Auto
+            </h2>
+            <p className="mt-1 text-sm text-okapi-ink/45">
+              Accède à tes projets sauvés et aux automatisations planifiées.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onNavigate?.("projects")}
+                className="rounded-2xl bg-okapi-forest px-4 py-2.5 text-sm font-semibold text-white hover:bg-okapi-leaf"
+              >
+                Projets
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate?.("automations")}
+                className="rounded-2xl border border-[var(--okapi-stroke)] bg-white/90 px-4 py-2.5 text-sm font-semibold text-okapi-ink/80 hover:bg-okapi-mist"
+              >
+                Auto
+              </button>
             </div>
           </section>
 

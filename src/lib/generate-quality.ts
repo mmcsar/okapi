@@ -7,16 +7,50 @@ export type GenerateQualityIssue = {
   detail: string;
 };
 
-const MAX_REPAIR_ATTEMPTS = 1;
+const MAX_REPAIR_ATTEMPTS = 2;
+
+/** Codes où un 2e passage (continuer / fermer HTML) vaut le coût. */
+const TRUNCATION_REPAIR_CODES = new Set([
+  "no_html",
+  "truncated_html",
+  "unclosed_script",
+  "unclosed_style",
+]);
 
 /** Barème visuel partagé Preview + Studio. */
 export const OKAPI_PRODUCT_DESIGN = `DESIGN — vrai site ou vraie app, pas une maquette:
 - Produit cliquable: en-tête avec le nom, navigation vers chaque écran, contenu principal, pied de page ou barre d’app.
-- Une palette cohérente avec le métier (vert profond et sable chaud conviennent). Hiérarchie de titres, espaces larges, boutons clairement cliquables. Jamais une seule carte centrée sur un dégradé violet.
+- Une palette cohérente avec le métier (vert profond #1b4f3a et ambre #e8892a conviennent). Hiérarchie de titres, espaces larges, boutons clairement cliquables. Jamais une seule carte centrée sur un dégradé violet / indigo.
 - Contenu d’exemple spécifique au brief (noms, prix en CDF pour une boutique, Kinshasa ou Gombe si c’est local). Pas de lorem ipsum, pas de TODO.
 - Un site a un hero, au moins deux sections de contenu, et une action claire (contact, commande, paiement). Une app a au moins deux écrans (liste + formulaire ou détail) avec une navigation qui change vraiment de vue.
 - Photos: https://picsum.photos/seed/MOT_ANGLAIS_UNIQUE/1200/800 — un seed différent par image, 4 images maximum. Jamais image.pollinations.ai, jamais un src vide.
 - Listes et formulaires passent par window.Okapi.list/create. États vide, chargement et erreur visibles.`;
+
+/**
+ * Sites vitrine / landing — une composition marketing, pas un dashboard.
+ * Aligné UX Accueil RDC (marque forte, hero plein, peu de cards).
+ */
+export const OKAPI_VITRINE_DESIGN = `VITRINE / LANDING (RDC) — non-négociable:
+- Première vue = UNE composition: marque (nom) en signal fort + 1 titre + 1 phrase + 1 groupe CTA + 1 image/ambiance dominante. Pas de dashboard, pas de stats, pas de grille de cards dans le hero.
+- Hero plein largeur (edge-to-edge), image réelle via picsum.photos/seed/… — pas d’image inset dans une carte arrondie seule.
+- Typo expressive (pas Inter / Roboto / Arial). Palette métier claire — éviter purple-on-white et glow violet.
+- Sections suivantes (une idée chacune): Services ou Offre · Preuve / galerie · Contact (WhatsApp + téléphone RDC + adresse quartier).
+- CTA WhatsApp réaliste (wa.me/243…) si contact commercial. Prix en CDF si tarif affiché.
+- Footer simple: nom, ville (Kinshasa / Lubumbashi…), liens. Mobile-first.
+- Contenu 100 % inventé mais crédible pour le brief (noms congolais, lieux réels). Zéro lorem ipsum.
+- Si c’est une vitrine pure: une page scroll, pas une mini-app multi-écrans. Formulaires contact → window.Okapi.create('leads') ou lien WhatsApp.`;
+
+/** Brief = site vitrine / landing / présentation. */
+export function wantsVitrineBrief(text: string): boolean {
+  const m = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, " ");
+  return /\b(vitrine|landing|landing page|site vitrine|page vitrine|site presentation|site web (pour |de )?(mon |ma |une? )?(entreprise|asso|association|ecole|eglise|cabinet|agence|marque)|portfolio|showcase|page d accueil (pro|entreprise)|site one[- ]?page)\b/.test(
+    m,
+  );
+}
 
 /**
  * Paiement RDC crédible — sans imposer WhatsApp.
@@ -31,6 +65,14 @@ export const OKAPI_MOBILE_MONEY_UX = `PAIEMENT RDC (Mobile Money — obligatoire
 
 export function maxGenerateRepairAttempts() {
   return MAX_REPAIR_ATTEMPTS;
+}
+
+/** Soft style issues: 1 pass. Truncation / no_html: jusqu’à 2. */
+export function maxRepairAttemptsForIssues(issues: GenerateQualityIssue[]) {
+  if (issues.some((i) => TRUNCATION_REPAIR_CODES.has(i.code))) {
+    return MAX_REPAIR_ATTEMPTS;
+  }
+  return 1;
 }
 
 function countTag(html: string, open: RegExp, close: RegExp) {
@@ -183,6 +225,33 @@ export function assessGenerateQuality(
     });
   }
 
+  // Vitrine / landing: hero + sections + CTA (détecté par structure HTML)
+  const looksLikeMarketingSite =
+    /hero|accueil|bienvenue|notre (offre|mission|histoire)|services|contact/i.test(
+      html,
+    ) && !/window\.Okapi\.(list|create)\s*\(\s*['"]products['"]/i.test(html);
+  if (looksLikeMarketingSite) {
+    if (
+      !/<section\b/i.test(html) ||
+      (html.match(/<section\b/gi) || []).length < 2
+    ) {
+      issues.push({
+        code: "vitrine_too_thin",
+        detail:
+          "Vitrine needs a hero plus at least 2 content sections (offre / galerie / contact).",
+      });
+    }
+    if (
+      !/\b(whatsapp|wa\.me|tel:|contactez|commander|demander)\b/i.test(html)
+    ) {
+      issues.push({
+        code: "vitrine_no_cta",
+        detail:
+          "Vitrine needs a clear CTA (WhatsApp, téléphone, or contact form).",
+      });
+    }
+  }
+
   if (
     opts.mode === "fullstack" &&
     looksInteractive &&
@@ -218,6 +287,8 @@ export function shouldRepairGenerate(issues: GenerateQualityIssue[]) {
       "missing_ui_states",
       "weak_page",
       "missing_nav",
+      "vitrine_too_thin",
+      "vitrine_no_cta",
     ].includes(i.code),
   );
 }

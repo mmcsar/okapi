@@ -127,10 +127,10 @@ export function Sidebar({
           type="button"
           onClick={() => go(item.id)}
           aria-current={active ? "page" : undefined}
-          className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+          className={`okapi-nav-item flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium ${
             active
-              ? "bg-okapi-forest text-white"
-              : "text-okapi-ink/65 hover:bg-white/70 hover:text-okapi-ink"
+              ? "okapi-nav-item--active"
+              : "text-okapi-ink/65 hover:text-okapi-ink"
           }`}
         >
           <span className={active ? "opacity-100" : "opacity-70"}>{item.icon}</span>
@@ -187,10 +187,10 @@ export function Sidebar({
       <button
         type="button"
         onClick={newChat}
-        className={`mt-4 flex w-full items-center justify-center gap-2 bg-okapi-amber text-sm font-semibold text-white transition hover:bg-okapi-amber-deep ${
+        className={`okapi-nav-new mt-4 flex w-full items-center justify-center gap-2 text-sm font-semibold text-white ${
           compact
             ? "rounded-xl px-3 py-2.5"
-            : "mt-5 rounded-2xl px-4 py-3 shadow-sm"
+            : "mt-5 rounded-2xl px-4 py-3"
         }`}
       >
         <span className="text-base leading-none">+</span>
@@ -220,7 +220,7 @@ export function Sidebar({
       </nav>
 
       <div
-        className={`mt-auto border border-[var(--okapi-stroke)] bg-white/55 ${
+        className={`okapi-nav-user mt-auto border border-[var(--okapi-stroke)] ${
           compact ? "rounded-xl p-1" : "rounded-2xl p-1.5"
         }`}
       >
@@ -266,7 +266,7 @@ export function Sidebar({
     <>
       <button
         type="button"
-        className={`fixed z-[80] rounded-xl border border-[var(--okapi-stroke)] bg-white px-3 py-2 text-sm font-semibold shadow-md md:hidden ${
+        className={`okapi-nav-menu-btn fixed z-[80] rounded-xl px-3 py-2 text-sm font-semibold md:hidden ${
           compact ? "left-3 top-3" : "left-4 top-4"
         }`}
         onClick={() => setMobileOpen(true)}
@@ -284,17 +284,17 @@ export function Sidebar({
       ) : null}
 
       <aside
-        className={`relative z-[40] hidden shrink-0 md:flex md:flex-col ${
+        className={`okapi-nav-shell relative z-[40] hidden shrink-0 md:flex md:flex-col ${
           compact
-            ? "w-[200px] border-r border-[var(--okapi-stroke)] bg-[rgba(243,246,243,0.92)] p-2.5 backdrop-blur-md"
-            : "w-[260px] md:rounded-[28px] md:border md:border-[var(--okapi-stroke)] md:bg-[var(--okapi-glass)] md:p-3.5 md:backdrop-blur-xl"
+            ? "okapi-nav-shell--compact w-[200px] rounded-none border-y-0 border-l-0 p-2.5"
+            : "w-[260px] md:rounded-[28px] md:p-3.5"
         }`}
       >
         {content}
       </aside>
 
       <aside
-        className={`fixed inset-y-3 left-3 z-[80] flex w-[min(86vw,280px)] flex-col rounded-[28px] border border-[var(--okapi-stroke)] bg-white p-3.5 shadow-2xl transition-transform md:hidden ${
+        className={`okapi-nav-shell fixed inset-y-3 left-3 z-[80] flex w-[min(86vw,280px)] flex-col rounded-[28px] p-3.5 transition-transform md:hidden ${
           mobileOpen ? "translate-x-0" : "-translate-x-[130%]"
         }`}
       >

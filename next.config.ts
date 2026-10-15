@@ -23,6 +23,13 @@ const nextConfig: NextConfig = {
   turbopack: {
     root,
   },
+  // Accès LAN / autre host en `next dev` (sinon JS/_next bloqués → page « texte brut »)
+  allowedDevOrigins: [
+    "localhost",
+    "127.0.0.1",
+    "10.2.0.2",
+    "*.local",
+  ],
   // Anti-vol : pas de source maps navigateur en production
   productionBrowserSourceMaps: false,
   poweredByHeader: false,

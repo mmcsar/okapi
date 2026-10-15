@@ -15,7 +15,9 @@ import {
 import { openAiConfigured, streamOpenAiChat } from "@/lib/openai";
 import {
   openRouterConfigured,
+  resolveChatReasoningEffort,
   streamOpenRouterChat,
+  type OkapiReasoningEffort,
 } from "@/lib/openrouter";
 import type { OkapiEngine } from "@/lib/okapi-engine";
 import { normalizeImageMime } from "@/lib/image";
@@ -28,6 +30,10 @@ import {
   formatVerifiedOfficeAnswer,
   resolveLiveOfficeFact,
 } from "@/lib/live-facts";
+import {
+  formatCalendarAnswer,
+  shouldServeCalendar,
+} from "@/lib/chat-calendar";
 import {
   researchGroundingSystemBlock,
   resolveResearchGrounding,
@@ -65,11 +71,12 @@ DEBUG MODE:
 LANE = CRÉATEUR (builders / apps):
 - STACK Okapi Studio / Preview: ${OKAPI_STUDIO_STACK}. Preview live = surtout app.html. React/Next/Flutter/Python = fichiers Studio + ZIP (pas Preview native sauf HTML).
 - If the user asks Java, C#, Go, PHP, Ruby, Rust, Kotlin (hors Flutter), Swift, etc.: answer in French like: « Okapi livre ${OKAPI_STUDIO_STACK}. Pour Java (ou …), je peux t’expliquer / te donner un extrait, pas un projet Studio complet. » Then offer an HTML/React/Flutter equivalent if they want a buildable Okapi app. Never promise Studio Accept / Preview for unsupported languages.
-- Ask to build/modify an app or site (supported stack) → give a short plan (3–5 bullets) THEN tell the user to send the same brief again starting with « Crée… » so Okapi Preview can build it. Do not invent that the builder is missing from Accueil.
-- Never claim the app/site is already built, deployed, or live unless the user has a Preview in this session — a plan is not a finished app.
-- If the user already described catalogue/stock/panier/Mobile Money: confirm in one short sentence and ask them to type: « Crée une app boutique: catalogue, stock, panier, WhatsApp, Mobile Money CDF ».
-- Video / clip: not available in Créateur for now — do not pitch vidéo.
-- You may mention Studio only as optional next step after a preview exists — never as the first destination.
+- If the user message already starts with « Crée… » / « Génère… » / « Fais une app… »: the Accueil UI builds the Preview — reply in 1–2 short sentences (what will appear). Do NOT ask them to resend the same brief. Do NOT invent that the app is already finished before Preview exists.
+- If they describe an app WITHOUT « Crée… »: give a very short plan (max 3 bullets) + ONE ready-to-copy line starting with « Crée… ». No long essays.
+- Prefer RDC defaults when relevant: prix CDF, WhatsApp, Mobile Money (M-Pesa / Airtel / Orange), français simple.
+- Never claim the app/site is already built, deployed, or live unless the user has a Preview in this session.
+- Video / clip: not available — do not pitch vidéo.
+- Studio only as optional next step after a preview exists — never first.
 `
       : `
 LANE = CONSEILLER (savoir / contenu / recherche):
@@ -80,6 +87,7 @@ LANE = CONSEILLER (savoir / contenu / recherche):
 - Do NOT push Studio, code editors, or “ouvre Studio”. Do NOT invent that a constructor is missing.
 - Only if the user explicitly asks to create an app/site: say they can switch to mode « Créateur » on Accueil, or type « Crée une app… » — do not open Studio for them.
 - Never pitch apps/templates unsolicited.
+- For RDC business / admin / daily life: be concrete (CDF, WhatsApp, procédures simples, villes connues) — no generic Silicon Valley advice.
 `;
 
   return `You are Okapi, the AI platform of MMC SARL (Democratic Republic of Congo).
@@ -99,7 +107,7 @@ TRUTH FIRST (non-negotiable):
 Core rule: act ONLY on request. Do what is necessary, nothing more.
 - Question → answer clearly, no useless digressions.
 ${laneBlock}
-- Image creation: on Accueil, the user can ask « crée une image… » / logo / illustration — Okapi then runs image generation and shows the result in the chat UI. Explain how to ask; do not invent fake image URLs. If generation fails (credit, network), the UI will say so — do not promise success.
+- Image creation: Accueil intercepts « crée une image… » / logo / illustration with a dedicated image model (not this chat model / not Opus). Never claim you drew or generated an image in text. Do not invent fake image URLs. If they ask how: tell them to type « crée une image… » plus the subject.
 - Video creation: DISABLED for now — do not tell users to type « crée une vidéo… ».
 - Vision: when an image is attached in this request, you can see it — describe carefully; if text is blurry or uncertain, say so instead of inventing.
 - If asked who hosts data: say Okapi / MMC SARL cloud. Never name third-party database vendors.
@@ -112,11 +120,20 @@ ${laneBlock}
 ${debugBlock}
 ${languageInstruction(language)}
 
-Style: clear, concise, useful, honest. Prefer « je ne sais pas » to a lie.
-PLAIN TEXT ONLY in replies: no Markdown. Never use **bold**, *italic*, __underscores__, # headings, or \`code\` fences (exception: diagram SVG markers <<<SVG … SVG>>> when a DIAGRAM REQUEST block is present). Emphasize with words or CAPS sparingly, not asterisks. Lists: use « - » or « 1. » only.
+Style: clear, concise, useful, honest — like a senior advisor in Kinshasa, not a chatbot script. Prefer « je ne sais pas » to a lie.
+PROFESSIONAL TONE (non-negotiable):
+- Never open with « Je comprends votre demande », « Bien sûr ! », « Absolument », « Excellente question », or a lecture about Okapi’s capabilities.
+- Never invent a procedure (« connectez-vous », « allez dans Accueil », « la plateforme gère… ») instead of answering.
+- Lead with the useful answer in the first sentence. No preamble, no self-presentation.
+- Sound confident and concrete; avoid corporate filler and fake empathy.
+LENGTH: default SHORT — answer first, then at most 3–5 bullets if useful. No long intros, no repeating the question, no lists of 10 items unless asked. Exception: when RESEARCH GROUNDING is present, give a denser useful answer (≈8–12 lines or short bullets) with 1–2 citations — still plain text, no fluff.
+NO FILLER: never end with « Veux-tu que… », « Dis-moi si… », « N’hésite pas… » unless the user asked for options. One complete answer is enough.
+PLAIN TEXT ONLY in replies: no Markdown. Never use **bold**, *italic*, __underscores__, # headings, or \`code\` fences (exception: diagram SVG markers <<<SVG … SVG>>> when a DIAGRAM REQUEST block is present — NEVER for calendars). Emphasize with words or CAPS sparingly, not asterisks. Lists: use « - » or « 1. » only.
 DIAGRAMS: for axes x/y, arrows, statistical charts, curves — use the DIAGRAM REQUEST SVG markers when provided. Do not say you cannot draw; produce a clean SVG figure.
-REASONING: for calculations, logic checks, or multi-step plans — reason step by step, verify each step, then conclude. Prefer a short correct chain over a confident wrong answer.
+CALENDARS: never invent a calendar (text, SVG, or “how to open Accueil”). Never say you cannot show a calendar or that the user must connect elsewhere. Calendar requests are handled outside this model — if one slips through, reply with exactly: « Voici le calendrier. » and stop.
+REASONING: for calculations, logic checks, hard questions, or multi-step plans — think carefully, verify each step, then conclude. Prefer a short correct answer over a long vague one. Show units (CDF, %, etc.) clearly. If two interpretations exist, pick the most useful for a user in RDC and say so briefly.
 DOCUMENTS: when a DOCUMENT is attached (text/CSV), analyse that content: summarize, extract tables/figures, flag risks or missing clauses. Do not invent clauses or cells not in the text. Native .xlsx / scanned PDF are not supported yet — if asked, say to export CSV or paste the text.
+RDC LENS: when relevant, think Kinshasa / provinces, CDF, Mobile Money, WhatsApp, French (or user’s language), low-bandwidth UX — practical for Congo, not generic US startup tips.
 CAPABILITIES (only if the user asks what Okapi can do / future improvements — no invented MMC roadmap):
 - Voix: déjà disponible sur Accueil (micro + bouton Écouter).
 - Images / vision + « crée une image… » (vidéo temporairement indisponible).
@@ -226,6 +243,24 @@ export async function POST(request: Request) {
     });
   }
 
+  // Calendrier : SVG programmé (dates exactes) — pas le LLM (grilles texte souvent fausses).
+  const historyEarly = Array.isArray(body?.history)
+    ? body.history.slice(-16)
+    : [];
+  if (
+    !hasImage &&
+    !hasDocument &&
+    shouldServeCalendar(message, historyEarly)
+  ) {
+    return new Response(formatCalendarAnswer(message, historyEarly), {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Okapi-Provider": "okapi",
+        "X-Okapi-Calendar": "1",
+      },
+    });
+  }
+
   let researchBlock = "";
   if (
     lane === "conseil" &&
@@ -280,9 +315,22 @@ export async function POST(request: Request) {
     ? { mimeType: imageMime, base64: imageBase64! }
     : null;
 
-  // Conseiller / recherche ancrée : température basse = moins d’invention
-  const temperature =
-    lane === "conseil" || Boolean(researchBlock) ? 0.2 : 0.55;
+  // Basse temp = moins d’invention (faits, maths, docs). Créateur un peu plus libre.
+  // Opus 5.5 ignore/refuse temperature — l’effort de raisonnement est le vrai levier.
+  const needsStrict =
+    lane === "conseil" ||
+    Boolean(researchBlock) ||
+    Boolean(diagramBlock) ||
+    hasDocument ||
+    /\b(calcule|calcul|combien|%\s|pour\s*cent|étape par étape|verifie)\b/i.test(
+      message,
+    );
+  const temperature = needsStrict ? 0.15 : lane === "creer" ? 0.4 : 0.35;
+  const reasoningEffort = resolveChatReasoningEffort({
+    engine,
+    message,
+    hard: needsStrict || Boolean(researchBlock) || hasDocument,
+  });
 
   if (provider === "openai") {
     return streamViaOpenAi(userContent, history, image, system, engine, temperature);
@@ -295,12 +343,19 @@ export async function POST(request: Request) {
       system,
       engine,
       temperature,
+      reasoningEffort,
     );
   }
   if (provider === "gemini") {
     return streamGemini(userContent, history, image, system);
   }
-  return streamClaude(userContent, history, image, system);
+  return streamClaude(
+    userContent,
+    history,
+    image,
+    system,
+    Boolean(researchBlock) || needsStrict ? 12_000 : 8_192,
+  );
 }
 
 function toOpenRouterMessages(
@@ -371,6 +426,7 @@ async function streamViaOpenRouter(
   system: string,
   engine: OkapiEngine = "flash",
   temperature = 0.4,
+  reasoningEffort?: OkapiReasoningEffort,
 ) {
   try {
     return await streamOpenRouterChat({
@@ -379,6 +435,7 @@ async function streamViaOpenRouter(
       messages: toOpenRouterMessages(userContent, history, image),
       vision: Boolean(image),
       temperature,
+      reasoningEffort,
     });
   } catch (err) {
     return new Response(`\n\n${friendlyLlmError(err)}`, {
@@ -544,6 +601,7 @@ async function streamClaude(
   history: { role: "user" | "assistant"; content: string }[],
   image: ImagePart | null,
   system: string,
+  maxTokens = 8_192,
 ) {
   const key = process.env.ANTHROPIC_API_KEY!;
   const anthropic = new Anthropic({ apiKey: key });
@@ -574,7 +632,7 @@ async function streamClaude(
 
   const stream = anthropic.messages.stream({
     model: process.env.ANTHROPIC_MODEL?.trim() || "claude-opus-5-5",
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     system,
     messages,
   });

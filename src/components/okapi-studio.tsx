@@ -32,8 +32,11 @@ import {
   type StudioProblem,
 } from "@/lib/studio-problems";
 import {
+  OKAPI_MONACO_THEME,
   configureMonacoStudio,
+  monacoEditorOptions,
   monacoMarkersToProblems,
+  monacoReviewOptions,
   studioFilePath,
 } from "@/lib/monaco-studio";
 import { readStudioStream } from "@/lib/studio-stream";
@@ -158,29 +161,6 @@ function diffStats(before: string, after: string) {
     if (line.type === "del") removed += 1;
   }
   return { added, removed };
-}
-
-const MONACO_FONT =
-  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-
-function monacoReviewOptions(readOnly: boolean) {
-  return {
-    readOnly,
-    fontSize: 13,
-    fontFamily: MONACO_FONT,
-    minimap: { enabled: false },
-    scrollBeyondLastLine: false,
-    automaticLayout: true,
-    wordWrap: "on" as const,
-    tabSize: 2,
-    padding: { top: 12, bottom: 12 },
-    renderLineHighlight: "none" as const,
-    lineNumbers: "on" as const,
-    scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
-    overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true,
-    renderWhitespace: "none" as const,
-  };
 }
 
 function previewSlug(title: string) {
@@ -747,6 +727,22 @@ export function OkapiStudio({
       editorRef.current = editor;
       monacoRef.current = monaco;
       configureMonacoStudio(monaco);
+      try {
+        monaco.editor.setTheme(OKAPI_MONACO_THEME);
+      } catch {
+        /* ignore */
+      }
+      // Format document (Shift+Alt+F) — rappel soft dans la console Studio
+      editor.addAction({
+        id: "okapi.format",
+        label: "Okapi: Formater le document",
+        keybindings: [
+          monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
+        ],
+        run: (ed) => {
+          void ed.getAction("editor.action.formatDocument")?.run();
+        },
+      });
       syncMonacoProblems();
       const sub = monaco.editor.onDidChangeMarkers(() => {
         syncMonacoProblems();
@@ -2130,7 +2126,7 @@ export function OkapiStudio({
     <div className="okapi-studio-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         {/* Activity bar — Okapi (pas un clone VS Code : pas Git / Extensions) */}
-        <div className="okapi-studio-activity flex w-full shrink-0 flex-row items-center gap-0.5 border-b border-white/10 px-1 py-0.5 lg:w-10 lg:flex-col lg:gap-0.5 lg:border-b-0 lg:border-r lg:px-0 lg:py-1">
+        <div className="okapi-studio-activity flex w-full shrink-0 flex-row items-center gap-0.5 border-b border-[var(--okapi-studio-border-soft)] px-1 py-0.5 lg:w-10 lg:flex-col lg:gap-0.5 lg:border-b-0 lg:border-r lg:px-0 lg:py-1">
           <button
             type="button"
             title="Explorateur — fichiers du projet (Ctrl+B)"
@@ -2138,9 +2134,9 @@ export function OkapiStudio({
               if (studioMode === "simple") setStudioModeAndLayout("pro");
               toggleStudioPanel("explorer");
             }}
-            className={`flex h-8 w-8 items-center justify-center rounded transition ${
+            className={`okapi-studio-activity-btn flex h-8 w-8 items-center justify-center rounded ${
               explorerOpen
-                ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
+                ? "okapi-studio-activity-btn--on"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -2150,9 +2146,9 @@ export function OkapiStudio({
             type="button"
             title="Agent Okapi — Créer / Chat"
             onClick={() => toggleStudioPanel("ai")}
-            className={`flex h-8 w-8 items-center justify-center rounded transition ${
+            className={`okapi-studio-activity-btn flex h-8 w-8 items-center justify-center rounded ${
               aiOpen
-                ? "border-b-2 border-[#ffd7a8] bg-[#e8892a]/25 text-[#ffd7a8] lg:border-b-0 lg:border-l-2"
+                ? "okapi-studio-activity-btn--agent"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -2166,9 +2162,9 @@ export function OkapiStudio({
                 : "Run — génère d’abord app.html avec l’Agent"
             }
             onClick={() => bootOkapiDevServer({ force: Boolean(html?.trim()) })}
-            className={`flex h-8 w-8 items-center justify-center rounded transition ${
+            className={`okapi-studio-activity-btn flex h-8 w-8 items-center justify-center rounded ${
               serverRunning && previewOpen
-                ? "border-b-2 border-[#3d8f68] bg-[#3d8f68]/25 text-[#9fd4b5] lg:border-b-0 lg:border-l-2"
+                ? "okapi-studio-activity-btn--on text-[#9fd4b5]"
                 : "text-[#e8892a] hover:bg-[#e8892a]/15 hover:text-[#ffd7a8]"
             }`}
           >
@@ -2178,9 +2174,9 @@ export function OkapiStudio({
             type="button"
             title="Preview — voir l’app HTML"
             onClick={() => toggleStudioPanel("preview")}
-            className={`flex h-8 w-8 items-center justify-center rounded transition ${
+            className={`okapi-studio-activity-btn flex h-8 w-8 items-center justify-center rounded ${
               previewOpen
-                ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
+                ? "okapi-studio-activity-btn--on"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -2193,9 +2189,9 @@ export function OkapiStudio({
               if (studioMode === "simple") setStudioModeAndLayout("pro");
               toggleStudioPanel("terminal");
             }}
-            className={`flex h-8 w-8 items-center justify-center rounded transition ${
+            className={`okapi-studio-activity-btn flex h-8 w-8 items-center justify-center rounded ${
               terminalOpen
-                ? "border-b-2 border-[#e8f2ec] bg-[#1b4f3a]/50 text-[#e8f2ec] lg:border-b-0 lg:border-l-2"
+                ? "okapi-studio-activity-btn--on"
                 : "text-[#7d9588] hover:bg-white/5 hover:text-[#d5e4db]"
             }`}
           >
@@ -2291,7 +2287,7 @@ export function OkapiStudio({
                         onClick={() => openFile(file.id)}
                         className={`mb-px flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left transition ${
                           selected
-                            ? "bg-[#1b4f3a] text-white shadow-[inset_2px_0_0_#e8892a]"
+                            ? "okapi-studio-file-active text-white"
                             : "text-[#b7c9bf] hover:bg-white/[0.04]"
                         }`}
                       >
@@ -2342,9 +2338,9 @@ export function OkapiStudio({
                     return (
                       <div
                         key={file.id}
-                        className={`group flex h-8 shrink-0 items-center gap-1 border-r border-white/10 px-2 ${
+                        className={`group flex h-8 shrink-0 items-center gap-1 border-r border-[var(--okapi-studio-border-soft)] px-2 ${
                           selected
-                            ? "bg-[#15221c] text-[#eef6f1]"
+                            ? "bg-[var(--okapi-studio-elevated)] text-[#eef6f1] shadow-[inset_0_-2px_0_#e8892a]"
                             : "bg-transparent text-[#7d9588] hover:bg-white/[0.03] hover:text-[#b7c9bf]"
                         }`}
                       >
@@ -2524,7 +2520,8 @@ export function OkapiStudio({
                         <MonacoEditor
                           height="100%"
                           language={active.language}
-                          theme="vs-dark"
+                          theme={OKAPI_MONACO_THEME}
+                          beforeMount={handleMonacoBeforeMount}
                           value={pending.before}
                           options={monacoReviewOptions(true)}
                         />
@@ -2549,7 +2546,8 @@ export function OkapiStudio({
                         <MonacoEditor
                           height="100%"
                           language={active.language}
-                          theme="vs-dark"
+                          theme={OKAPI_MONACO_THEME}
+                          beforeMount={handleMonacoBeforeMount}
                           value={pending.after}
                           options={monacoReviewOptions(true)}
                         />
@@ -2561,7 +2559,7 @@ export function OkapiStudio({
                     height="100%"
                     path={studioFilePath(active.id)}
                     language={active.language}
-                    theme="vs-dark"
+                    theme={OKAPI_MONACO_THEME}
                     value={editorValue}
                     beforeMount={handleMonacoBeforeMount}
                     onMount={handleMonacoMount}
@@ -2570,14 +2568,7 @@ export function OkapiStudio({
                       onChangeFile(active.id, v ?? "");
                       markDirty(active.id);
                     }}
-                    options={{
-                      ...monacoReviewOptions(hasPendingHere),
-                      fontSize: 13.5,
-                      renderLineHighlight: "line",
-                      smoothScrolling: true,
-                      cursorBlinking: "smooth",
-                      roundedSelection: true,
-                    }}
+                    options={monacoEditorOptions(hasPendingHere)}
                   />
                 )}
               </div>
@@ -3266,7 +3257,7 @@ export function OkapiStudio({
       </div>
 
       {/* Status bar — pleine largeur workbench */}
-      <div className="flex h-5 shrink-0 items-center justify-between gap-3 border-t border-white/10 bg-[#0a1410] px-2 text-[10px] text-[#8aa89a]">
+      <div className="okapi-studio-status relative flex h-5 shrink-0 items-center justify-between gap-3 px-2 pl-3 text-[10px] text-[#8aa89a]">
         <div className="flex min-w-0 items-center gap-2.5 overflow-x-auto">
           <span className="shrink-0 font-semibold text-[#c8ddd2]">Okapi Studio</span>
           <button

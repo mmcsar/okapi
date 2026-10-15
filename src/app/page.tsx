@@ -233,25 +233,14 @@ function HomeApp() {
           </button>
           <button
             type="button"
-            onClick={() => navigate("projects")}
+            onClick={() => navigate("settings")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold ${
-              activeNav === "projects"
+              activeNav === "settings"
                 ? "bg-okapi-forest text-white"
                 : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
             }`}
           >
-            Projets
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("automations")}
-            className={`rounded-xl px-3 py-2 text-xs font-semibold ${
-              activeNav === "automations"
-                ? "bg-okapi-forest text-white"
-                : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
-            }`}
-          >
-            Auto
+            Paramètres
           </button>
         </div>
         ) : null}
@@ -260,6 +249,7 @@ function HomeApp() {
           <SettingsPanel
             onBack={() => navigate("home")}
             onOpenBilling={() => navigate("billing")}
+            onNavigate={navigate}
           />
         ) : activeNav === "billing" ? (
           <BillingPanel
