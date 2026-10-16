@@ -125,7 +125,7 @@ export function sanitizeStudioWorkspace(
 
 export function assessStudioProjectFiles(
   files: { fileId: StudioFileId; content: string }[],
-  opts?: { large?: boolean },
+  opts?: { large?: boolean; website?: boolean },
 ): StudioQualityIssue[] {
   const issues: StudioQualityIssue[] = [];
   const byId = new Map(files.map((f) => [f.fileId, f.content]));
@@ -156,11 +156,13 @@ export function assessStudioProjectFiles(
           detail: "app.html missing </html> (likely truncated).",
         });
       }
-      const minHtml = large ? 1800 : 800;
+      const minHtml = opts?.website ? 1600 : large ? 1800 : 1400;
       if (html.length < minHtml) {
         issues.push({
           code: "html_too_short",
-          detail: `app.html is too short for a robust ${large ? "large " : ""}Preview product.`,
+          detail: opts?.website
+            ? "app.html is too short for a real website (hero, sections, contact)."
+            : `app.html is too short for a robust ${large ? "large " : ""}Preview product.`,
         });
       }
       const openScript = (html.match(/<script\b/gi) || []).length;
@@ -195,16 +197,41 @@ export function assessStudioProjectFiles(
       }
       const screenHints = (
         html.match(
-          /\b(data-view|data-screen|id=["'](?:view|screen|page|tab)-|showView|navigateTo|nav-item|role=["']tab["'])/gi,
+          /\b(data-view|data-screen|data-go|id=["'](?:view|screen|page|tab)-|showView|navigateTo|nav-item|role=["']tab["'])/gi,
         ) || []
       ).length;
-      const navHints = (html.match(/<nav\b|navbar|bottom-nav|sidebar/gi) || [])
-        .length;
-      if (large && screenHints + navHints < 2) {
+      const hasRouter =
+        /data-screen\s*=|data-go\s*=|showView\s*\(|location\.hash|data-view\s*=/i.test(
+          html,
+        );
+      const hasNav = /<nav\b/i.test(html);
+      if (!opts?.website && (!hasNav || !hasRouter || (large && screenHints < 2))) {
         issues.push({
           code: "html_weak_navigation",
           detail:
-            "Large project app.html needs real multi-screen navigation (nav + views).",
+            "app.html needs a real <nav> and a screen switch (data-go + data-screen, or hash). Hidden sections must actually toggle. A single card is not an app.",
+        });
+      }
+      if (opts?.website) {
+        const sections = (html.match(/<section\b/gi) || []).length;
+        const hasHero = /<h1\b/i.test(html);
+        const hasCta = /wa\.me|tel:|mailto:/i.test(html);
+        const hasImage = /picsum\.photos|<img\b/i.test(html);
+        if (!hasHero || sections < 2 || !hasCta || !hasImage) {
+          issues.push({
+            code: "html_weak_website",
+            detail:
+              "Website app.html needs an h1 hero, at least 2 <section>, a real image (picsum.photos), and a CTA (wa.me, tel:, or mailto:). Not a one-card mock.",
+          });
+        }
+      }
+      if (
+        /lorem ipsum|votre titre|titre ici|image\.pollinations\.ai/i.test(html)
+      ) {
+        issues.push({
+          code: "html_placeholder",
+          detail:
+            "Replace lorem, « Votre titre », and dead image URLs with real sample content and https://picsum.photos/seed/UNIQUE/1400/900.",
         });
       }
       if (
@@ -319,6 +346,8 @@ export function shouldRepairStudioProject(issues: StudioQualityIssue[]) {
         "html_too_short",
         "html_unclosed_script",
         "html_weak_navigation",
+        "html_weak_website",
+        "html_placeholder",
         "html_missing_states",
         "interactive_without_okapi",
         "sql_too_short",
@@ -369,7 +398,9 @@ Rules:
 2. Include ALL mandatory files: app.html, App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md.
 3. If main.dart exists, also include pubspec.yaml. If main.py exists, also include requirements.txt.
 4. Fix truncation / missing sections. Prefer completing previous content over rewriting from scratch.
-5. app.html must be a full document ending with </html> — multi-screen, empty/loading/error states, window.Okapi for data.
+5. app.html must be a full document ending with </html>.
+   - Website brief: hero + h1 + at least 2 sections + image + CTA. Keep other files short. Do not turn it into a dashboard.
+   - App brief: working data-go / data-screen navigation, sample rows visible, empty/loading/error states, window.Okapi for data.
 6. package.json must be valid JSON with scripts.
 7. Prefer window.Okapi.list/create over localStorage for interactive lists/forms.
 8. schema.sql needs real CREATE TABLE(s). api.ts and App.tsx must be substantial, not stubs.

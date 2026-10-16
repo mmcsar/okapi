@@ -94,7 +94,22 @@ type HomeDashboardProps = {
   onNavigate?: (id: string) => void;
 };
 
-function greetingFromHour(hour: number) {
+function greetingFromHour(hour: number, lang: OkapiLangCode = "fr") {
+  if (lang === "ln") {
+    if (hour < 12) return "Mbote na tongo";
+    if (hour < 18) return "Mbote";
+    return "Mbote na mpokwa";
+  }
+  if (lang === "sw") {
+    if (hour < 12) return "Habari za asubuhi";
+    if (hour < 18) return "Habari za mchana";
+    return "Habari za jioni";
+  }
+  if (lang === "en") {
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  }
   if (hour < 12) return "Bonjour";
   if (hour < 18) return "Bon après-midi";
   return "Bonsoir";
@@ -408,8 +423,8 @@ export function HomeDashboard({
   }, [devMode]);
 
   useEffect(() => {
-    setGreeting(greetingFromHour(new Date().getHours()));
-  }, []);
+    setGreeting(greetingFromHour(new Date().getHours(), language));
+  }, [language]);
 
   const openInStudioRef = useRef(openInStudio);
   openInStudioRef.current = openInStudio;
@@ -620,7 +635,7 @@ export function HomeDashboard({
 
     try {
       const snap = snapRef.current;
-      let artifacts = ensureReadmeArtifact(
+      const artifacts = ensureReadmeArtifact(
         artifactsFromSnap({
           react: keepOrReplace(payload.artifacts?.react, snap.react),
           reactNative: keepOrReplace(

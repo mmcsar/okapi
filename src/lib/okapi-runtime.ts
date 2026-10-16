@@ -79,6 +79,23 @@ export function buildOkapiRuntimeScript(opts: {
 
   return `<script ${OKAPI_RUNTIME_MARKER}="1">
 (function(){
+  function memStore() {
+    var data = Object.create(null);
+    return {
+      getItem: function (k) {
+        k = String(k);
+        return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null;
+      },
+      setItem: function (k, v) { data[String(k)] = String(v); },
+      removeItem: function (k) { delete data[String(k)]; },
+      clear: function () { data = Object.create(null); },
+      key: function (i) { return Object.keys(data)[i] || null; },
+      get length() { return Object.keys(data).length; }
+    };
+  }
+  window.__okapiLocal = memStore();
+  window.__okapiSession = memStore();
+
   var PROJECT_ID = ${JSON.stringify(projectId)};
   var PARENT_ORIGIN = ${JSON.stringify(parentOrigin)};
   var pending = {};
@@ -230,6 +247,44 @@ export function buildOkapiRuntimeScript(opts: {
 </script>`;
 }
 
+/** Rend le HTML généré affichable dans l’iframe Preview (CSP + sandbox). */
+export function preparePreviewHtml(html: string): string {
+  let out = html.trim();
+  if (!out) return out;
+  out = out.replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  if (!/<html[\s>]/i.test(out) && /&lt;html[\s>]/i.test(out)) {
+    out = out
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+  out = out.replace(
+    /<script\b([^>]*)>([\s\S]*?)<\/script>/gi,
+    (full, attrs: string, body: string) => {
+      if (/\bsrc\s*=/i.test(attrs)) return full;
+      const next = body
+        .replace(/\blocalStorage\b/g, "window.__okapiLocal")
+        .replace(/\bsessionStorage\b/g, "window.__okapiSession");
+      return `<script${attrs}>${next}</script>`;
+    },
+  );
+  const usesTailwind =
+    /\bclass\s*=\s*["'][^"']*\b(?:flex|grid|hidden|block|bg-|text-|p-|px-|py-|m-|mx-|my-|rounded|min-h-|max-w-|gap-|items-|justify-|border|shadow|font-|w-|h-)/i.test(
+      out,
+    );
+  if (usesTailwind && !/cdn\.tailwindcss\.com/i.test(out)) {
+    const tag = `<script src="https://cdn.tailwindcss.com"></script>`;
+    if (/<head[^>]*>/i.test(out)) {
+      out = out.replace(/<head([^>]*)>/i, `<head$1>\n${tag}`);
+    } else {
+      out = `${tag}\n${out}`;
+    }
+  }
+  return out;
+}
+
 export function injectOkapiRuntime(
   html: string,
   opts: {
@@ -241,14 +296,15 @@ export function injectOkapiRuntime(
   },
 ): string {
   if (!html?.trim()) return html;
-  const cleaned = stripOkapiRuntime(html);
+  const cleaned = preparePreviewHtml(stripOkapiRuntime(html));
   const parentOrigin = opts.parentOrigin || opts.origin || "";
   const script = buildOkapiRuntimeScript({
     projectId: opts.projectId,
     parentOrigin,
   });
-  if (/<\/head>/i.test(cleaned)) {
-    return cleaned.replace(/<\/head>/i, `${script}\n</head>`);
+  // En tête de <head> : le pont Okapi et la mémoire existent avant les scripts générés.
+  if (/<head[^>]*>/i.test(cleaned)) {
+    return cleaned.replace(/<head([^>]*)>/i, `<head$1>\n${script}`);
   }
   if (/<body[^>]*>/i.test(cleaned)) {
     return cleaned.replace(/<body([^>]*)>/i, `<body$1>\n${script}`);

@@ -40,6 +40,69 @@ export const OKAPI_VITRINE_DESIGN = `VITRINE / LANDING (RDC) — non-négociable
 - Contenu 100 % inventé mais crédible pour le brief (noms congolais, lieux réels). Zéro lorem ipsum.
 - Si c’est une vitrine pure: une page scroll, pas une mini-app multi-écrans. Formulaires contact → window.Okapi.create('leads') ou lien WhatsApp.`;
 
+/**
+ * Site vitrine (pas une app métier).
+ * « Crée un site » sans boutique / stock / dashboard → page marketing.
+ * Une boutique, une école ou un CRM restent des apps.
+ */
+export function wantsWebsiteBrief(text: string): boolean {
+  if (wantsVitrineBrief(text)) {
+    const product = stripAccents(text);
+    if (
+      /\b(app|application|boutique|restaurant|maquis|pharmacie|ecole|clinique|flotte|crm|panier|stock|caisse|dashboard|gestion)\b/.test(
+        product,
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+  const m = stripAccents(text);
+  const siteish =
+    /\b(site|website|vitrine|landing|portfolio|page web|one page|presentation)\b/.test(
+      m,
+    );
+  const appish =
+    /\b(app|application|dashboard|crm|erp|gestion|panier|stock|caisse|saas|plateforme|fullstack|boutique|restaurant|maquis|pharmacie|ecole|clinique|flotte)\b/.test(
+      m,
+    );
+  return siteish && !appish;
+}
+
+/** Ce que Preview doit montrer pour un site — app.html d’abord, le reste court. */
+export const OKAPI_WEBSITE_CONTRACT = `WEBSITE (app.html is the product — spend the tokens here):
+- One scrolling page, not a dashboard and not a multi-screen admin.
+- Required in app.html: <header> with the brand, one <h1> hero, one sentence, one CTA (https://wa.me/243… or tel:+243…), one large image https://picsum.photos/seed/UNIQUE_ENGLISH/1400/900, then at least two <section> (offre, preuve or galerie, contact), then <footer> with a real city (Kinshasa, Lubumbashi…).
+- Tailwind CDN in <head>. One Google font that is not Inter, Roboto, or Arial (Fraunces, Newsreader, or Outfit).
+- Copy is specific and credible (Congolese names, a quartier, CDF if a price is shown). Zero lorem ipsum, zero « Votre titre », zero purple gradient card as the whole page.
+- Companion files (App.tsx, app/page.tsx, schema.sql, api.ts, package.json, README.md) stay SHORT — under 40 lines each — so app.html can finish. A contact form may call window.Okapi.create('leads'). Do not invent a catalog CRUD.`;
+
+/** Ce que Preview doit montrer pour une app — navigation qui change vraiment d’écran. */
+export const OKAPI_APP_CONTRACT = `APP (app.html must work in Preview without reading the other files):
+- <nav> with buttons data-go="home" data-go="list" data-go="form" (add more if the brief needs them).
+- Each screen is <section data-screen="home|list|form">. Only the first is visible; the others start with class "hidden".
+- A script that toggles them:
+  document.querySelectorAll("[data-go]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var id = btn.getAttribute("data-go");
+      document.querySelectorAll("[data-screen]").forEach(function (s) {
+        s.classList.toggle("hidden", s.getAttribute("data-screen") !== id);
+      });
+    });
+  });
+- The list screen shows 2 real sample rows in the HTML immediately (names, prices in CDF when it is a sale), then refreshes from window.Okapi.list. Empty, loading, and error text are real elements, not comments.
+- The form checks required fields, then Okapi.create, then switches back to the list. try/catch shows the error element. list rows are flat { id, name, ... } — never row.data.
+- At least 3 screens. Tailwind CDN. No single centered card, no lorem, no purple-on-white mock.
+- If the JSON must be shorter, shorten README and api.ts. Never cut app.html before </html>.`;
+
+function stripAccents(text: string) {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, " ");
+}
+
 /** Brief = site vitrine / landing / présentation. */
 export function wantsVitrineBrief(text: string): boolean {
   const m = text

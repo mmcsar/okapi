@@ -2326,8 +2326,16 @@ export function OkapiStudio({
         {/* Center column: editor + terminal */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-            {/* Editor */}
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* Editor — se réduit quand le Preview est ouvert */}
+            <div
+              className={`flex min-h-0 min-w-0 flex-col ${
+                previewOpen && studioMode === "simple"
+                  ? "hidden"
+                  : previewOpen
+                    ? "h-[min(18vh,140px)] shrink-0 lg:h-auto lg:w-[min(28%,300px)] lg:max-w-[300px] lg:flex-none"
+                    : "flex-1"
+              }`}
+            >
               {/* Tabs bar — multi-fichiers Okapi */}
               <div className="okapi-studio-chrome flex items-stretch border-b">
                 <div className="flex min-w-0 flex-1 items-center gap-0 overflow-x-auto">
@@ -2576,7 +2584,7 @@ export function OkapiStudio({
 
             {/* Preview — dans la colonne éditeur (Agent reste à droite) */}
             {previewOpen ? (
-              <div className="okapi-studio-panel flex h-[min(42vh,320px)] w-full shrink-0 flex-col border-t border-white/10 lg:h-auto lg:max-h-none lg:w-[min(48%,440px)] lg:border-l lg:border-t-0">
+              <div className="okapi-studio-panel flex min-h-[240px] w-full min-w-0 flex-1 flex-col border-t border-white/10 lg:h-full lg:min-h-0 lg:w-auto lg:border-l lg:border-t-0">
                 <div className="okapi-studio-chrome flex h-8 shrink-0 items-center gap-1.5 border-b px-2">
                   <span className="shrink-0 text-[9px] font-bold uppercase tracking-[0.14em] text-[#7d9588]">
                     Preview
@@ -2629,8 +2637,9 @@ export function OkapiStudio({
                   </button>
                 </div>
 
-                <div className="min-h-0 flex-1 bg-white lg:min-h-0">
+                <div className="relative min-h-0 flex-1 bg-[#06110c] p-2.5 sm:p-3.5">
                   {html?.trim() ? (
+                    <div className="relative h-full overflow-hidden rounded-xl bg-white shadow-[0_16px_50px_rgba(0,0,0,0.35)] ring-1 ring-white/10">
                     <iframe
                       ref={previewIframeRef}
                       key={previewKey}
@@ -2638,8 +2647,9 @@ export function OkapiStudio({
                       srcDoc={liveHtml || ""}
                       sandbox={OKAPI_PREVIEW_SANDBOX}
                       referrerPolicy="no-referrer"
-                      className="h-full min-h-[200px] w-full lg:min-h-0"
+                      className="absolute inset-0 h-full w-full border-0 bg-white"
                     />
+                    </div>
                   ) : (
                     <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-1 px-6 text-center">
                       <p className="text-sm font-medium text-gray-500">
@@ -2841,10 +2851,14 @@ export function OkapiStudio({
 
         {/* Agent Okapi — rail droit (intention Trae : Créer | Chat) */}
         {aiOpen ? (
-          <aside className={`okapi-studio-panel flex max-h-[min(52vh,420px)] w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:border-l lg:border-t-0 ${
-            studioMode === "simple"
-              ? "lg:w-[min(42%,400px)]"
-              : "lg:w-[min(36%,360px)]"
+          <aside className={`okapi-studio-panel flex w-full shrink-0 flex-col border-t border-white/10 lg:max-h-none lg:border-l lg:border-t-0 ${
+            previewOpen && studioMode === "simple"
+              ? "max-h-[min(22vh,180px)] lg:w-[340px]"
+              : previewOpen
+              ? "max-h-[min(22vh,180px)] lg:w-[min(26%,300px)]"
+              : studioMode === "simple"
+                ? "max-h-[min(52vh,420px)] lg:w-[min(42%,400px)]"
+                : "max-h-[min(52vh,420px)] lg:w-[min(36%,360px)]"
           }`}>
             <div className="flex h-8 items-center justify-between gap-2 border-b border-white/10 px-1.5">
               <div className="flex min-w-0 items-center gap-0.5">

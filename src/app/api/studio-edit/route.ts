@@ -150,7 +150,11 @@ ${multiBias ? "- This request likely needs MULTI FILE (format B)." : ""}
 - Never name third-party AI/cloud vendors (say Okapi / MMC SARL).
 - Do not embed secrets or API keys.
 - Active file default target: ${fileId} (${hint})
-- Prefer French for UI strings / README when the user writes in French.`;
+- Prefer French for UI strings / README when the user writes in French.
+- If the active file is app.html, the result must look finished in Preview:
+  - Website: keep or build a scrolling page with header, h1, at least 2 sections, a picsum.photos image, and a wa.me or tel: CTA. Do not turn it into a dashboard.
+  - App: keep a working screen switch (data-go + data-screen, or hash). Sample rows stay visible. Do not collapse the product into one centered card.
+  - Never leave lorem ipsum, « Votre titre », or a purple gradient as the whole page.`;
 }
 
 async function complete(opts: {

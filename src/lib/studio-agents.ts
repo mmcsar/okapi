@@ -9,6 +9,9 @@ export type OkapiAgentId =
   | "general"
   | "restaurant"
   | "boutique"
+  | "pharmacie"
+  | "flotte"
+  | "paroisse"
   | "clinique"
   | "ecole"
   | "crm"
@@ -49,6 +52,51 @@ Product rules:
 - SQL: dishes, categories, orders, order_items, tables (si salle).
 - API: window.Okapi.list/create('dishes'|'orders') — lignes plates {id,...} (jamais .data).
 - Ton: appétissant, rapide, mobile-first Kinshasa/Gombe.`,
+  },
+  {
+    id: "pharmacie",
+    label: "Pharmacie",
+    sector: "Pharmacie",
+    short: "Stock & caisse",
+    systemAddon: `AGENT MÉTIER: Pharmacie de quartier (RDC).
+Product rules:
+- Stock médicaments, recherche, prix CDF, garde de nuit, vente comptoir.
+- Ne donne aucun conseil médical et n’invente pas d’ordonnance. C’est une caisse + stock, pas un diagnostic.
+- ${OKAPI_MOBILE_MONEY_UX}
+- Écrans: Accueil · Stock · Vente · Garde · Reçu.
+- SQL: medicines, stock_movements, sales, sale_items.
+- API: window.Okapi.list/create('medicines'|'sales') — lignes plates {id, name, price…}.
+- UX: lisible pour un comptoir, gros boutons, mobile-first Kinshasa.`,
+  },
+  {
+    id: "flotte",
+    label: "Flotte",
+    sector: "Flotte",
+    short: "Courses moto",
+    systemAddon: `AGENT MÉTIER: Courses moto / flotte (Kinshasa).
+Product rules:
+- Demande de course entre communes réelles (Gombe, Lingwala, Kintambo, Ngaliema, Lemba, Masina…).
+- Tarif en CDF, conducteur, suivi simple (demandée → en route → arrivée).
+- ${OKAPI_MOBILE_MONEY_UX}
+- Écrans: Accueil · Nouvelle course · Suivi · Historique · Paiement.
+- SQL: rides, riders, zones, payments.
+- API: window.Okapi.list/create('rides') — lignes plates {id, from, to, fare…}.
+- UX: une main, gros CTA, pas une carte GPS fictive qui prétend être live.`,
+  },
+  {
+    id: "paroisse",
+    label: "Paroisse",
+    sector: "Paroisse",
+    short: "Messes & offrandes",
+    systemAddon: `AGENT MÉTIER: Paroisse / communauté (RDC).
+Product rules:
+- Horaires des messes, annonces, offrandes et dîme en CDF.
+- Ton respectueux. Pas de promesse spirituelle, pas de faux reçu « miracle ».
+- ${OKAPI_MOBILE_MONEY_UX}
+- Écrans: Accueil · Messes · Annonces · Offrande · Reçu.
+- SQL: masses, announcements, offerings.
+- API: window.Okapi.list/create('offerings'|'announcements') — lignes plates {id,…}.
+- UX: calme, lisible pour un téléphone partagé en famille.`,
   },
   {
     id: "boutique",
@@ -165,6 +213,23 @@ export function resolveOkapiAgent(opts: {
     )
   ) {
     return BY_ID.vitrine;
+  }
+  if (
+    /\b(pharmacie|medicament|ordonnance|garde de nuit|comptoir)\b/.test(blob)
+  ) {
+    return BY_ID.pharmacie;
+  }
+  if (
+    /\b(flotte|moto[- ]?taxi|course moto|courses moto|wewa|livraison moto)\b/.test(
+      blob,
+    )
+  ) {
+    return BY_ID.flotte;
+  }
+  if (
+    /\b(paroisse|messe|messes|offrande|dime|eglise|chapelle)\b/.test(blob)
+  ) {
+    return BY_ID.paroisse;
   }
   if (
     /\b(restaurant|menu|plat|commande|table|traiteur|bar|cafe|café)\b/.test(

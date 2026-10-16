@@ -17,10 +17,12 @@ import { openRouterComplete } from "@/lib/openrouter";
 import { ensureHtmlDocument, wantsLargeProject } from "@/lib/fullstack";
 import { assertBodySize } from "@/lib/security";
 import {
+  OKAPI_APP_CONTRACT,
   OKAPI_MOBILE_MONEY_UX,
   OKAPI_PRODUCT_DESIGN,
   OKAPI_VITRINE_DESIGN,
-  wantsVitrineBrief,
+  OKAPI_WEBSITE_CONTRACT,
+  wantsWebsiteBrief,
 } from "@/lib/generate-quality";
 import {
   assessStudioProjectFiles,
@@ -222,14 +224,23 @@ function makeDeltaBatcher(onDelta: (text: string) => void) {
   };
 }
 
-function buildSystem(large: boolean, engine: string, agentBlock: string) {
+function buildSystem(
+  large: boolean,
+  engine: string,
+  agentBlock: string,
+  website = false,
+) {
   const leanFlash = large && engine === "flash";
   const finishRule = `FINISH RULE (non-negotiable):
 - Output ONE complete JSON object only. Never stop mid-string or mid-file.
 - files.app.html must be a full HTML document that ends with </html>.
 - Prefer finishing a solid compact scaffold over an unfinished long one.
 - Order files: app.html, package.json, schema.sql, api.ts, App.tsx, app/page.tsx, README.md (then optional).`;
-  const scale = leanFlash
+  const scale = website
+    ? `SCALE — SITE:
+- app.html is a finished one-page website (hero, sections, contact). Not a multi-screen app.
+- Companion files exist but stay short so app.html is not truncated.`
+    : leanFlash
     ? `SCALE — PROJET MÉTIER COMPLET mais COMPACT (engine=flash):
 - Priorité: app.html utilisable en Preview (3–5 écrans max), Tailwind CDN, mobile-first RDC.
 - Inclure aussi: App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md — versions courtes mais cohérentes.
@@ -249,10 +260,10 @@ function buildSystem(large: boolean, engine: string, agentBlock: string) {
 - When Python backend is useful: ALWAYS include main.py AND requirements.txt — usable FastAPI/Flask skeleton.
 - Think end-to-end: list → detail → form → empty states → Mobile Money CDF/USSD when useful.
 - Stay on the supported stack (HTML/React/Next/Flutter/Python/SQL) — never invent Java/C#/Go project files.`
-      : `SCALE — projet standard:
-- Complete, lean product: solid HTML + React + SQL + API + README + package.json.
-- At least 2–3 screens in HTML. Code must run in Preview.
-- Quality bar: polished UI (spacing, hierarchy, empty/loading states), coherent React/Next mirrors — not throwaway stubs.`;
+      : `SCALE — APP:
+- app.html has at least 3 working screens (data-go / data-screen) and visible sample rows.
+- React, SQL, API, README stay coherent and shorter than app.html.
+- Code must run in Preview. Not a single centered card.`;
 
   return `You are Okapi Studio (MMC SARL) — senior product engineer and coding coach for builders in DR Congo.
 You plan like a tech lead, then deliver a complete multi-file project the user can Accept in Studio.
@@ -265,24 +276,19 @@ STACK LOCK (non-negotiable):
 - If the user asks Java, C#, Go, PHP, Ruby, Rust, Kotlin (hors Flutter), Swift, etc.: do NOT invent fake Studio files for that language. In "note", say honestly in French that Okapi livre HTML · React · Next · Flutter · Python · SQL — for that language you can explain later in Chat, but this Créer run should ship the closest supported equivalent (usually HTML Preview + React/Next). Never claim Preview runs Java/C#.
 - Preview live = app.html only. React/Next/Flutter/Python = edit + ZIP export.
 
-QUALITY (plateformes robustes — non-négociable):
-- Tu livres une VRAIE plateforme métier, pas une démo fil-de-fer. Profondeur > liste de langages.
-- Avant d’écrire le JSON: mentalement fige public, rôles, modules, données — le brief a déjà été clarifié.
-- app.html: SPA production — nav claire, ≥2–3 écrans réels (large: ≥4–6), CDF + Mobile Money si vente.
+QUALITY (ce que l’utilisateur voit dans Preview — non-négociable):
+${
+  website
+    ? `- This run is a WEBSITE. app.html is one scrolling page (hero, sections, contact). Not a dashboard, not a 4-screen admin.
+- ${OKAPI_VITRINE_DESIGN}
+- Companion files stay short. A leads form may use window.Okapi.create('leads').`
+    : `- This run is an APP. app.html: nav that really changes screens, ≥3 écrans, sample rows visible before any fetch.
 - ${OKAPI_MOBILE_MONEY_UX}
-- Parcours métier bout-en-bout: liste → détail → formulaire → succès ; au moins un CRUD complet (créer / lire / modifier ou supprimer).
-- States: empty + loading + error (toast ou bandeau) + feedback succès sur create/update.
-- Forms: validation (champs requis, téléphone/email si pertinent) avant Okapi.create.
-- Data: window.Okapi.list/create/update/remove avec try/catch ; jamais d’échec silencieux ; seed 1–2 lignes si vide.
-- Cohérence noms: mêmes collections HTML ↔ schema.sql ↔ api.ts ↔ React/Next.
-- schema.sql: tables réelles liées (PK/FK ou relations claires), indexes, commentaires RLS — pas une table jouet.
-- api.ts: stubs CRUD alignés schéma + collections HTML.
-- App.tsx + app/page.tsx: mêmes modules (props typées, composants) — pas de hello-world.
-- Flutter inclus: vrais écrans main.dart + pubspec.yaml valide.
-- package.json: JSON valide name + scripts dev/build + deps.
-- README: comment tester Preview Okapi + Next/Flutter/Python en local.
-- Robustesse UI: nav qui change vraiment de vue, ids cohérents, pas d’onclick cassés, mobile-first RDC.
-- Prefer depth on the supported stack over inventing unsupported languages.
+- Parcours: liste → formulaire → succès ; au moins un CRUD (créer / lire).
+- States: empty + loading + error + succès. Forms validate before Okapi.create.
+- Data: window.Okapi.list/create/update/remove with try/catch. Seed is visible HTML, then refresh from list.
+- schema.sql, api.ts, App.tsx stay aligned with the same collection names, but shorter than app.html.`
+}
 
 If WORKSPACE CONTEXT already has files, extend / replace coherently — do not ignore existing product names or data shapes unless asked.
 Use AGENT HISTORY for follow-ups.
@@ -316,7 +322,7 @@ Rules:
 4. Never invent real API keys. Prefer window.Okapi.list/create for live Preview data (Okapi cloud). Optional stubs in api.ts may mirror the same collections.
 5. Never mention third-party AI or database vendor brand names in UI or README — say « base Okapi » / Okapi / MMC SARL.
 6. UI copy in the user's language (French if they write French).
-7. Every file must be substantial and coherent with the others — no empty stubs, no lorem-only pages.
+7. ${website ? "app.html is long and finished. Companion files stay short but valid — no lorem-only page." : "Every file must be substantial and coherent with the others — no empty stubs, no lorem-only pages."}
 8. Prefer REAL Okapi data via window.Okapi (not localStorage demos) when building interactive lists/forms:
    - await Okapi.list('products'|'orders'|'patients'|…) → flat rows [{ id, ...fields }] (never row.data)
    - await Okapi.create(collection, data) → same flat shape
@@ -330,7 +336,7 @@ Rules:
 12. package.json must be valid JSON with name, scripts (dev/build), and dependencies for the React/Next stubs.
 13. pubspec.yaml must be valid YAML with name, environment sdk, and flutter dependencies when Flutter is included.
 14. requirements.txt must list real pip packages (one per line) when Python is included.
-15. Robustness: nav works, at least one full CRUD path (list → add → edit/delete or equivalent), no broken onclick / missing ids.`;
+15. ${website ? "The page scrolls: hero, sections, image, and a real CTA. Do not add a fake admin nav." : "Robustness: nav switches screens, at least one full path (list → add), no broken onclick / missing ids."}`;
 }
 
 function parseProjectFiles(
@@ -404,25 +410,30 @@ async function runStudioProject(opts: {
   const REPAIR_BUDGET_MS = 90_000;
   const CONTINUE_BUDGET_MS = 140_000;
   const startedAt = Date.now();
+  const website = wantsWebsiteBrief(instruction);
   const system =
-    buildSystem(large, engine, agentBlock) +
-    (wantsVitrineBrief(instruction)
-      ? `\n\nVITRINE MODE ACTIVE:\n${OKAPI_VITRINE_DESIGN}\nPrefer a polished one-page marketing site over a multi-screen app.`
-      : "");
+    buildSystem(large, engine, agentBlock, website) +
+    (website
+      ? `\n\nWEBSITE MODE: one scrolling page in app.html. Companion files under 40 lines. Do not build a multi-screen admin. Follow the website contract in the user message.`
+      : `\n\nAPP MODE: app.html has working data-go screens and visible sample rows. Follow the app contract in the user message.`);
   const total = 4;
   const delta = onDelta ? makeDeltaBatcher(onDelta) : null;
 
-  const user = `Build a COMPLETE, ROBUST Okapi Studio platform from this clarified brief.
-Think like a tech lead for an RDC SME: coherent modules, real UI, SQL + API aligned, end-to-end CRUD path.
-Do NOT ship a thin demo. Prefer a solid product skeleton the user can Accept and run in Preview.
+  const user = `Build what Preview will actually show. ${
+    website
+      ? "This is a WEBSITE: one polished scrolling page. Companion files stay short."
+      : "This is an APP: working screens in app.html, with sample data visible immediately."
+  }
 Active métier agent: ${agentLabel}
 
-BRIEF (already discussed / ready to build):
+BRIEF:
 -----
 ${instruction}
 -----
 ${hintTitle ? `Suggested title: ${hintTitle}` : ""}
-Mode: ${large ? "GRAND PROJET / PLATEFORME" : "plateforme standard"} · engine=${engine}
+Mode: ${website ? "SITE" : large ? "GRAND PROJET" : "APP"} · engine=${engine}
+
+${website ? OKAPI_WEBSITE_CONTRACT : OKAPI_APP_CONTRACT}
 
 AGENT HISTORY (recent):
 ${formatStudioHistory(history)}
@@ -432,9 +443,13 @@ ${formatStudioWorkspaceContext(workspace)}
 
 Return ONLY one complete JSON object with title, note, and files map.
 CRITICAL — finish the JSON: no truncated strings.
-PRIORITY #1: files.app.html = full <!DOCTYPE html>…</html> with working nav + at least 2 screens + window.Okapi for data. This is what Preview runs.
-PRIORITY #2: keep App.tsx, app/page.tsx, schema.sql, api.ts, package.json, README compact but coherent so the JSON completes.
-Put app.html first in the files map. Prefer a finished Preview over incomplete extra files.`;
+PRIORITY #1: files.app.html is a full <!DOCTYPE html>…</html> document. This is what Preview runs.
+PRIORITY #2: ${
+    website
+      ? "Keep App.tsx, app/page.tsx, schema.sql, api.ts, package.json, README under 40 lines so the page can finish."
+      : "Keep App.tsx, schema.sql, api.ts, package.json, README coherent but shorter than app.html."
+  }
+Put app.html first in the files map. If you must cut, cut the companions, never app.html.`;
 
   onStatus?.({
     type: "status",
@@ -515,7 +530,7 @@ Put app.html first in the files map. Prefer a finished Preview over incomplete e
 
   let parsed = extractJsonObject(raw);
   let files = parsed ? parseProjectFiles(parsed) : [];
-  let issues = assessStudioProjectFiles(files, { large });
+  let issues = assessStudioProjectFiles(files, { large, website });
 
   const hardFail =
     !parsed ||
@@ -540,7 +555,7 @@ Put app.html first in the files map. Prefer a finished Preview over incomplete e
     shouldRepairStudioProject(issues) &&
     (engine === "pro" ||
       issues.some((i) =>
-        ["html_too_short", "html_weak_navigation", "html_missing_states"].includes(
+        ["html_too_short", "html_weak_navigation", "html_weak_website", "html_placeholder", "html_missing_states"].includes(
           i.code,
         ),
       ));
@@ -591,7 +606,7 @@ Put app.html first in the files map. Prefer a finished Preview over incomplete e
     ) {
       parsed = repairedParsed;
       files = repairedFiles;
-      issues = assessStudioProjectFiles(files, { large });
+      issues = assessStudioProjectFiles(files, { large, website });
     }
   } else if (softNeedsRepair && elapsedAfterFirst >= REPAIR_BUDGET_MS) {
     onStatus?.({

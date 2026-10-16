@@ -253,7 +253,7 @@ export async function openRouterComplete(opts: {
   const wantStream = Boolean(opts.onChunk);
 
   async function once(model: string, stream: boolean): Promise<string> {
-    let res = await openRouterFetch({
+    const res = await openRouterFetch({
       key,
       model,
       messages,

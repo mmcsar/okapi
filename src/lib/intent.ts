@@ -66,7 +66,7 @@ export function wantsLiveCurrentFact(message: string): boolean {
 
 /** Métiers / écrans RDC — même sans le verbe « crée ». */
 const METIER_BUILD_RE =
-  /\b(boutique|catalogue|stock|panier|checkout|commande|mobile\s*money|m[- ]?pesa|airtel\s*money|orange\s*money|whatsapp|restaurant|menu|clinique|patient|rendez[- ]?vous|ecole|eleve|crm|clients?|dashboard|marketplace|facture|caisse|flotte|livraison)\b/i;
+  /\b(boutique|catalogue|stock|panier|checkout|commande|mobile\s*money|m[- ]?pesa|airtel\s*money|orange\s*money|whatsapp|restaurant|menu|clinique|patient|rendez[- ]?vous|ecole|eleve|crm|clients?|dashboard|marketplace|facture|caisse|flotte|livraison|pharmacie|medicament|paroisse|messe|offrande|dime|moto[- ]?taxi|course moto)\b/i;
 
 /**
  * Schéma maths / stats (axes x-y, flèches, courbes, histogrammes…).

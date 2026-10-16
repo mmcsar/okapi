@@ -30,13 +30,13 @@ export function applySecurityHeaders(
     "img-src 'self' data: blob: https:",
     "font-src 'self' data: https://fonts.gstatic.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    // Next.js + Monaco nécessitent souvent inline/eval en prod bundlée
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
+    // Preview srcdoc hérite de cette CSP. Sans cdn.tailwindcss.com, les classes
+    // générées ne s’appliquent pas et la page s’affiche comme du HTML brut.
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com",
     "worker-src 'self' blob: https://cdn.jsdelivr.net",
     "child-src 'self' blob:",
     "frame-src 'self' blob:",
-    // LLM providers are called server-side only — do not allow browser→vendor.
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://cdn.tailwindcss.com",
     "upgrade-insecure-requests",
   ].join("; ");
   res.headers.set("Content-Security-Policy", csp);

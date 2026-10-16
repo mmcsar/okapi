@@ -42,6 +42,10 @@ import {
   intelligenceSystemBlock,
   loadUserIntelligenceContext,
 } from "@/lib/okapi-intelligence";
+import {
+  okapiTurnBrief,
+  turnNeedsDeepReasoning,
+} from "@/lib/okapi-reasoning";
 import { getUserFromAuthHeader } from "@/lib/supabase";
 import {
   OKAPI_STUDIO_STACK,
@@ -302,7 +306,8 @@ export async function POST(request: Request) {
       : "") +
     diagramBlock +
     researchBlock +
-    memoryBlock;
+    memoryBlock +
+    okapiTurnBrief(message, historyEarly.length);
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const docBlock = hasDocument
     ? `\n\n--- DOCUMENT: ${docName} ---\n${docText.slice(0, 80_000)}\n--- FIN DOCUMENT ---`
@@ -327,10 +332,11 @@ export async function POST(request: Request) {
       message,
     );
   const temperature = needsStrict ? 0.15 : lane === "creer" ? 0.4 : 0.35;
+  const deepTurn = turnNeedsDeepReasoning(message, historyEarly.length);
   const reasoningEffort = resolveChatReasoningEffort({
     engine,
     message,
-    hard: needsStrict || Boolean(researchBlock) || hasDocument,
+    hard: needsStrict || deepTurn || Boolean(researchBlock) || hasDocument,
   });
 
   if (provider === "openai") {
