@@ -398,9 +398,9 @@ Rules:
 2. Include ALL mandatory files: app.html, App.tsx, app/page.tsx, package.json, schema.sql, api.ts, README.md.
 3. If main.dart exists, also include pubspec.yaml. If main.py exists, also include requirements.txt.
 4. Fix truncation / missing sections. Prefer completing previous content over rewriting from scratch.
-5. app.html must be a full document ending with </html>.
+5. app.html must be a full document ending with </html>. Keep the product from the original brief. Do not rename screens into a generic home/list/form app.
    - Website brief: hero + h1 + at least 2 sections + image + CTA. Keep other files short. Do not turn it into a dashboard.
-   - App brief: working data-go / data-screen navigation, sample rows visible, empty/loading/error states, window.Okapi for data.
+   - App brief: working navigation for the screens the brief asked for, sample rows visible, empty/loading/error states, window.Okapi for data.
 6. package.json must be valid JSON with scripts.
 7. Prefer window.Okapi.list/create over localStorage for interactive lists/forms.
 8. schema.sql needs real CREATE TABLE(s). api.ts and App.tsx must be substantial, not stubs.

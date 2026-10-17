@@ -46,6 +46,7 @@ import type { OkapiEngine } from "@/lib/okapi-engine";
 import { assertBodySize } from "@/lib/security";
 import {
   agentSystemBlock,
+  existingProductLock,
   resolveOkapiAgent,
 } from "@/lib/studio-agents";
 import {
@@ -147,8 +148,8 @@ Rules:
 6. API stubs: clear, copy-pasteable, aligned with SQL + HTML collections.
 7. Do only what was requested — no useless marketing filler.
 8. Never mention third-party AI or database vendor brand names in user-facing text.
-9. On edit: return ALL sections updated (never omit a section that existed).
-10. Follow AGENT MÉTIER rules when present (screens, schema, payments).
+9. On edit: return ALL sections updated (never omit a section that existed). Keep the same product. Do not replace it with another métier.
+10. The user brief wins over AGENT MÉTIER. Use métier details only when they match the brief.
 11. Interactive HTML should use window.Okapi.list/create (real persistence) when possible — not localStorage-only demos. list = flat rows [{id,...fields}]; empty → message + seed via create. Wrap in try/catch; show error UI on failure.
 12. ROBUST PRODUCT: multi-screen nav, empty/loading/error states, form validation, at least one full list→create flow. No wireframe-only pages.
 ${scale}
@@ -245,7 +246,7 @@ ${currentApi ? `Current API:\n${currentApi.slice(0, 8000)}\n` : ""}`;
     if (currentHtml) {
       return `Sector: ${sector}
 Mode: fullstack (${scaleLabel})
-Modify all relevant artifacts:
+${existingProductLock(true)}Modify all relevant artifacts. Do not invent a different product:
 ${message}
 
 Current HTML:
@@ -266,7 +267,7 @@ ${message}`;
 
   if (currentHtml) {
     return `Sector: ${sector}
-Modify (${scaleLabel}, full HTML):
+${existingProductLock(true)}Modify (${scaleLabel}, full HTML). Do not invent a different product:
 ${message}
 
 Current HTML:
@@ -437,8 +438,8 @@ export async function POST(request: Request) {
   }
 
   const access = await resolveLlmAccess(request);
-  const quota = checkAndConsumeQuota(
-    quotaKeyFromRequest(request),
+  const quota = await checkAndConsumeQuota(
+    quotaKeyFromRequest(request, access.userId),
     "generate",
     { paid: access.paid },
   );

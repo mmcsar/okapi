@@ -26,6 +26,7 @@ type AuthContextValue = {
     displayName?: string,
   ) => Promise<string | null>;
   signInWithGoogle: () => Promise<string | null>;
+  sendPasswordReset: (email: string) => Promise<string | null>;
   signOut: () => Promise<void>;
   authFetch: (input: string, init?: RequestInit) => Promise<Response>;
 };
@@ -109,20 +110,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const sendPasswordReset = useCallback(async (email: string) => {
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const { error } = await getSupabase().auth.resetPasswordForEmail(
+      email.trim(),
+      { redirectTo: `${origin}/auth/callback?next=reset` },
+    );
+    return error?.message ?? null;
+  }, []);
+
   const signInWithGoogle = useCallback(async () => {
     const origin =
       typeof window !== "undefined" ? window.location.origin : "";
-    const { error } = await getSupabase().auth.signInWithOAuth({
+    const { data, error } = await getSupabase().auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${origin}/auth/callback`,
+        skipBrowserRedirect: true,
         queryParams: {
           access_type: "offline",
           prompt: "select_account",
         },
       },
     });
-    return error?.message ?? null;
+    if (error) return error.message;
+    const url = data?.url;
+    if (!url) return "Unsupported provider: provider is not enabled";
+    try {
+      const probe = await fetch(url, { method: "GET", redirect: "manual" });
+      const goesToGoogle =
+        probe.type === "opaqueredirect" ||
+        probe.status === 0 ||
+        (probe.status >= 300 && probe.status < 400) ||
+        probe.ok;
+      if (goesToGoogle) {
+        window.location.assign(url);
+        return null;
+      }
+      return (await probe.text()) || "Unsupported provider: provider is not enabled";
+    } catch {
+      return "Unsupported provider: provider is not enabled";
+    }
   }, []);
 
   const signOut = useCallback(async () => {
@@ -165,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn,
     signUp,
     signInWithGoogle,
+    sendPasswordReset,
     signOut,
     authFetch,
   };

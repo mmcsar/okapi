@@ -99,7 +99,7 @@ export async function POST(request: Request) {
   if (tooBig) return tooBig;
 
   const access = await resolveLlmAccess(request);
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat", {
+  const quota = await checkAndConsumeQuota(quotaKeyFromRequest(request, access.userId), "chat", {
     paid: access.paid,
   });
   if (!quota.ok) return quotaExceededResponse(quota);

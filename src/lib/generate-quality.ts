@@ -79,8 +79,9 @@ export const OKAPI_WEBSITE_CONTRACT = `WEBSITE (app.html is the product — spen
 
 /** Ce que Preview doit montrer pour une app — navigation qui change vraiment d’écran. */
 export const OKAPI_APP_CONTRACT = `APP (app.html must work in Preview without reading the other files):
-- <nav> with buttons data-go="home" data-go="list" data-go="form" (add more if the brief needs them).
-- Each screen is <section data-screen="home|list|form">. Only the first is visible; the others start with class "hidden".
+- Screens and labels come from the brief. Do not rename them to a generic home/list/form app.
+- <nav> with buttons data-go="…" for each screen the brief asked for.
+- Each screen is <section data-screen="…">. Only the first is visible; the others start with class "hidden".
 - A script that toggles them:
   document.querySelectorAll("[data-go]").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -90,9 +91,9 @@ export const OKAPI_APP_CONTRACT = `APP (app.html must work in Preview without re
       });
     });
   });
-- The list screen shows 2 real sample rows in the HTML immediately (names, prices in CDF when it is a sale), then refreshes from window.Okapi.list. Empty, loading, and error text are real elements, not comments.
-- The form checks required fields, then Okapi.create, then switches back to the list. try/catch shows the error element. list rows are flat { id, name, ... } — never row.data.
-- At least 3 screens. Tailwind CDN. No single centered card, no lorem, no purple-on-white mock.
+- If the brief has a list, that screen shows 2 real sample rows immediately (names, prices in CDF when it is a sale), then refreshes from window.Okapi.list. Empty, loading, and error text are real elements, not comments.
+- If the brief has a form, it checks required fields, then Okapi.create, then returns to the list. try/catch shows the error element. list rows are flat { id, name, ... } — never row.data.
+- Include the screens the brief asked for. Do not add a different product to reach 3 screens. Tailwind CDN. No single centered card, no lorem, no purple-on-white mock.
 - If the JSON must be shorter, shorten README and api.ts. Never cut app.html before </html>.`;
 
 function stripAccents(text: string) {
@@ -392,7 +393,7 @@ ${issueList}
 
 Rules for this repair:
 1. Fix every listed problem.
-2. Keep the same product intent and language as the request.
+2. Keep the same product as the request. Do not swap it for another métier or a generic template.
 3. Prefer completing / closing truncated content over rewriting everything.
 4. Always finish completely — never cut off mid-tag.
 5. If localStorage was used for lists/forms: replace with window.Okapi.list/create/update/remove. list returns flat rows [{id,...fields}] — never row.data. Empty list → empty state + optional seed create.

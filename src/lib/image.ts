@@ -64,6 +64,37 @@ function looksLikeImage(file: File) {
   return IMAGE_EXT.test(file.name || "");
 }
 
+/** Image copiée (capture d’écran, photo) — le collage Windows n’a souvent pas de nom. */
+export function imageFileFromClipboard(data: DataTransfer | null): File | null {
+  if (!data) return null;
+  const found: File[] = [];
+
+  for (const item of Array.from(data.items || [])) {
+    if (item.kind !== "file") continue;
+    const raw = item.getAsFile();
+    if (!raw) continue;
+    const type = (raw.type || item.type || "").toLowerCase();
+    if (!type.startsWith("image/")) continue;
+    const ext = type.includes("png")
+      ? "png"
+      : type.includes("webp")
+        ? "webp"
+        : type.includes("gif")
+          ? "gif"
+          : "jpg";
+    const name = raw.name?.trim() || `capture.${ext}`;
+    found.push(new File([raw], name, { type }));
+  }
+
+  if (!found.length) {
+    for (const raw of Array.from(data.files || [])) {
+      if (looksLikeImage(raw)) found.push(raw);
+    }
+  }
+
+  return found[0] ?? null;
+}
+
 async function compressToJpegDataUrl(
   file: File,
   maxEdge = MAX_EDGE,

@@ -191,92 +191,116 @@ export function getOkapiAgent(id: string | null | undefined): OkapiAgentDef {
   return BY_ID.general;
 }
 
+function normAgentText(value: string) {
+  return value.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+}
+
+/**
+ * Nom du produit demandé — pas un mot de passage
+ * (« commande », « client », « stock », « couleur » ne changent pas l’app).
+ */
+const PRODUCT_MATCH: { id: OkapiAgentId; re: RegExp }[] = [
+  {
+    id: "vitrine",
+    re: /\b(vitrine|landing|portfolio|showcase|page vitrine|site (web )?presentation|one[- ]?page)\b/,
+  },
+  { id: "pharmacie", re: /\b(pharmacie|medicaments?)\b/ },
+  {
+    id: "flotte",
+    re: /\b(flotte|moto[- ]?taxi|courses? moto|wewa)\b/,
+  },
+  {
+    id: "paroisse",
+    re: /\b(paroisse|messes?|offrandes?|dime|eglise|chapelle)\b/,
+  },
+  { id: "restaurant", re: /\b(restaurant|maquis|traiteur)\b/ },
+  {
+    id: "boutique",
+    re: /\b(boutique|e-?commerce|magasin|vente en ligne)\b/,
+  },
+  {
+    id: "clinique",
+    re: /\b(clinique|hopital|cabinet medical)\b/,
+  },
+  {
+    id: "ecole",
+    re: /\b(ecole|universite|eleves?|frais scolaires)\b/,
+  },
+  { id: "crm", re: /\bcrm\b|\bpipeline commercial\b/ },
+  {
+    id: "design",
+    re: /\b(charte graphique|design system|identite visuelle)\b/,
+  },
+];
+
+function productFromInstruction(instruction: string): OkapiAgentDef | null {
+  const text = normAgentText(instruction);
+  if (!text.trim()) return null;
+  for (const rule of PRODUCT_MATCH) {
+    if (rule.re.test(text)) return BY_ID[rule.id];
+  }
+  return null;
+}
+
+function agentFromSector(sector: string | null | undefined): OkapiAgentDef | null {
+  const label = normAgentText(sector || "");
+  if (!label.trim() || label === "general" || label === "site web") return null;
+  for (const agent of OKAPI_AGENTS) {
+    if (agent.id === "general") continue;
+    if (label.includes(normAgentText(agent.sector))) return agent;
+  }
+  return null;
+}
+
+/** Le message demande vraiment un autre produit, pas une retouche du code. */
+function asksForNewProduct(instruction: string) {
+  return /\b(cree|creer|genere|generer|nouvelle app|nouvel app|nouveau projet|transforme en|recommence|passe en|construis|build)\b/.test(
+    normAgentText(instruction),
+  );
+}
+
+/**
+ * Le brief gagne. L’agent métier ne remplace pas le produit demandé,
+ * et un code déjà là ne change de métier que si le prompt le nomme.
+ */
+export const OKAPI_BRIEF_LOCK = `BRIEF LOCK — the latest user instruction is the product:
+- Build or edit exactly that instruction: same subject, same screens, same actions.
+- AGENT MÉTIER is a hint (French UI, CDF, mobile) only when it matches the instruction. If it conflicts, ignore its default screens, SQL tables, and sample flows.
+- Never substitute a restaurant, boutique, pharmacie, école, clinique, flotte, paroisse, CRM, vitrine, or a generic home/list/form app.
+- If code already exists: that code IS the product. Change only what the instruction asks. Do not rebuild a different app.`;
+
+export function existingProductLock(hasExisting: boolean): string {
+  if (!hasExisting) return "";
+  return `EXISTING CODE LOCK: files already present are the product. Apply the instruction as an edit. Keep the name, screens, and data except where the instruction explicitly changes them. Do not start a different app.\n`;
+}
+
 /** Resolve agent from explicit id, sector label, or free-text brief. */
 export function resolveOkapiAgent(opts: {
   agentId?: string | null;
   sector?: string | null;
   instruction?: string | null;
 }): OkapiAgentDef {
-  if (opts.agentId) {
-    const direct = getOkapiAgent(opts.agentId);
-    if (opts.agentId !== "general" || !opts.instruction) return direct;
-  }
-
-  const blob = `${opts.sector || ""} ${opts.instruction || ""}`
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+  const instruction = opts.instruction || "";
+  const named = productFromInstruction(instruction);
+  const pinned =
+    opts.agentId && opts.agentId !== "general"
+      ? getOkapiAgent(opts.agentId)
+      : null;
+  const fromSector = agentFromSector(opts.sector);
 
   if (
-    /\b(vitrine|landing|portfolio|showcase|site (web )?presentation|one[- ]?page|page vitrine)\b/.test(
-      blob,
-    )
+    named &&
+    asksForNewProduct(instruction) &&
+    (!pinned || named.id !== pinned.id)
   ) {
-    return BY_ID.vitrine;
+    return named;
   }
-  if (
-    /\b(pharmacie|medicament|ordonnance|garde de nuit|comptoir)\b/.test(blob)
-  ) {
-    return BY_ID.pharmacie;
-  }
-  if (
-    /\b(flotte|moto[- ]?taxi|course moto|courses moto|wewa|livraison moto)\b/.test(
-      blob,
-    )
-  ) {
-    return BY_ID.flotte;
-  }
-  if (
-    /\b(paroisse|messe|messes|offrande|dime|eglise|chapelle)\b/.test(blob)
-  ) {
-    return BY_ID.paroisse;
-  }
-  if (
-    /\b(restaurant|menu|plat|commande|table|traiteur|bar|cafe|café)\b/.test(
-      blob,
-    )
-  ) {
-    return BY_ID.restaurant;
-  }
-  if (
-    /\b(boutique|shop|ecommerce|e-commerce|catalogue|panier|stock|magasin|vente en ligne)\b/.test(
-      blob,
-    )
-  ) {
-    return BY_ID.boutique;
-  }
-  if (
-    /\b(clinique|hopital|hôpital|patient|medecin|médecin|cabinet|sante|santé|rdv medical)\b/.test(
-      blob,
-    )
-  ) {
-    return BY_ID.clinique;
-  }
-  if (
-    /\b(ecole|école|universite|université|eleve|élève|inscription|notes|classe)\b/.test(
-      blob,
-    )
-  ) {
-    return BY_ID.ecole;
-  }
-  if (
-    /\b(crm|client|pipeline|lead|prospect|relance|commercial)\b/.test(blob)
-  ) {
-    return BY_ID.crm;
-  }
-  if (/\b(design|ui|ux|style|couleur|typo|marque|branding)\b/.test(blob)) {
-    return BY_ID.design;
-  }
-
-  const sector = (opts.sector || "").toLowerCase();
-  for (const agent of OKAPI_AGENTS) {
-    if (agent.id === "general") continue;
-    if (sector.includes(agent.sector.toLowerCase())) return agent;
-  }
-
+  if (pinned) return pinned;
+  if (fromSector) return fromSector;
+  if (named) return named;
   return BY_ID.general;
 }
 
 export function agentSystemBlock(agent: OkapiAgentDef): string {
-  return `\n\n———\n${agent.systemAddon}\n———\n`;
+  return `\n\n———\n${agent.systemAddon}\n———\n${OKAPI_BRIEF_LOCK}\n`;
 }

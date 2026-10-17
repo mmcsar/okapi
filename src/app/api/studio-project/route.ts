@@ -36,6 +36,7 @@ import {
 } from "@/lib/studio-context";
 import {
   agentSystemBlock,
+  existingProductLock,
   resolveOkapiAgent,
 } from "@/lib/studio-agents";
 import {
@@ -331,7 +332,7 @@ Rules:
    - Wrap async Okapi calls in try/catch; show a clear error message in the UI on failure
    Preview injects window.Okapi always (local memory if not saved; cloud after Sauver).
 9. Always finish JSON completely — never truncate mid-string.
-10. Follow the AGENT MÉTIER product rules above strictly (screens, SQL, API, RDC payments).
+10. The brief wins over AGENT MÉTIER. Use métier screens, SQL, and payments only when the brief asks for that product.
 11. In README explain: Preview = base Okapi ; Next = npm i && npm run dev ; Flutter = flutter pub get ; Python = pip install -r requirements.txt.
 12. package.json must be valid JSON with name, scripts (dev/build), and dependencies for the React/Next stubs.
 13. pubspec.yaml must be valid YAML with name, environment sdk, and flutter dependencies when Flutter is included.
@@ -415,16 +416,17 @@ async function runStudioProject(opts: {
     buildSystem(large, engine, agentBlock, website) +
     (website
       ? `\n\nWEBSITE MODE: one scrolling page in app.html. Companion files under 40 lines. Do not build a multi-screen admin. Follow the website contract in the user message.`
-      : `\n\nAPP MODE: app.html has working data-go screens and visible sample rows. Follow the app contract in the user message.`);
+      : `\n\nAPP MODE: app.html has working navigation and visible sample rows for the product named in the brief. Do not replace that product with another métier or a generic home/list/form app.`);
   const total = 4;
   const delta = onDelta ? makeDeltaBatcher(onDelta) : null;
 
-  const user = `Build what Preview will actually show. ${
+  const hasExisting = workspace.some((file) => file.content?.trim());
+  const user = `${existingProductLock(hasExisting)}Build what Preview will actually show. ${
     website
       ? "This is a WEBSITE: one polished scrolling page. Companion files stay short."
       : "This is an APP: working screens in app.html, with sample data visible immediately."
   }
-Active métier agent: ${agentLabel}
+The BRIEF below is the product. Active métier agent (${agentLabel}) does not replace it.
 
 BRIEF:
 -----
@@ -686,7 +688,7 @@ export async function POST(request: Request) {
   }
 
   const access = await resolveLlmAccess(request);
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate", {
+  const quota = await checkAndConsumeQuota(quotaKeyFromRequest(request, access.userId), "generate", {
     paid: access.paid,
   });
   if (!quota.ok) return quotaExceededResponse(quota);

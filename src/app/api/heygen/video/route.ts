@@ -3,6 +3,7 @@ import {
   checkAndConsumeQuota,
   quotaExceededResponse,
   quotaKeyFromRequest,
+  releaseGenerateSlot,
 } from "@/lib/llm-quota";
 import {
   getHeygenSession,
@@ -37,22 +38,22 @@ export async function POST(request: Request) {
   }
 
   const access = await resolveLlmAccess(request);
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "generate", {
+  const quota = await checkAndConsumeQuota(quotaKeyFromRequest(request, access.userId), "generate", {
     paid: access.paid,
   });
   if (!quota.ok) return quotaExceededResponse(quota);
 
-  if (!heygenConfigured()) {
-    return fail("Service vidéo Okapi non configuré — contacte l’admin MMC.", 503);
-  }
-
-  const body = (await request.json().catch(() => null)) as Body | null;
-  const prompt = body?.prompt?.trim() || "";
-  if (prompt.length < 3) {
-    return fail("Décris la vidéo à créer (min. 3 caractères).", 400);
-  }
-
   try {
+    if (!heygenConfigured()) {
+      return fail("Service vidéo Okapi non configuré — contacte l’admin MMC.", 503);
+    }
+
+    const body = (await request.json().catch(() => null)) as Body | null;
+    const prompt = body?.prompt?.trim() || "";
+    if (prompt.length < 3) {
+      return fail("Décris la vidéo à créer (min. 3 caractères).", 400);
+    }
+
     const started = await startHeygenVideo(prompt);
     return Response.json({
       ok: true,
@@ -68,6 +69,8 @@ export async function POST(request: Request) {
       err instanceof Error ? err.message : "Impossible de lancer la vidéo.",
       502,
     );
+  } finally {
+    releaseGenerateSlot();
   }
 }
 

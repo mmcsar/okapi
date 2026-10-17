@@ -34,22 +34,30 @@ function isFreeModel(model: string) {
   return /:free$/i.test(model) || model === FREE_FALLBACK_MODEL;
 }
 
-/** Effort chat : Pro plus profond ; questions dures → monter d’un cran. */
+/**
+ * Effort chat.
+ * Salutation : pas d’attente.
+ * Question normale : medium — assez pour vérifier, sans silence long.
+ * Calcul, droit, architecture, document : high (Flash) ou xhigh (Pro).
+ */
 export function resolveChatReasoningEffort(opts: {
   engine: OkapiEngine;
   message: string;
   hard?: boolean;
-}): OkapiReasoningEffort {
+  greeting?: boolean;
+}): OkapiReasoningEffort | undefined {
+  if (opts.greeting) return undefined;
   const hard =
     opts.hard ||
-    /\b(analyse|comparer?|explique|pourquoi|strategie|preuve|calcule|debug|corrige|architecture|juridique|contrat|etape|raisonne|detail|approfond|optimise|refacto)\b/i.test(
+    /\b(calcule|calcul|combien|debug|corrige|architecture|juridique|contrat|refacto|poutre|beton|formule|strategie|preuve)\b/i.test(
       opts.message
         .toLowerCase()
         .normalize("NFD")
         .replace(/\p{M}/gu, ""),
     );
-  if (opts.engine === "pro") return hard ? "xhigh" : "high";
-  return hard ? "high" : "medium";
+  if (!hard) return "medium";
+  if (opts.engine === "pro") return "xhigh";
+  return "high";
 }
 
 export function openRouterConfigured() {
@@ -135,9 +143,9 @@ async function openRouterFetch(opts: {
     max_tokens: opts.maxTokens,
     stream: opts.stream === true,
   };
-  if (reasoning) {
+  if (reasoning && opts.reasoningEffort) {
     body.reasoning = {
-      effort: opts.reasoningEffort ?? "medium",
+      effort: opts.reasoningEffort,
       exclude: true,
     };
   } else if (typeof opts.temperature === "number") {
@@ -148,6 +156,39 @@ async function openRouterFetch(opts: {
     headers: openRouterHeaders(opts.key),
     body: JSON.stringify(body),
   });
+}
+
+function textFromContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (
+        part &&
+        typeof part === "object" &&
+        "text" in part &&
+        typeof (part as { text?: unknown }).text === "string"
+      ) {
+        return (part as { text: string }).text;
+      }
+      return "";
+    })
+    .join("");
+}
+
+function choiceText(choice: {
+  delta?: { content?: unknown; text?: unknown };
+  message?: { content?: unknown };
+  text?: unknown;
+} | undefined): string {
+  if (!choice) return "";
+  return (
+    textFromContent(choice.delta?.content) ||
+    textFromContent(choice.delta?.text) ||
+    textFromContent(choice.message?.content) ||
+    textFromContent(choice.text)
+  );
 }
 
 /** Read OpenRouter SSE body → full text, optional per-delta callback. */
@@ -186,13 +227,8 @@ async function consumeOpenRouterSse(
         if (json.error?.message) {
           throw new Error(json.error.message);
         }
-        const piece =
-          json.choices?.[0]?.delta?.content ??
-          json.choices?.[0]?.delta?.text ??
-          json.choices?.[0]?.message?.content ??
-          json.choices?.[0]?.text ??
-          "";
-        if (!piece || typeof piece !== "string") continue;
+        const piece = choiceText(json.choices?.[0]);
+        if (!piece) continue;
 
         let neu = piece;
         // Snapshot cumulatif : n’émettre que le suffixe nouveau
@@ -342,15 +378,14 @@ export async function streamOpenRouterChat(opts: {
     ...opts.messages,
   ];
   const temperature = opts.temperature ?? 0.4;
-  const reasoningEffort =
-    opts.reasoningEffort ??
-    (engine === "pro" ? "high" : "medium");
-  // Thinking + réponse : Opus a besoin de marge sinon réponse coupée.
+  const reasoningEffort = opts.reasoningEffort;
   const maxTokens = isReasoningModel(primary)
-    ? engine === "pro"
-      ? 24_000
-      : 16_000
-    : 8192;
+    ? reasoningEffort === "xhigh"
+      ? 16_000
+      : reasoningEffort === "high"
+        ? 8_000
+        : 6_000
+    : 4096;
 
   let upstream = await openRouterFetch({
     key,
@@ -440,9 +475,7 @@ export async function streamOpenRouterChat(opts: {
                   message?: { content?: string };
                 }[];
               };
-              const piece =
-                json.choices?.[0]?.delta?.content ??
-                json.choices?.[0]?.message?.content;
+              const piece = choiceText(json.choices?.[0]);
               if (!piece) continue;
 
               let neu = piece;
@@ -454,10 +487,35 @@ export async function streamOpenRouterChat(opts: {
               } else {
                 assembled += piece;
               }
-              if (neu) controller.enqueue(encoder.encode(neu));
+              if (
+                neu &&
+                !/^(?:User|Response|Assistant)\s+Safety\s*:/i.test(neu.trim())
+              ) {
+                controller.enqueue(encoder.encode(neu));
+              }
             } catch {
               /* skip bad chunk */
             }
+          }
+        }
+        if (!stripModelSafetyFooter(assembled)) {
+          const retry = await openRouterFetch({
+            key,
+            model: primary,
+            messages,
+            maxTokens: 16_000,
+            stream: false,
+            temperature,
+            reasoningEffort,
+          });
+          if (retry.ok) {
+            const data = (await retry.json().catch(() => null)) as {
+              choices?: { message?: { content?: unknown } }[];
+            } | null;
+            const recovered = stripModelSafetyFooter(
+              choiceText(data?.choices?.[0]),
+            );
+            if (recovered) controller.enqueue(encoder.encode(recovered));
           }
         }
         controller.close();

@@ -130,13 +130,21 @@ PROFESSIONAL TONE (non-negotiable):
 - Never invent a procedure (« connectez-vous », « allez dans Accueil », « la plateforme gère… ») instead of answering.
 - Lead with the useful answer in the first sentence. No preamble, no self-presentation.
 - Sound confident and concrete; avoid corporate filler and fake empathy.
-LENGTH: default SHORT — answer first, then at most 3–5 bullets if useful. No long intros, no repeating the question, no lists of 10 items unless asked. Exception: when RESEARCH GROUNDING is present, give a denser useful answer (≈8–12 lines or short bullets) with 1–2 citations — still plain text, no fluff.
-NO FILLER: never end with « Veux-tu que… », « Dis-moi si… », « N’hésite pas… » unless the user asked for options. One complete answer is enough.
-PLAIN TEXT ONLY in replies: no Markdown. Never use **bold**, *italic*, __underscores__, # headings, or \`code\` fences (exception: diagram SVG markers <<<SVG … SVG>>> when a DIAGRAM REQUEST block is present — NEVER for calendars). Emphasize with words or CAPS sparingly, not asterisks. Lists: use « - » or « 1. » only.
+INTELLIGENCE (non-negotiable):
+- Decide what the user needs (a number, a choice, a draft, a fact) before writing.
+- First sentence = the answer. The following lines prove it: figure, unit, condition, or the one reason that changes the choice.
+- Do not invent a current name, price, law, or date. If it is not in the conversation or in RESEARCH GROUNDING, write « à vérifier ».
+- Recheck arithmetic. Keep every coefficient the formula requires (φ, 0,85). Show the substitution.
+- When the user is in RDC, use CDF, Mobile Money, WhatsApp, and a real local step — never a generic foreign blog.
+- If they asked for one thing, do not dump three interchangeable slogans. Options only when they asked for options, and each option must differ by a real criterion.
+LENGTH: simple questions stay short — answer first, then at most 3–5 bullets. Calculations, engineering, law, medicine, finance, and step-by-step methods get a full professional note: numbered sections, the formula, what each symbol means (with units), a worked numeric example, then the norms or limits. Do not cut a calculation short. When RESEARCH GROUNDING is present, stay dense (≈8–12 lines) with 1–2 citations.
+NO FILLER: never end with « Veux-tu que… », « Dis-moi si… », « N’hésite pas… », « Besoin d’aide… » unless the user asked for options. One complete answer is enough.
+PLAIN TEXT ONLY in replies: no Markdown. Never use **bold**, *italic*, __underscores__, # headings, --- rules, or \`code\` fences (exception: diagram SVG markers <<<SVG … SVG>>> when a DIAGRAM REQUEST block is present — NEVER for calendars). Emphasize with words or CAPS sparingly, not asterisks. Lists: use « - » or « 1. » only.
+FORMULAS: this chat does not render LaTeX. Never write \\[ \\] \\( \\) $...$ \\frac \\cdot \\text or backslash commands. Write a readable line: Mu = φ × As × fy × (d − a/2). Put each symbol on its own « - » line with its unit (mm, mm², MPa, kNm). Show the numeric substitution, then the result with the unit.
 DIAGRAMS: for axes x/y, arrows, statistical charts, curves — use the DIAGRAM REQUEST SVG markers when provided. Do not say you cannot draw; produce a clean SVG figure.
 CALENDARS: never invent a calendar (text, SVG, or “how to open Accueil”). Never say you cannot show a calendar or that the user must connect elsewhere. Calendar requests are handled outside this model — if one slips through, reply with exactly: « Voici le calendrier. » and stop.
-REASONING: for calculations, logic checks, hard questions, or multi-step plans — think carefully, verify each step, then conclude. Prefer a short correct answer over a long vague one. Show units (CDF, %, etc.) clearly. If two interpretations exist, pick the most useful for a user in RDC and say so briefly.
-DOCUMENTS: when a DOCUMENT is attached (text/CSV), analyse that content: summarize, extract tables/figures, flag risks or missing clauses. Do not invent clauses or cells not in the text. Native .xlsx / scanned PDF are not supported yet — if asked, say to export CSV or paste the text.
+REASONING: for calculations, logic checks, hard questions, or multi-step plans — think carefully, verify each step, then conclude. A calculation stays complete (formula, symbols, numbers, unit). A simple question stays short. Show units (CDF, mm, MPa, kNm, %) clearly. If two interpretations exist, pick the most useful for a user in RDC and say so briefly.
+DOCUMENTS: when a DOCUMENT is attached (text, CSV, Excel turned into tables, or a PDF turned into pages), analyse that content: summarize, extract tables/figures, flag risks or missing clauses. Do not invent clauses or cells not in the text. Excel sheets start with « Feuille: ». PDF pages start with « Page N ». A scanned PDF may also include a page image — read that image. Do not claim a PDF format is unsupported.
 RDC LENS: when relevant, think Kinshasa / provinces, CDF, Mobile Money, WhatsApp, French (or user’s language), low-bandwidth UX — practical for Congo, not generic US startup tips.
 CAPABILITIES (only if the user asks what Okapi can do / future improvements — no invented MMC roadmap):
 - Voix: déjà disponible sur Accueil (micro + bouton Écouter).
@@ -154,6 +162,8 @@ type ChatBody = {
   sector?: string;
   language?: string;
   history?: { role: "user" | "assistant"; content: string }[];
+  /** Événements précédents + artifact déjà créé sur cet appareil. */
+  recall?: string;
   image?: { mimeType?: string; base64?: string; name?: string };
   document?: { name?: string; mimeType?: string; text?: string };
   debug?: boolean;
@@ -175,7 +185,7 @@ export async function POST(request: Request) {
   }
 
   const access = await resolveLlmAccess(request);
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat", {
+  const quota = await checkAndConsumeQuota(quotaKeyFromRequest(request, access.userId), "chat", {
     paid: access.paid,
   });
   if (!quota.ok) return quotaExceededResponse(quota);
@@ -307,6 +317,9 @@ export async function POST(request: Request) {
     diagramBlock +
     researchBlock +
     memoryBlock +
+    (typeof body?.recall === "string" && body.recall.trim()
+      ? `\n\n${body.recall.trim().slice(0, 6000)}`
+      : "") +
     okapiTurnBrief(message, historyEarly.length);
   const history = Array.isArray(body?.history) ? body.history.slice(-16) : [];
   const docBlock = hasDocument
@@ -333,10 +346,21 @@ export async function POST(request: Request) {
     );
   const temperature = needsStrict ? 0.15 : lane === "creer" ? 0.4 : 0.35;
   const deepTurn = turnNeedsDeepReasoning(message, historyEarly.length);
+  const greeting =
+    /^(salut|bonjour|bonsoir|mbote|hello|hi|hey|merci|ok|oui|non|ca va|cava|cv|bon)\b/i.test(
+      message
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .trim(),
+    );
   const reasoningEffort = resolveChatReasoningEffort({
     engine,
     message,
-    hard: needsStrict || deepTurn || Boolean(researchBlock) || hasDocument,
+    greeting,
+    hard:
+      !greeting &&
+      (deepTurn || Boolean(diagramBlock) || hasDocument),
   });
 
   if (provider === "openai") {

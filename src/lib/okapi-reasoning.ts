@@ -65,25 +65,22 @@ export function okapiTurnBrief(message: string, historyCount = 0): string {
   const decision = isDecision(n);
   const calc = isCalc(n);
   const deep = decision || calc || (follow && n.includes("?"));
-  if (!follow && !deep && n.length < 28) return "";
 
   const lines = [
     `\n\nINTELLIGENCE DE CE TOUR (interne — n’écris pas ces étapes, seulement la réponse):`,
+    `- Identifie le besoin (chiffre, choix, texte, fait) puis réponds à ça, pas à côté.`,
+    `- Première phrase = la réponse. Ensuite la preuve : nombre, unité, condition, ou la raison qui change le choix.`,
+    `- Pas de ** gras, pas de titre #, pas de LaTeX. Texte brut.`,
+    `- Sûr vs supposé: un nom, un prix officiel, une loi ou une date absents du contexte ou des sources = « à vérifier ». Ne les invente pas.`,
   ];
   if (follow) {
     lines.push(
       `- Suite: le sujet est déjà dans l’historique. Résous « ça », « et », « le prix », « pourquoi ». Ne demande pas de répéter le contexte.`,
     );
   }
-  lines.push(
-    `- Première phrase = la réponse. Ensuite seulement ce qui change la décision.`,
-  );
-  lines.push(
-    `- Sûr vs supposé: un nom, un prix officiel, une loi ou une date absents du contexte ou des sources = « à vérifier ». Ne les invente pas.`,
-  );
   if (calc) {
     lines.push(
-      `- Calcul: écris l’opération, l’unité (CDF, %), puis le résultat. Revérifie l’arithmétique avant de conclure.`,
+      `- Calcul: note complète, pas un résumé. Formule demandée avec tous ses coefficients (φ, 0,85, etc. — ne les retire pas), chaque symbole et son unité, substitution chiffrée, résultat avec l’unité. Vérifie l’arithmétique. Texte lisible, jamais de LaTeX.`,
     );
   }
   if (decision) {
@@ -91,9 +88,9 @@ export function okapiTurnBrief(message: string, historyCount = 0): string {
       `- Décision RDC: une recommandation, le pourquoi en une phrase, le prochain geste (Mobile Money, WhatsApp, démarche simple). Pas dix options.`,
     );
   }
-  if (deep) {
+  if (deep && !calc) {
     lines.push(
-      `- Profondeur: 4 à 7 lignes utiles après la première phrase. Pas d’introduction, pas de « excellente question ».`,
+      `- Développe seulement ce qui change la décision. Pas d’introduction.`,
     );
   }
   return lines.join("\n");

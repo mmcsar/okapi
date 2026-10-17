@@ -22,6 +22,7 @@ import {
 } from "@/lib/studio-context";
 import {
   agentSystemBlock,
+  existingProductLock,
   resolveOkapiAgent,
 } from "@/lib/studio-agents";
 import {
@@ -139,7 +140,7 @@ Return ONLY valid JSON:
 Include every file you change (full content each). Allowed keys: ${STUDIO_FILE_IDS.join(", ")}.
 
 Rules:
-- Keep the user's intent. Improve or create code as asked.
+- Keep the user's intent. Improve or create code as asked. If the file already has code, edit that product — do not replace it with a different app.
 - Prefer B when the change touches data model, API contracts, or mirrored UI (React/Next/HTML).
 - Prefer A for local UI/copy tweaks on the active file only.
 ${multiBias ? "- This request likely needs MULTI FILE (format B)." : ""}
@@ -247,7 +248,7 @@ export async function POST(request: Request) {
   }
 
   const access = await resolveLlmAccess(request);
-  const quota = checkAndConsumeQuota(quotaKeyFromRequest(request), "chat", {
+  const quota = await checkAndConsumeQuota(quotaKeyFromRequest(request, access.userId), "chat", {
     paid: access.paid,
   });
   if (!quota.ok) return quotaExceededResponse(quota);
@@ -302,7 +303,7 @@ export async function POST(request: Request) {
     multiBias,
     agentBlock,
   );
-  const user = `Active file: ${fileLabel} (${language})
+  const user = `${existingProductLock(Boolean(content.trim()))}Active file: ${fileLabel} (${language})
 Instruction: ${instruction}
 
 AGENT HISTORY (recent):

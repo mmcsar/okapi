@@ -26,11 +26,14 @@ import {
   downloadDataUrl,
   downloadImageUrl,
   fileToAttachedImage,
+  imageFileFromClipboard,
   type AttachedImage,
 } from "@/lib/image";
 import {
   fileToChatDocument,
+  fileToPdfAttachment,
   isChatDocumentFile,
+  isPdfFile,
   type AttachedChatDocument,
 } from "@/lib/chat-document";
 import { downloadTextFile, downloadProjectZip, slugifyFilename } from "@/lib/export";
@@ -74,6 +77,14 @@ import {
   readGuestDraft,
   writeGuestDraft,
 } from "@/lib/guest-draft";
+import {
+  clearSessionMemory,
+  formatSessionRecall,
+  readSessionMemory,
+  visibleHtmlHint,
+  writeSessionMemory,
+  type SessionArtifact,
+} from "@/lib/session-memory";
 import { WorkspacePanel } from "@/components/workspace-panel";
 import {
   studioFileIdToArtifactKey,
@@ -193,7 +204,9 @@ export function HomeDashboard({
   const [language, setLanguage] = useState<OkapiLangCode>("auto");
   const [copiedMsgKey, setCopiedMsgKey] = useState<string | null>(null);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const pinningChatRef = useRef(false);
   const projectIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const devModeRef = useRef(false);
@@ -216,6 +229,7 @@ export function HomeDashboard({
   const saveBusyRef = useRef(false);
   const saveQueuedRef = useRef(false);
   const saveDebounceRef = useRef<number | null>(null);
+  const memoryReadyRef = useRef(false);
 
   useEffect(() => {
     snapRef.current = {
@@ -255,7 +269,34 @@ export function HomeDashboard({
   const dictateBaseRef = useRef<string | null>(null);
   const pendingDictationSend = useRef(false);
   const sendingLock = useRef(false);
+  const chatAbortRef = useRef<AbortController | null>(null);
+  const stopKindRef = useRef<"pause" | "edit" | null>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
+  const attachFileRef = useRef<(file: File) => void>(() => {});
+
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const file = imageFileFromClipboard(e.clipboardData);
+      if (!file) return;
+      const target = e.target as HTMLElement | null;
+      const inComposer = Boolean(
+        target && composerFormRef.current?.contains(target),
+      );
+      if (
+        !inComposer &&
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      attachFileRef.current(file);
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
   const voiceOutRef = useRef(voiceOut);
   voiceOutRef.current = voiceOut;
 
@@ -496,38 +537,125 @@ export function HomeDashboard({
         ]);
       }
     } else {
-      setSector("Général");
-      setPreviewHtml(null);
-      setPreviewReact(null);
-      setPreviewReactNative(null);
-      setPreviewNext(null);
-      setPreviewPackageJson(null);
-      setPreviewSql(null);
-      setPreviewApi(null);
-      setPreviewPython(null);
-      setPreviewRequirements(null);
-      setPreviewFlutter(null);
-      setPreviewPubspec(null);
-      setPreviewReadme(null);
-      setPreviewTitle("Preview");
+      const remembered = resetKey === 0 ? readSessionMemory() : null;
+      if (resetKey !== 0) clearSessionMemory();
+      const art = remembered?.artifact;
+      const hasArtifact = Boolean(
+        art && (art.html?.trim() || art.files.length || art.readme?.trim()),
+      );
+      if (hasArtifact && art) {
+        setSector(art.sector || "Général");
+        setPreviewHtml(art.html || null);
+        setPreviewReact(art.react ?? null);
+        setPreviewReactNative(art.reactNative ?? null);
+        setPreviewNext(art.nextjs ?? null);
+        setPreviewPackageJson(art.packageJson ?? null);
+        setPreviewSql(art.sql ?? null);
+        setPreviewApi(art.api ?? null);
+        setPreviewPython(art.python ?? null);
+        setPreviewRequirements(art.requirements ?? null);
+        setPreviewFlutter(art.flutter ?? null);
+        setPreviewPubspec(art.pubspec ?? null);
+        setPreviewReadme(art.readme ?? null);
+        setPreviewTitle(art.title || "Preview");
+        setCloudStatus("Artifact repris");
+      } else {
+        setSector("Général");
+        setPreviewHtml(null);
+        setPreviewReact(null);
+        setPreviewReactNative(null);
+        setPreviewNext(null);
+        setPreviewPackageJson(null);
+        setPreviewSql(null);
+        setPreviewApi(null);
+        setPreviewPython(null);
+        setPreviewRequirements(null);
+        setPreviewFlutter(null);
+        setPreviewPubspec(null);
+        setPreviewReadme(null);
+        setPreviewTitle("Preview");
+        setCloudStatus(null);
+      }
       setProjectId(null);
       projectIdRef.current = null;
-      setCloudStatus(null);
       setDevMode(goStudio);
       setDebugArmed(false);
+      const prior = (remembered?.events ?? [])
+        .filter((event) => event.text.trim())
+        .map((event) => ({ role: event.role, content: event.text }));
       if (goStudio) {
         setStudioFocusKey((k) => k + 1);
-        setMessages([
-          {
-            role: "assistant",
-            content:
-              "Studio Okapi ouvert — tu peux générer sans compte. Connexion + Sauver pour garder le projet. Accepte pour appliquer les fichiers.",
-          },
-        ]);
+        setMessages(
+          prior.length
+            ? prior
+            : [
+                {
+                  role: "assistant",
+                  content:
+                    "Studio Okapi ouvert — tu peux générer sans compte. Connexion + Sauver pour garder le projet. Accepte pour appliquer les fichiers.",
+                },
+              ],
+        );
+      } else if (prior.length) {
+        setMessages(prior);
       }
     }
+    memoryReadyRef.current = true;
     // openInStudio lu via ref : ne pas le mettre en deps (sinon ça efface la preview au clic Studio)
   }, [resetKey, initialProject, stopListen, stopSpeak]);
+
+  useEffect(() => {
+    if (!memoryReadyRef.current || sending) return;
+    const snap = snapRef.current;
+    const files = listFilledArtifactLabels(artifactsFromSnap(snap), snap.html);
+    const note = [visibleHtmlHint(snap.html), (snap.readme ?? "").slice(0, 400)]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 900);
+    const artifact: SessionArtifact | null = files.length
+      ? {
+          title: snap.title || previewTitle,
+          sector: snap.sector || sector,
+          files,
+          note,
+          html: snap.html || undefined,
+          react: snap.react || undefined,
+          reactNative: snap.reactNative || undefined,
+          nextjs: snap.nextjs || undefined,
+          packageJson: snap.packageJson || undefined,
+          sql: snap.sql || undefined,
+          api: snap.api || undefined,
+          python: snap.python || undefined,
+          requirements: snap.requirements || undefined,
+          flutter: snap.flutter || undefined,
+          pubspec: snap.pubspec || undefined,
+          readme: snap.readme || undefined,
+        }
+      : null;
+    const events = messages
+      .filter((message) => message.content?.trim())
+      .slice(-16)
+      .map((message) => ({ role: message.role, text: message.content }));
+    if (!events.length && !artifact) return;
+    writeSessionMemory({ events, artifact });
+  }, [
+    messages,
+    sending,
+    previewHtml,
+    previewReact,
+    previewReactNative,
+    previewNext,
+    previewPackageJson,
+    previewSql,
+    previewApi,
+    previewPython,
+    previewRequirements,
+    previewFlutter,
+    previewPubspec,
+    previewReadme,
+    previewTitle,
+    sector,
+  ]);
 
   // Accueil Agent = jamais Studio immersif. Studio uniquement si openInStudio (#studio).
   useEffect(() => {
@@ -540,8 +668,23 @@ export function HomeDashboard({
     setStudioFocusKey((k) => k + 1);
   }, [openInStudio, studioKick]);
 
+  function onChatScroll() {
+    if (pinningChatRef.current) return;
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = gap < 72;
+  }
+
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = chatScrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    pinningChatRef.current = true;
+    el.scrollTop = el.scrollHeight;
+    const frame = window.requestAnimationFrame(() => {
+      pinningChatRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [messages, sending]);
 
   const isHome = section === "dashboard";
@@ -572,6 +715,7 @@ export function HomeDashboard({
   /** Efface workspace + conversation ; reste en Studio si déjà ouvert. */
   function startFreshProject(opts?: { stayInStudio?: boolean }) {
     const stay = opts?.stayInStudio ?? immersiveStudio;
+    clearSessionMemory();
     stopSpeak();
     stopListen();
     setPreviewHtml(null);
@@ -840,6 +984,18 @@ export function HomeDashboard({
         setStatus("Image prête — Okapi pourra la lire.");
         return;
       }
+      if (isPdfFile(file)) {
+        setStatus("Lecture du PDF…");
+        const pdf = await fileToPdfAttachment(file);
+        setAttachedImage(pdf.pageImage);
+        setAttachedDoc(pdf.document);
+        setStatus(
+          pdf.pageImage
+            ? "PDF scanné prêt — Okapi lira les pages."
+            : "PDF prêt — Okapi pourra le lire.",
+        );
+        return;
+      }
       if (isChatDocumentFile(file)) {
         setStatus("Lecture du document…");
         const doc = await fileToChatDocument(file);
@@ -849,7 +1005,7 @@ export function HomeDashboard({
         return;
       }
       setStatus(
-        "Formats : image, .txt, .csv, .md, .json. Pour Excel, exporte en CSV.",
+        "Formats : image, PDF, Excel (.xlsx, .xls), .txt, .csv, .md, .json.",
       );
     } catch (err) {
       setAttachedImage(null);
@@ -857,6 +1013,10 @@ export function HomeDashboard({
       setStatus(err instanceof Error ? err.message : "Fichier invalide");
     }
   }
+
+  attachFileRef.current = (file) => {
+    void onPickAttachment(file);
+  };
 
   function exportHtml() {
     if (!previewHtml) return;
@@ -1046,6 +1206,7 @@ export function HomeDashboard({
       return;
     }
     sendingLock.current = true;
+    stickToBottomRef.current = true;
 
     const imagePayload = attachedImage;
     const docPayload = attachedDoc;
@@ -1088,6 +1249,29 @@ export function HomeDashboard({
       .filter((m) => m.content?.trim())
       .slice(-12)
       .map((m) => ({ role: m.role, content: m.content }));
+    const snap = snapRef.current;
+    const artifactFiles = listFilledArtifactLabels(
+      artifactsFromSnap(snap),
+      snap.html,
+    );
+    const recall =
+      formatSessionRecall({
+        events: historyForChat.map((turn) => ({
+          role: turn.role,
+          text: turn.content,
+        })),
+        artifact: artifactFiles.length
+          ? {
+              title: snap.title || previewTitle,
+              sector: snap.sector || sector,
+              files: artifactFiles,
+              note: [visibleHtmlHint(snap.html), (snap.readme ?? "").slice(0, 400)]
+                .filter(Boolean)
+                .join(" ")
+                .slice(0, 900),
+            }
+          : null,
+      }) || undefined;
 
     const started = Date.now();
     stopListen();
@@ -1140,6 +1324,10 @@ export function HomeDashboard({
     setStatus(null);
     setSending(true);
     setBuildingPreview(Boolean(build));
+
+    const abort = new AbortController();
+    chatAbortRef.current = abort;
+    const signal = abort.signal;
 
     const setAssistant = (
       content: string,
@@ -1197,6 +1385,7 @@ export function HomeDashboard({
         const brief = extractVideoPrompt(trimmed);
         const startRes = await fetch("/api/heygen/video", {
           method: "POST",
+          signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: brief }),
         });
@@ -1271,6 +1460,7 @@ export function HomeDashboard({
         setDevMode(false);
         const imgRes = await fetch("/api/image", {
           method: "POST",
+          signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: extractImagePrompt(trimmed),
@@ -1301,6 +1491,7 @@ export function HomeDashboard({
       if (!build) {
         const res = await authFetch("/api/chat", {
           method: "POST",
+          signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message:
@@ -1311,6 +1502,7 @@ export function HomeDashboard({
             sector,
             language: activeLang,
             history: historyForChat,
+            recall,
             debug,
             engine,
             lane: agentLane,
@@ -1338,22 +1530,78 @@ export function HomeDashboard({
           throw new Error(fail?.error ?? `Erreur ${res.status}`);
         }
 
-        const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let answer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          if (!chunk) continue;
-          // Garde-fou : snapshot cumulatif reçu tel quel
-          if (answer && chunk.startsWith(answer)) {
-            answer = chunk;
-          } else if (!(answer && answer.endsWith(chunk))) {
-            answer += chunk;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const attemptRes =
+            attempt === 0
+              ? res
+              : await authFetch("/api/chat", {
+                  method: "POST",
+                  signal,
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    message:
+                      trimmed ||
+                      (imagePayload
+                        ? "Décris cette image clairement et dis ce qui est utile."
+                        : "Analyse ce document : résumé, points clés, risques ou prochaines actions."),
+                    sector,
+                    language: activeLang,
+                    history: historyForChat,
+                    recall,
+                    debug,
+                    engine,
+                    lane: agentLane,
+                    image: imagePayload
+                      ? {
+                          mimeType: imagePayload.mimeType,
+                          base64: imagePayload.base64,
+                          name: imagePayload.name,
+                        }
+                      : undefined,
+                    document: docPayload
+                      ? {
+                          name: docPayload.name,
+                          mimeType: docPayload.mimeType,
+                          text: docPayload.text,
+                        }
+                      : undefined,
+                  }),
+                });
+          if (!attemptRes.ok || !attemptRes.body) {
+            if (attempt === 0) {
+              const fail = (await attemptRes.json().catch(() => null)) as {
+                error?: string;
+              } | null;
+              throw new Error(fail?.error ?? `Erreur ${attemptRes.status}`);
+            }
+            break;
           }
-          setAssistant(stripModelSafetyFooter(answer) || "…");
+          const reader = attemptRes.body.getReader();
+          answer = "";
+          let pendingAnswer = "";
+          let paintTimer = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            if (!chunk) continue;
+            if (answer && chunk.startsWith(answer)) {
+              answer = chunk;
+            } else if (!(answer && answer.endsWith(chunk))) {
+              answer += chunk;
+            }
+            pendingAnswer = stripModelSafetyFooter(answer) || "…";
+            if (!paintTimer) {
+              paintTimer = window.setTimeout(() => {
+                paintTimer = 0;
+                setAssistant(pendingAnswer);
+              }, 120);
+            }
+          }
+          if (paintTimer) window.clearTimeout(paintTimer);
+          if (stripModelSafetyFooter(answer)) break;
         }
 
         if (!stripModelSafetyFooter(answer)) {
@@ -1392,6 +1640,7 @@ export function HomeDashboard({
             : `Crée une app : ${trimmed}`;
           const genRes = await authFetch("/api/generate", {
             method: "POST",
+            signal,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               message: buildMessage,
@@ -1416,7 +1665,6 @@ export function HomeDashboard({
             const reader2 = genRes.body.getReader();
             const decoder2 = new TextDecoder();
             let buffer2 = "";
-            let chars2 = 0;
             let gotDone2 = false;
             const started2 = Date.now();
 
@@ -1425,12 +1673,6 @@ export function HomeDashboard({
               const event = parseGenerateStreamLine(line);
               if (event.type === "status" && event.message) {
                 setAssistant(event.message);
-              } else if (event.type === "delta" && event.text) {
-                chars2 += event.text.length;
-                const sec = Math.round((Date.now() - started2) / 1000);
-                setAssistant(
-                  `Écriture… ${chars2.toLocaleString("fr-FR")} car. · ${sec}s`,
-                );
               } else if (event.type === "done" && event.html) {
                 gotDone2 = true;
                 const sec = Math.round((Date.now() - started2) / 1000);
@@ -1587,6 +1829,7 @@ export function HomeDashboard({
 
       const res = await authFetch("/api/generate", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: trimmed,
@@ -1612,7 +1855,6 @@ export function HomeDashboard({
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let chars = 0;
       let gotDone = false;
 
       const handleGenerateEvent = async (line: string) => {
@@ -1621,12 +1863,6 @@ export function HomeDashboard({
 
         if (event.type === "status" && event.message) {
           setAssistant(event.message);
-        } else if (event.type === "delta" && event.text) {
-          chars += event.text.length;
-          const sec = Math.round((Date.now() - started) / 1000);
-          setAssistant(
-            `Écriture… ${chars.toLocaleString("fr-FR")} car. · ${sec}s`,
-          );
         } else if (event.type === "done" && event.html) {
           gotDone = true;
           const sec = Math.round((Date.now() - started) / 1000);
@@ -1759,14 +1995,41 @@ export function HomeDashboard({
         );
       }
     } catch (err) {
+      const aborted =
+        stopKindRef.current !== null ||
+        (err instanceof Error && err.name === "AbortError");
+      if (aborted) {
+        const kind = stopKindRef.current;
+        stopKindRef.current = null;
+        if (kind !== "edit") {
+          setStatus("En pause.");
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (
+              last?.role === "assistant" &&
+              /réfléchit|analyse|debug|génère|Génération|Mise à jour|prépare|lance le constructeur|écriture/i.test(
+                last.content,
+              )
+            ) {
+              next[next.length - 1] = {
+                ...last,
+                content: "En pause. Tu peux modifier la demande et renvoyer.",
+              };
+            }
+            return next;
+          });
+        }
+        return;
+      }
       const raw = (err instanceof Error ? err.message : "").trim();
       const soft = !raw
         ? "Okapi n’a pas pu répondre. Réessaie dans quelques secondes."
         : /trop de requ[eê]tes|rate.?limit|okapi_rate_limit/i.test(raw)
           ? "Trop de requêtes. Attends 20 secondes puis réessaie."
-          : /limite du jour|okapi_quota/i.test(raw)
-            ? "Okapi a atteint la limite du jour pour ta session. Réessaie demain."
-            : /très sollicité|okapi_busy|saturé/i.test(raw)
+        : /limite gratuite du jour|limite du jour|okapi_quota/i.test(raw)
+          ? raw
+          : /très sollicité|okapi_busy|saturé/i.test(raw)
               ? "Okapi est très sollicité. Réessaie dans quelques secondes."
               : /crédit|credits|billing|402/i.test(raw)
                 ? "Le crédit IA Okapi est épuisé. Réessaie plus tard."
@@ -1784,6 +2047,29 @@ export function HomeDashboard({
       setSending(false);
       setBuildingPreview(false);
     }
+  }
+
+  function pauseRequest() {
+    if (!sendingLock.current) return;
+    stopKindRef.current = "pause";
+    chatAbortRef.current?.abort();
+  }
+
+  function editUserMessage(index: number) {
+    const text = messages[index]?.content?.trim() ?? "";
+    if (!text) return;
+    if (sendingLock.current) {
+      stopKindRef.current = "edit";
+      chatAbortRef.current?.abort();
+    }
+    promptRef.current = text;
+    setPrompt(text);
+    setDraftVoice("");
+    setMessages((prev) => prev.slice(0, index));
+    setStatus(null);
+    queueMicrotask(() => {
+      composerFormRef.current?.querySelector("textarea")?.focus();
+    });
   }
 
   if (!isHome) {
@@ -1845,6 +2131,11 @@ export function HomeDashboard({
     onNewProject: () => startFreshProject({ stayInStudio: true }),
   };
 
+  const lastUserIndex = messages.reduce(
+    (found, msg, index) => (msg.role === "user" ? index : found),
+    -1,
+  );
+
   const messageListBlock =
     messages.length > 0 ? (
       <div
@@ -1876,7 +2167,11 @@ export function HomeDashboard({
           return (
             <div
               key={`${msg.role}-${i}`}
-              className={`okapi-chat-bubble okapi-chat-bubble--enter rounded-2xl px-3.5 py-3 text-[13px] leading-relaxed whitespace-pre-wrap ${
+              className={`okapi-chat-bubble rounded-2xl px-3.5 py-3 text-[13px] leading-relaxed whitespace-pre-wrap ${
+                isStreamingAssistant
+                  ? "okapi-chat-bubble--streaming"
+                  : "okapi-chat-bubble--enter"
+              } ${
                 msg.role === "user"
                   ? "okapi-chat-bubble--user ml-6 sm:ml-10"
                   : "okapi-chat-bubble--assistant mr-4 sm:mr-8"
@@ -2052,6 +2347,16 @@ export function HomeDashboard({
                       {copiedMsgKey === msgKey ? "Copié" : "Copier"}
                     </button>
                   ) : null}
+                  {msg.role === "user" && i === lastUserIndex && msg.content.trim() ? (
+                    <button type="button" onClick={() => editUserMessage(i)}>
+                      Éditer
+                    </button>
+                  ) : null}
+                  {msg.role === "user" && i === lastUserIndex && sending ? (
+                    <button type="button" onClick={pauseRequest}>
+                      Pause
+                    </button>
+                  ) : null}
                   {canSpeak ? (
                     <button
                       type="button"
@@ -2082,7 +2387,6 @@ export function HomeDashboard({
             </div>
           );
         })}
-        <div ref={chatEndRef} />
       </div>
     ) : null;
 
@@ -2094,9 +2398,7 @@ export function HomeDashboard({
       ref={composerFormRef}
       onSubmit={onSubmit}
       className={`okapi-composer w-full ${extraClass} ${
-        formSplit
-          ? "mt-auto sticky bottom-0 z-20 bg-[rgba(248,250,248,0.96)] pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md"
-          : "mt-6 max-w-2xl"
+        formSplit ? "" : "max-w-2xl"
       }`}
     >
       <div className="okapi-composer-shell">
@@ -2255,7 +2557,7 @@ export function HomeDashboard({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,.txt,.csv,.tsv,.md,.markdown,.json,.log,text/plain,text/csv,application/json"
+              accept="image/*,.pdf,.xlsx,.xls,.txt,.csv,.tsv,.md,.markdown,.json,.log,text/plain,text/csv,application/pdf,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={(e) => {
                 void onPickAttachment(e.target.files?.[0] ?? null);
@@ -2381,8 +2683,8 @@ export function HomeDashboard({
               onClick={() => fileInputRef.current?.click()}
               disabled={sending}
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--okapi-stroke)] bg-okapi-mist text-okapi-ink/70 transition hover:bg-white disabled:opacity-60"
-              title="Joindre image ou document (.txt, .csv, .md)"
-              aria-label="Joindre image ou document"
+              title="Joindre ou coller une image (Ctrl+V), ou un PDF, Excel, .csv, .txt"
+              aria-label="Joindre ou coller une image"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -2433,9 +2735,16 @@ export function HomeDashboard({
             ) : null}
           </div>
           <button
-            type="submit"
-            disabled={sending}
-            className={`okapi-send-3d inline-flex shrink-0 items-center gap-2 px-3.5 py-2 text-sm font-semibold disabled:opacity-60 sm:px-4 ${
+            type={sending ? "button" : "submit"}
+            onClick={
+              sending
+                ? (e) => {
+                    e.preventDefault();
+                    pauseRequest();
+                  }
+                : undefined
+            }
+            className={`okapi-send-3d inline-flex shrink-0 items-center gap-2 px-3.5 py-2 text-sm font-semibold sm:px-4 ${
               sending ? "okapi-send-3d--busy" : ""
             }`}
             aria-busy={sending}
@@ -2446,15 +2755,13 @@ export function HomeDashboard({
                   <svg
                     viewBox="0 0 24 24"
                     className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
+                    fill="currentColor"
                   >
-                    <circle cx="12" cy="12" r="8" opacity="0.35" />
-                    <path d="M12 4a8 8 0 018 8" strokeLinecap="round" />
+                    <rect x="6" y="5" width="4" height="14" rx="1" />
+                    <rect x="14" y="5" width="4" height="14" rx="1" />
                   </svg>
                 </span>
-                Envoi…
+                Pause
               </>
             ) : (
               <>
@@ -2636,10 +2943,12 @@ export function HomeDashboard({
           }`}
         >
           <div
-            className={`scrollbar-thin mx-auto flex w-full flex-1 flex-col overflow-y-auto ${
+            ref={chatScrollRef}
+            onScroll={onChatScroll}
+            className={`scrollbar-thin mx-auto flex w-full min-h-0 flex-1 flex-col overflow-y-auto ${
               split
-                ? "max-w-xl px-3 pb-3 pt-3"
-                : "max-w-2xl items-stretch px-4 py-8 text-left lg:px-8"
+                ? "max-w-xl px-3 pb-2 pt-3"
+                : "max-w-2xl items-stretch px-4 py-6 text-left lg:px-8"
             }`}
           >
             {!split ? (
@@ -2680,7 +2989,14 @@ export function HomeDashboard({
                 {messageListBlock}
               </div>
             ) : null}
-
+          </div>
+          <div
+            className={`mx-auto w-full shrink-0 ${
+              split
+                ? "max-w-xl border-t border-[var(--okapi-stroke)] bg-[rgba(248,250,248,0.96)] px-3 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-2"
+                : "max-w-2xl px-4 pb-4 lg:px-8"
+            }`}
+          >
             {renderPromptForm(split)}
           </div>
         </section>

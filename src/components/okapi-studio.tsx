@@ -349,13 +349,17 @@ export function OkapiStudio({
   const [aiLiveCode, setAiLiveCode] = useState("");
   const [aiLiveLabel, setAiLiveLabel] = useState("Code");
   const liveCodeEndRef = useRef<HTMLPreElement>(null);
+  const liveBufRef = useRef("");
+  const liveTimerRef = useRef(0);
+  const aiScrollRef = useRef<HTMLDivElement>(null);
+  const aiStickRef = useRef(true);
+  const pinningAiRef = useRef(false);
   const [pendingList, setPendingList] = useState<PendingEdit[]>([]);
   const pending =
     pendingList.find((p) => p.fileId === activeId) ?? pendingList[0] ?? null;
   const [diffView, setDiffView] = useState<"after" | "before">("after");
   const [splitDiff, setSplitDiff] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const termEndRef = useRef<HTMLDivElement>(null);
   const serverTimersRef = useRef<number[]>([]);
   const [aiMessages, setAiMessages] = useState<AiMsg[]>([]);
@@ -1008,16 +1012,35 @@ export function OkapiStudio({
     ? `${aiProgress.step}/${aiProgress.total}:${aiProgress.message}`
     : "";
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [aiMessages, aiBusy, aiProgressKey, aiLiveCode]);
+  function onAiScroll() {
+    if (pinningAiRef.current) return;
+    const el = aiScrollRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    aiStickRef.current = gap < 72;
+  }
 
   useEffect(() => {
-    liveCodeEndRef.current?.scrollIntoView({ block: "nearest" });
+    const el = aiScrollRef.current;
+    if (!el || !aiStickRef.current) return;
+    pinningAiRef.current = true;
+    el.scrollTop = el.scrollHeight;
+    const frame = window.requestAnimationFrame(() => {
+      pinningAiRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [aiMessages, aiBusy, aiProgressKey]);
+
+  useEffect(() => {
+    const pre = liveCodeEndRef.current;
+    if (!pre) return;
+    pre.scrollTop = pre.scrollHeight;
   }, [aiLiveCode]);
 
   useEffect(() => {
-    termEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = termEndRef.current;
+    if (!el || !terminalOpen) return;
+    el.scrollTop = el.scrollHeight;
   }, [termLines, terminalOpen]);
 
   useEffect(() => {
@@ -1371,6 +1394,24 @@ export function OkapiStudio({
     });
   }
 
+  function pushLiveCode(text: string) {
+    liveBufRef.current = (liveBufRef.current + text).slice(-2500);
+    if (liveTimerRef.current) return;
+    liveTimerRef.current = window.setTimeout(() => {
+      liveTimerRef.current = 0;
+      setAiLiveCode(liveBufRef.current);
+    }, 140);
+  }
+
+  function clearLiveCode() {
+    liveBufRef.current = "";
+    if (liveTimerRef.current) {
+      window.clearTimeout(liveTimerRef.current);
+      liveTimerRef.current = 0;
+    }
+    setAiLiveCode("");
+  }
+
   function refreshPreview() {
     setPreviewKey((k) => k + 1);
     logTerm("Preview actualisée", "info");
@@ -1382,7 +1423,7 @@ export function OkapiStudio({
     aiAbortRef.current = null;
     setAiBusy(false);
     setAiProgress(null);
-    setAiLiveCode("");
+    clearLiveCode();
     setAiError(null);
     setAiCanRetry(Boolean(lastAiInstructionRef.current));
     setAiMessages((prev) => [
@@ -1403,6 +1444,7 @@ export function OkapiStudio({
     e?.preventDefault();
     const instruction = (opts?.instruction ?? aiPrompt).trim();
     if (!instruction || aiBusy) return;
+    aiStickRef.current = true;
 
     aiAbortRef.current?.abort();
     const abort = new AbortController();
@@ -1430,7 +1472,7 @@ export function OkapiStudio({
     setAiBusy(true);
     setAiError(null);
     setAiProgress(null);
-    setAiLiveCode("");
+    clearLiveCode();
     if (!opts?.instruction) setAiPrompt("");
     setAiMessages((prev) => [...prev, { role: "user", content: instruction }]);
     logTerm(`Agent ${activeAgent.label} · ${activeAgent.short}`, "cmd");
@@ -1514,7 +1556,7 @@ export function OkapiStudio({
           }
 
           setAiProgress(null);
-          setAiLiveCode("");
+          clearLiveCode();
           setAiMessages((prev) => [
             ...prev,
             { role: "assistant", content: planData.reply! },
@@ -1585,7 +1627,7 @@ export function OkapiStudio({
               });
               logTerm(event.message, event.repairing ? "ok" : "cmd");
             } else if (event.type === "delta") {
-              setAiLiveCode((prev) => (prev + event.text).slice(-14_000));
+              if (event.text) pushLiveCode(event.text);
             } else if (event.type === "file") {
               setAiLiveLabel(`Fichier · ${event.fileId}`);
             }
@@ -1620,7 +1662,7 @@ export function OkapiStudio({
         }
 
         setAiProgress(null);
-        setAiLiveCode("");
+        clearLiveCode();
         deliverProjectBatch(batch, {
           note: data.note,
           large: Boolean(data.large),
@@ -1684,7 +1726,7 @@ export function OkapiStudio({
             });
             logTerm(event.message, "cmd");
           } else if (event.type === "delta") {
-            setAiLiveCode((prev) => (prev + event.text).slice(-14_000));
+            if (event.text) pushLiveCode(event.text);
           } else if (event.type === "file") {
             setAiLiveLabel(`Fichier · ${event.fileId}`);
           }
@@ -1707,7 +1749,7 @@ export function OkapiStudio({
         }
       }
 
-      setAiLiveCode("");
+      clearLiveCode();
 
       const edits: PendingEdit[] = (
         data?.files?.length
@@ -1805,7 +1847,7 @@ export function OkapiStudio({
       if (aiAbortRef.current === abort) aiAbortRef.current = null;
       setAiBusy(false);
       setAiProgress(null);
-      setAiLiveCode("");
+      clearLiveCode();
     }
   }
 
@@ -2730,7 +2772,10 @@ export function OkapiStudio({
                 </div>
               </div>
 
-              <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed">
+              <div
+                ref={termEndRef}
+                className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed"
+              >
                 {termTab === "terminal" ? (
                   <>
                     {termLines.map((line, i) => (
@@ -2738,7 +2783,6 @@ export function OkapiStudio({
                         {line.t}
                       </div>
                     ))}
-                    <div ref={termEndRef} />
                   </>
                 ) : termTab === "problems" ? (
                   studioProblems.length === 0 ? (
@@ -2923,7 +2967,11 @@ export function OkapiStudio({
               </div>
             </div>
 
-            <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2.5 py-3">
+            <div
+              ref={aiScrollRef}
+              onScroll={onAiScroll}
+              className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2.5 py-3"
+            >
               {aiMessages.length === 0 && !aiBusy && !pending ? (
                 aiLane === "creer" ? null : (
                 <div className="space-y-4 px-0.5 pt-1">
@@ -3201,7 +3249,6 @@ export function OkapiStudio({
                   </button>
                 </div>
               ) : null}
-              <div ref={chatEndRef} />
             </div>
 
             <form
