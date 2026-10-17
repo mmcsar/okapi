@@ -177,33 +177,33 @@ body::after {
   animation: glow-pulse 4s ease-in-out infinite;
 }
 
-/* Menu latéral — relief 3D (ombres / dégradés, pas de transform sur le rail) */
+/* Menu latéral — jaune doux sur le bleu ciel */
 .okapi-nav-shell {
   background: linear-gradient(
     165deg,
-    rgba(255, 255, 255, 0.88) 0%,
-    rgba(243, 246, 243, 0.92) 55%,
-    rgba(232, 238, 233, 0.9) 100%
+    rgba(255, 250, 230, 0.94) 0%,
+    rgba(255, 226, 140, 0.8) 58%,
+    rgba(247, 209, 24, 0.42) 100%
   );
-  border: 1px solid rgba(20, 38, 28, 0.1);
+  border: 1px solid rgba(180, 140, 20, 0.2);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.85) inset,
-    0 -12px 28px rgba(20, 38, 28, 0.04) inset,
-    0 18px 40px rgba(20, 38, 28, 0.12),
-    0 4px 12px rgba(20, 38, 28, 0.06),
-    6px 8px 0 rgba(20, 38, 28, 0.05);
+    0 1px 0 rgba(255, 255, 255, 0.75) inset,
+    0 -12px 28px rgba(160, 120, 10, 0.08) inset,
+    0 18px 40px rgba(160, 120, 10, 0.14),
+    0 4px 12px rgba(120, 90, 10, 0.08),
+    6px 8px 0 rgba(180, 140, 20, 0.08);
   backdrop-filter: blur(18px);
 }
 
 .okapi-nav-shell--compact {
   background: linear-gradient(
     180deg,
-    rgba(248, 250, 248, 0.96) 0%,
-    rgba(236, 242, 237, 0.94) 100%
+    rgba(255, 250, 230, 0.96) 0%,
+    rgba(255, 214, 110, 0.84) 100%
   );
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.7) inset,
-    4px 0 24px rgba(20, 38, 28, 0.06);
+    4px 0 24px rgba(160, 120, 10, 0.12);
 }
 
 .okapi-nav-item {
@@ -218,11 +218,11 @@ body::after {
 }
 
 .okapi-nav-item:not(.okapi-nav-item--active):hover {
-  background: rgba(255, 255, 255, 0.82);
-  border-color: rgba(20, 38, 28, 0.08);
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(180, 140, 20, 0.18);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.9) inset,
-    0 4px 10px rgba(20, 38, 28, 0.07);
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 4px 10px rgba(160, 120, 10, 0.1);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -279,24 +279,24 @@ body::after {
 }
 
 .okapi-nav-menu-btn {
-  background: linear-gradient(165deg, #fff 0%, #f3f6f3 100%);
-  border: 1px solid rgba(20, 38, 28, 0.1);
+  background: linear-gradient(165deg, #fff8e4 0%, #ffe08a 100%);
+  border: 1px solid rgba(180, 140, 20, 0.2);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.9) inset,
-    0 8px 18px rgba(20, 38, 28, 0.12),
-    0 2px 4px rgba(20, 38, 28, 0.06),
-    3px 4px 0 rgba(20, 38, 28, 0.06);
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 8px 18px rgba(160, 120, 10, 0.16),
+    0 2px 4px rgba(120, 90, 10, 0.08),
+    3px 4px 0 rgba(180, 140, 20, 0.08);
 }
 
 .okapi-nav-user {
   background: linear-gradient(
     165deg,
-    rgba(255, 255, 255, 0.75) 0%,
-    rgba(243, 246, 243, 0.65) 100%
+    rgba(255, 255, 255, 0.58) 0%,
+    rgba(255, 228, 150, 0.7) 100%
   );
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.85) inset,
-    0 6px 14px rgba(20, 38, 28, 0.06);
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 6px 14px rgba(160, 120, 10, 0.08);
 }
 
 @media (prefers-reduced-motion: reduce) {
