@@ -21,6 +21,27 @@ const SWEEP_MS = 60 * 60 * 1000;
 
 type Flag = { level: "abuse" | "watch"; label: string };
 
+type AudiencePerson = {
+  id: string;
+  email: string;
+  name: string;
+  city: string;
+  country: string;
+  phone: string;
+  createdAt: string | null;
+  lastSignInAt: string | null;
+  projects: number;
+  lastProjectAt: string | null;
+  lastProjectTitle: string | null;
+  projectList: { title: string; at: string | null }[];
+  chats7d: number;
+  generates7d: number;
+  chats14d: number;
+  generates14d: number;
+  usageDays: { day: string; chats: number; generates: number }[];
+  flags: Flag[];
+};
+
 function pushFlag(flags: Flag[], flag: Flag) {
   if (flags.some((item) => item.label === flag.label)) return;
   flags.push(flag);
@@ -268,7 +289,7 @@ export async function GET() {
 
   const authUsers = usersRes.data?.users ?? [];
   const seen = new Set<string>();
-  const people = [];
+  const people: AudiencePerson[] = [];
 
   for (const user of authUsers) {
     seen.add(user.id);
@@ -285,7 +306,8 @@ export async function GET() {
         (user.user_metadata?.display_name as string | undefined) ||
         user.email?.split("@")[0] ||
         "Compte Okapi",
-      city: profile?.city || "—",
+      city: profile?.city || "",
+      country: "",
       phone: profile?.phone || user.phone || "",
       createdAt: user.created_at || null,
       lastSignInAt: user.last_sign_in_at || null,
@@ -316,7 +338,8 @@ export async function GET() {
         id,
         email: "—",
         name: profile.full_name || profile.display_name || "Compte Okapi",
-        city: profile.city || "—",
+        city: profile.city || "",
+        country: "",
         phone: profile.phone || "",
         createdAt: null,
         lastSignInAt: null,
@@ -380,9 +403,9 @@ export async function GET() {
       events: [],
     };
     if (row.user_id) bucket.userId = row.user_id;
-    if (row.display_name) bucket.name = row.display_name;
-    if (row.city) bucket.city = row.city;
-    if (row.country) bucket.country = row.country;
+    if (row.display_name && !bucket.name) bucket.name = row.display_name;
+    if (row.city && !bucket.city) bucket.city = row.city;
+    if (row.country && !bucket.country) bucket.country = row.country;
     const at = new Date(row.created_at).getTime();
     if (Number.isFinite(at)) {
       bucket.events.push({ at, iso: row.created_at, path: row.path });
@@ -399,6 +422,7 @@ export async function GET() {
   const guests: {
     id: string;
     label: string;
+    email: string;
     city: string;
     country: string;
     count: number;
@@ -444,6 +468,8 @@ export async function GET() {
       : undefined;
     if (person) {
       for (const flag of flags) pushFlag(person.flags, flag);
+      if (!person.city && bucket.city) person.city = bucket.city;
+      if (!person.country && bucket.country) person.country = bucket.country;
       continue;
     }
     const passages = [...bucket.events]
@@ -454,6 +480,7 @@ export async function GET() {
     guests.push({
       id: key.slice(0, 8),
       label: place ? `Sans compte · ${place}` : "Sans compte",
+      email: "",
       city: bucket.city,
       country: bucket.country,
       count: bucket.events.length,
@@ -480,6 +507,7 @@ export async function GET() {
     guests.push({
       id: `chat-${key.slice(-8)}`,
       label: "Sans compte · recherche",
+      email: "",
       city: "",
       country: "",
       count: 0,
@@ -558,13 +586,19 @@ export async function GET() {
       generates: dayGenerates.get(day) || 0,
       visits: visitsByDay.get(day) || 0,
     })),
-    visits: visitRows.slice(0, 80).map((row) => ({
-      at: row.created_at,
-      path: row.path,
-      city: row.city || "",
-      country: row.country || "",
-      name: row.user_id ? row.display_name || "Compte Okapi" : "",
-    })),
+    visits: visitRows.slice(0, 80).map((row) => {
+      const person = row.user_id
+        ? people.find((item) => item.id === row.user_id)
+        : undefined;
+      return {
+        at: row.created_at,
+        path: row.path,
+        city: row.city || person?.city || "",
+        country: row.country || person?.country || "",
+        name: row.user_id ? row.display_name || person?.name || "Compte Okapi" : "",
+        email: person?.email && person.email !== "—" ? person.email : "",
+      };
+    }),
     since,
     people,
     guests,

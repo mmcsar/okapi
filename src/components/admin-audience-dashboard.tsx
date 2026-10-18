@@ -29,6 +29,7 @@ type Visit = {
   city: string;
   country: string;
   name: string;
+  email?: string;
 };
 
 type Flag = { level: "abuse" | "watch"; label: string };
@@ -42,6 +43,7 @@ type Alert = { level: "abuse" | "watch"; who: string; email: string; label: stri
 type Guest = {
   id: string;
   label: string;
+  email?: string;
   city: string;
   country: string;
   count: number;
@@ -68,6 +70,7 @@ type Person = {
   projectList?: ProjectItem[];
   chats7d: number;
   generates7d: number;
+  country?: string;
   chats14d?: number;
   generates14d?: number;
   usageDays?: UsageDay[];
@@ -98,6 +101,23 @@ const PATH_LABEL: Record<string, string> = {
   billing: "Abonnement",
   login: "Connexion",
 };
+
+function countryName(code: string) {
+  if (!code) return "";
+  try {
+    return new Intl.DisplayNames(["fr"], { type: "region" }).of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+function placeLine(city: string, country: string) {
+  const pays = countryName(country);
+  return {
+    ville: city || "Non connue",
+    pays: pays || "Non connu",
+  };
+}
 
 function pathLabel(path: string) {
   if (PATH_LABEL[path]) return PATH_LABEL[path];
@@ -405,11 +425,16 @@ export function AdminAudienceDashboard() {
                       <p className="font-semibold text-okapi-ink">
                         {visit.name || "Visiteur"}
                       </p>
-                      <p className="text-xs text-okapi-ink/45">
+                      <p className="text-xs text-okapi-ink/55">
                         {pathLabel(visit.path)}
-                        {visit.city
-                          ? ` · ${visit.city}${visit.country ? `, ${visit.country}` : ""}`
-                          : ""}
+                      </p>
+                      <p className="text-xs text-okapi-ink/50">
+                        E-mail · {visit.email || "Pas d’e-mail"}
+                      </p>
+                      <p className="text-xs text-okapi-ink/50">
+                        Ville · {placeLine(visit.city, visit.country).ville}
+                        {" · "}
+                        Pays · {placeLine(visit.city, visit.country).pays}
                       </p>
                     </div>
                     <p className="text-xs text-okapi-ink/45">{fmtWhen(visit.at)}</p>
@@ -449,13 +474,16 @@ export function AdminAudienceDashboard() {
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
                           <p className="font-semibold text-okapi-ink">
-                            {guest.label} · {index + 1}
+                            Sans compte · {index + 1}
                           </p>
                           <p className="text-xs text-okapi-ink/50">
-                            Repère {guest.id}
-                            {guest.city
-                              ? ` · ${guest.city}${guest.country ? `, ${guest.country}` : ""}`
-                              : ""}
+                            E-mail · {guest.email || "Pas d’e-mail"}
+                          </p>
+                          <p className="text-xs text-okapi-ink/50">
+                            Ville · {placeLine(guest.city, guest.country).ville}
+                          </p>
+                          <p className="text-xs text-okapi-ink/50">
+                            Pays · {placeLine(guest.city, guest.country).pays}
                           </p>
                         </div>
                         <p className="text-xs text-okapi-ink/45">
@@ -547,9 +575,17 @@ export function AdminAudienceDashboard() {
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
                           <p className="font-semibold text-okapi-ink">{person.name}</p>
-                          <p className="text-xs text-okapi-ink/50">{person.email}</p>
                           <p className="text-xs text-okapi-ink/50">
-                            {person.phone || "Pas de téléphone"} · {person.city || "—"}
+                            E-mail · {person.email && person.email !== "—" ? person.email : "Pas d’e-mail"}
+                          </p>
+                          <p className="text-xs text-okapi-ink/50">
+                            Ville · {placeLine(person.city, person.country || "").ville}
+                          </p>
+                          <p className="text-xs text-okapi-ink/50">
+                            Pays · {placeLine(person.city, person.country || "").pays}
+                          </p>
+                          <p className="text-xs text-okapi-ink/40">
+                            {person.phone || "Pas de téléphone"}
                           </p>
                         </div>
                         <p className="text-xs text-okapi-ink/45">
