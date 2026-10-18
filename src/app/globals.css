@@ -313,17 +313,17 @@ body::after {
 
 .okapi-composer-shell {
   border-radius: 1.15rem;
-  border: 1px solid rgba(20, 38, 28, 0.1);
+  border: 1px solid rgba(0, 90, 180, 0.14);
   background: linear-gradient(
     165deg,
-    rgba(255, 255, 255, 0.97) 0%,
-    rgba(247, 250, 247, 0.94) 100%
+    rgba(255, 255, 255, 0.94) 0%,
+    rgba(232, 244, 255, 0.9) 100%
   );
   padding: 0.7rem;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.9) inset,
-    0 14px 32px rgba(20, 38, 28, 0.1),
-    0 4px 10px rgba(20, 38, 28, 0.05);
+    0 14px 32px rgba(0, 70, 160, 0.1),
+    0 4px 10px rgba(0, 50, 120, 0.05);
   transition: box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
@@ -521,13 +521,17 @@ body::after {
 }
 
 .app-shell {
-  background: rgba(255, 255, 255, 0.52);
-  border: 1px solid var(--okapi-stroke);
+  background: linear-gradient(
+    165deg,
+    rgba(232, 244, 255, 0.78) 0%,
+    rgba(176, 216, 255, 0.58) 100%
+  );
+  border: 1px solid rgba(0, 90, 180, 0.14);
   backdrop-filter: blur(20px);
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.65) inset,
-    0 18px 40px rgba(20, 38, 28, 0.08),
-    0 4px 12px rgba(20, 38, 28, 0.04);
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 18px 40px rgba(0, 70, 160, 0.1),
+    0 4px 12px rgba(0, 50, 120, 0.05);
   /* pas de transform 3D ici : ça capturait les clics du menu latéral */
 }
 

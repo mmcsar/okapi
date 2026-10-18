@@ -260,7 +260,7 @@ export function AdminExecutiveDashboard() {
           {error}
           {setupRequired ? (
             <span className="mt-1 block text-xs">
-              Vercel → SUPABASE_SECRET_KEY = clé service_role (secret, ey…). Puis Redeploy.
+              Ouvre https://okapii.tech/admin. La clé sb_secret_ est déjà sur Vercel.
             </span>
           ) : null}
         </div>

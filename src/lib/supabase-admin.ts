@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 let adminClient: SupabaseClient | null = null;
 
 export const SUPABASE_ADMIN_SETUP_MESSAGE =
-  "Clé secrète Supabase incorrecte. Sur Vercel, SUPABASE_SECRET_KEY doit être la clé service_role (secret, elle commence par ey). Pas la clé anon, pas sb_publishable, pas une clé sk. Puis Redeploy.";
+  "Ce serveur n’a pas la clé secrète. Sur okapii.tech elle est déjà en place. En local, ajoute SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local.";
 
 function jwtRole(token: string) {
   const part = token.split(".")[1];

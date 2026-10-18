@@ -208,7 +208,7 @@ export function AdminOpsDashboard() {
           {error}
           {setupRequired ? (
             <span className="mt-1 block text-xs opacity-80">
-              Fichiers : 20260313_kyc_profiles.sql · 20260313_mobile_pay.sql
+              La production est sur https://okapii.tech/admin. Ce message vient du serveur local.
             </span>
           ) : null}
         </p>
