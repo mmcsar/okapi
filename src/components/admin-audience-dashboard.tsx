@@ -31,6 +31,14 @@ type Visit = {
   name: string;
 };
 
+type Flag = { level: "abuse" | "watch"; label: string };
+
+type ProjectItem = { title: string; at: string | null };
+
+type UsageDay = { day: string; chats: number; generates: number };
+
+type Alert = { level: "abuse" | "watch"; who: string; email: string; label: string };
+
 type Person = {
   id: string;
   email: string;
@@ -42,8 +50,13 @@ type Person = {
   projects: number;
   lastProjectAt: string | null;
   lastProjectTitle: string | null;
+  projectList?: ProjectItem[];
   chats7d: number;
   generates7d: number;
+  chats14d?: number;
+  generates14d?: number;
+  usageDays?: UsageDay[];
+  flags?: Flag[];
 };
 
 type Payload = {
@@ -57,6 +70,7 @@ type Payload = {
   days?: DayRow[];
   visits?: Visit[];
   people?: Person[];
+  alerts?: Alert[];
 };
 
 const PATH_LABEL: Record<string, string> = {
@@ -115,6 +129,7 @@ export function AdminAudienceDashboard() {
   const [days, setDays] = useState<DayRow[]>([]);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,12 +145,14 @@ export function AdminAudienceDashboard() {
         setDays([]);
         setVisits([]);
         setPeople([]);
+        setAlerts([]);
         return;
       }
       setTotals(json.totals ?? null);
       setDays(json.days ?? []);
       setVisits(json.visits ?? []);
       setPeople(json.people ?? []);
+      setAlerts(json.alerts ?? []);
       setUsageReady(json.usageReady !== false);
       setVisitsReady(json.visitsReady !== false);
       setTruncated(Boolean(json.truncated));
@@ -169,8 +186,8 @@ export function AdminAudienceDashboard() {
             Qui passe sur Okapi
           </h2>
           <p className="mt-1 text-sm text-okapi-ink/55">
-            Comptes, dernière connexion, projets et usage chat / génération
-            sur 7 jours.
+            Comptes, projets, messages, générations, et signalement si quelqu’un
+            sature Okapi.
           </p>
         </div>
         <button
@@ -191,7 +208,7 @@ export function AdminAudienceDashboard() {
           {error}
           {setupRequired ? (
             <span className="mt-1 block text-xs">
-              Vercel → SUPABASE_SECRET_KEY = clé service_role (secret, ey…). Puis Redeploy.
+              Ouvre https://okapii.tech/admin. La clé sb_secret_ est déjà sur Vercel.
             </span>
           ) : null}
         </div>
@@ -199,6 +216,47 @@ export function AdminAudienceDashboard() {
 
       {totals ? (
         <>
+          <section
+            className={`rounded-[28px] border p-5 ${
+              alerts.some((alert) => alert.level === "abuse")
+                ? "border-red-200 bg-red-50"
+                : alerts.length
+                  ? "border-okapi-amber/40 bg-okapi-amber/10"
+                  : "border-[var(--okapi-stroke)] bg-white/80"
+            }`}
+          >
+            <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+              Recherche abusive
+            </h3>
+            <p className="mt-1 text-xs text-okapi-ink/50">
+              Signalé à partir de 20 messages ou 6 générations dans une journée,
+              de 25 passages en 7 jours, ou de 6 pages différentes en moins
+              d’une heure.
+            </p>
+            {alerts.length === 0 ? (
+              <p className="mt-3 text-sm text-okapi-ink/70">
+                Aucun signalement sur 14 jours.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {alerts.map((alert, index) => (
+                  <li
+                    key={`${alert.who}-${alert.label}-${index}`}
+                    className="rounded-2xl bg-white/80 px-3 py-2 text-sm"
+                  >
+                    <p className="font-semibold text-okapi-ink">
+                      {alert.level === "abuse" ? "Abus" : "À surveiller"} · {alert.who}
+                    </p>
+                    <p className="text-xs text-okapi-ink/55">
+                      {alert.email ? `${alert.email} · ` : ""}
+                      {alert.label}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
               {
@@ -280,6 +338,30 @@ export function AdminAudienceDashboard() {
                 );
               })}
             </div>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-left text-sm">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-[0.12em] text-okapi-ink/40">
+                    <th className="pb-2 pr-3 font-medium">Jour</th>
+                    <th className="pb-2 pr-3 font-medium">Passages</th>
+                    <th className="pb-2 pr-3 font-medium">Inscrits</th>
+                    <th className="pb-2 pr-3 font-medium">Messages</th>
+                    <th className="pb-2 font-medium">Générations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...days].reverse().map((row) => (
+                    <tr key={row.day} className="border-t border-[var(--okapi-stroke)]">
+                      <td className="py-2 pr-3">{fmtDay(row.day)}</td>
+                      <td className="py-2 pr-3">{fmtInt(row.visits)}</td>
+                      <td className="py-2 pr-3">{fmtInt(row.signups)}</td>
+                      <td className="py-2 pr-3">{fmtInt(row.chats)}</td>
+                      <td className="py-2">{fmtInt(row.generates)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/80 p-5">
@@ -332,55 +414,99 @@ export function AdminAudienceDashboard() {
             {people.length === 0 ? (
               <p className="text-sm text-okapi-ink/50">Aucun compte pour l’instant.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-left text-sm">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-[0.12em] text-okapi-ink/40">
-                      <th className="pb-2 pr-3 font-medium">Personne</th>
-                      <th className="pb-2 pr-3 font-medium">Ville</th>
-                      <th className="pb-2 pr-3 font-medium">Dernière visite</th>
-                      <th className="pb-2 pr-3 font-medium">Projets</th>
-                      <th className="pb-2 font-medium">7 j</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {people.map((person) => (
-                      <tr
-                        key={person.id}
-                        className="border-t border-[var(--okapi-stroke)]"
-                      >
-                        <td className="py-3 pr-3">
-                          <p className="font-semibold text-okapi-ink">
-                            {person.name}
+              <ul className="space-y-3">
+                {people.map((person) => {
+                  const flagged = (person.flags || []).some(
+                    (flag) => flag.level === "abuse",
+                  );
+                  const watched = (person.flags || []).length > 0;
+                  return (
+                    <li
+                      key={person.id}
+                      className={`rounded-2xl border px-4 py-3 ${
+                        flagged
+                          ? "border-red-200 bg-red-50/70"
+                          : watched
+                            ? "border-okapi-amber/40 bg-okapi-amber/5"
+                            : "border-[var(--okapi-stroke)] bg-white/70"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-okapi-ink">{person.name}</p>
+                          <p className="text-xs text-okapi-ink/50">{person.email}</p>
+                          <p className="text-xs text-okapi-ink/50">
+                            {person.phone || "Pas de téléphone"} · {person.city || "—"}
                           </p>
-                          <p className="text-xs text-okapi-ink/45">
-                            {person.email}
-                            {person.phone ? ` · ${person.phone}` : ""}
-                          </p>
-                        </td>
-                        <td className="py-3 pr-3 text-okapi-ink/70">
-                          {person.city}
-                        </td>
-                        <td className="py-3 pr-3 text-okapi-ink/70">
+                        </div>
+                        <p className="text-xs text-okapi-ink/45">
+                          Dernière visite{" "}
                           {fmtWhen(person.lastSignInAt || person.lastProjectAt)}
-                          <p className="text-[11px] text-okapi-ink/40">
-                            Inscrit {fmtWhen(person.createdAt)}
-                          </p>
-                        </td>
-                        <td className="py-3 pr-3">
-                          <p className="font-semibold">{person.projects}</p>
-                          <p className="text-[11px] text-okapi-ink/40">
-                            {person.lastProjectTitle || "—"}
-                          </p>
-                        </td>
-                        <td className="py-3 text-okapi-ink/70">
-                          {person.chats7d} msg · {person.generates7d} gén.
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </p>
+                      </div>
+                      {(person.flags || []).length > 0 ? (
+                        <ul className="mt-2 space-y-1">
+                          {(person.flags || []).map((flag) => (
+                            <li
+                              key={flag.label}
+                              className={`text-xs font-semibold ${
+                                flag.level === "abuse"
+                                  ? "text-red-800"
+                                  : "text-okapi-amber-deep"
+                              }`}
+                            >
+                              {flag.level === "abuse" ? "Abus" : "À surveiller"} · {flag.label}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      <p className="mt-2 text-xs text-okapi-ink/55">
+                        Inscrit {fmtWhen(person.createdAt)} · {fmtInt(person.chats7d)} msg
+                        / 7 j · {fmtInt(person.generates7d)} gén. / 7 j ·{" "}
+                        {fmtInt(person.chats14d || 0)} msg / 14 j ·{" "}
+                        {fmtInt(person.generates14d || 0)} gén. / 14 j
+                      </p>
+                      <div className="mt-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-okapi-ink/40">
+                          Projets ({fmtInt(person.projects)})
+                        </p>
+                        {(person.projectList || []).length === 0 ? (
+                          <p className="text-xs text-okapi-ink/45">Aucun projet.</p>
+                        ) : (
+                          <ul className="mt-1 space-y-0.5">
+                            {(person.projectList || []).map((project, index) => (
+                              <li
+                                key={`${project.title}-${project.at}-${index}`}
+                                className="text-sm text-okapi-ink/80"
+                              >
+                                {project.title}
+                                <span className="text-xs text-okapi-ink/40">
+                                  {" "}
+                                  · {fmtWhen(project.at)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      {(person.usageDays || []).length > 0 ? (
+                        <ul className="mt-2 space-y-0.5">
+                          {(person.usageDays || []).map((day) => (
+                            <li key={day.day} className="text-xs text-okapi-ink/55">
+                              {fmtDay(day.day)} · {fmtInt(day.chats)} msg ·{" "}
+                              {fmtInt(day.generates)} gén.
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-xs text-okapi-ink/40">
+                          Aucun message ni génération sur 14 jours.
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </section>
         </>
