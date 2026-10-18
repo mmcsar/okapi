@@ -32,6 +32,16 @@ type ProfileRow = {
   phone: string | null;
 };
 
+type VisitRow = {
+  created_at: string;
+  path: string;
+  user_id: string | null;
+  display_name: string | null;
+  city: string | null;
+  country: string | null;
+  visitor_key: string;
+};
+
 function dayKey(iso: string | null | undefined) {
   if (!iso) return "";
   return iso.slice(0, 10);
@@ -79,7 +89,7 @@ export async function GET() {
   const since = `${days[0]}T00:00:00.000Z`;
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [usersRes, profilesRes, projectsRes, usageRes] = await Promise.all([
+  const [usersRes, profilesRes, projectsRes, usageRes, visitsRes] = await Promise.all([
     admin.auth.admin.listUsers({ page: 1, perPage: USER_PAGE }),
     admin
       .from("profiles")
@@ -94,6 +104,12 @@ export async function GET() {
       .from("okapi_usage_daily")
       .select("quota_key, day, chat_count, generate_count")
       .gte("day", days[0])
+      .limit(2000),
+    admin
+      .from("okapi_visits")
+      .select("created_at, path, user_id, display_name, city, country, visitor_key")
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
       .limit(2000),
   ]);
 
@@ -236,10 +252,27 @@ export async function GET() {
     );
   }).length;
 
+  const visitsMissing = Boolean(visitsRes.error);
+  const visitRows = (visitsMissing ? [] : visitsRes.data || []) as VisitRow[];
+  const visitsByDay = new Map<string, number>();
+  const visitors7d = new Set<string>();
+  const guestVisitors7d = new Set<string>();
+  let visits7d = 0;
+  for (const row of visitRows) {
+    const day = dayKey(row.created_at);
+    visitsByDay.set(day, (visitsByDay.get(day) || 0) + 1);
+    if (row.created_at >= weekAgo) {
+      visits7d += 1;
+      visitors7d.add(row.visitor_key);
+      if (!row.user_id) guestVisitors7d.add(row.visitor_key);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     generatedAt: new Date().toISOString(),
     usageReady: !usageMissing,
+    visitsReady: !visitsMissing,
     truncated: authUsers.length >= USER_PAGE,
     totals: {
       accounts: people.length,
@@ -249,12 +282,23 @@ export async function GET() {
       chats7d,
       generates7d,
       guests7d: guestKeys.size,
+      visits7d,
+      visitors7d: visitors7d.size,
+      guestVisitors7d: guestVisitors7d.size,
     },
     days: days.map((day) => ({
       day,
       signups: signupsByDay.get(day) || 0,
       chats: dayChats.get(day) || 0,
       generates: dayGenerates.get(day) || 0,
+      visits: visitsByDay.get(day) || 0,
+    })),
+    visits: visitRows.slice(0, 40).map((row) => ({
+      at: row.created_at,
+      path: row.path,
+      city: row.city || "",
+      country: row.country || "",
+      name: row.user_id ? row.display_name || "Compte Okapi" : "",
     })),
     since,
     people,

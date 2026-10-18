@@ -8,6 +8,7 @@ import { LoginPanel } from "@/components/login-panel";
 import { ProjectsPanel } from "@/components/projects-panel";
 import { ScheduledTasksPanel } from "@/components/scheduled-tasks-panel";
 import { PwaInstallBanner } from "@/components/pwa-install-banner";
+import { VisitPing } from "@/components/visit-ping";
 import { SettingsPanel } from "@/components/settings-panel";
 import { Sidebar } from "@/components/sidebar";
 import type { OkapiProject } from "@/lib/supabase";
@@ -54,7 +55,7 @@ function hashFor(id: NavId) {
 }
 
 function HomeApp() {
-  const { user, displayName, signOut, ready } = useAuth();
+  const { user, displayName, signOut, ready, accessToken } = useAuth();
   const [activeNav, setActiveNav] = useState<NavId>(() =>
     typeof window !== "undefined" ? parseHash() : "home",
   );
@@ -191,6 +192,7 @@ function HomeApp() {
           : "gap-3 p-3 md:gap-2 md:p-4"
       }`}
     >
+      <VisitPing path={activeNav} token={accessToken} />
       <Sidebar
         activeNav={sidebarActive}
         onNavChange={navigate}
@@ -202,22 +204,22 @@ function HomeApp() {
 
       <div
         className={`relative z-0 flex min-h-0 min-w-0 flex-1 flex-col ${
-          studioLayout ? "gap-0 pt-12 md:pt-0" : "gap-2 pt-12 md:pt-0"
+          studioLayout ? "gap-0 pt-12 md:pt-0" : "gap-3"
         }`}
       >
         {!studioLayout ? (
-        <div className="flex flex-wrap items-center gap-2 md:hidden">
+        <div className="relative z-20 flex items-center gap-2 overflow-x-auto pl-[5.4rem] md:hidden">
           <button
             type="button"
             onClick={startNewProject}
-            className="rounded-xl bg-okapi-amber px-3 py-2 text-xs font-semibold text-white"
+            className="shrink-0 rounded-xl bg-okapi-amber px-3 py-2 text-xs font-semibold text-white"
           >
             + Nouveau
           </button>
           <button
             type="button"
             onClick={() => navigate("home")}
-            className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+            className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ${
               activeNav === "home"
                 ? "bg-okapi-forest text-white"
                 : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
@@ -228,14 +230,14 @@ function HomeApp() {
           <button
             type="button"
             onClick={() => navigate("studio")}
-            className="rounded-xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-xs font-semibold text-okapi-ink/70"
+            className="shrink-0 rounded-xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-xs font-semibold text-okapi-ink/70"
           >
             Studio
           </button>
           <button
             type="button"
             onClick={() => navigate("settings")}
-            className={`rounded-xl px-3 py-2 text-xs font-semibold ${
+            className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ${
               activeNav === "settings"
                 ? "bg-okapi-forest text-white"
                 : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"

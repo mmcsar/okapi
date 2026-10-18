@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { VisitPing } from "@/components/visit-ping";
 import { useOkapiPublicBridge } from "@/hooks/use-okapi-public-bridge";
 import {
   OKAPI_PUBLIC_SANDBOX,
@@ -69,16 +70,18 @@ export default function PublicProjectPage() {
     });
   }, [project?.html, project?.id]);
 
+  const publicPath =
+    slug && /^[a-z0-9-]{1,60}$/i.test(slug) ? `p/${slug.toLowerCase()}` : "";
+
+  let body: ReactNode;
   if (loading) {
-    return (
+    body = (
       <div className="flex min-h-screen items-center justify-center bg-[#e8eee9] text-sm text-okapi-ink/50">
         Chargement du projet…
       </div>
     );
-  }
-
-  if (error || !project) {
-    return (
+  } else if (error || !project) {
+    body = (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#e8eee9] px-4 text-center">
         <p className="font-[family-name:var(--font-syne)] text-2xl font-bold text-okapi-ink">
           Lien indisponible
@@ -92,9 +95,8 @@ export default function PublicProjectPage() {
         </Link>
       </div>
     );
-  }
-
-  return (
+  } else {
+    body = (
     <div className="flex min-h-screen flex-col bg-[#e8eee9]">
       <header className="flex items-center justify-between gap-3 border-b border-[var(--okapi-stroke)] bg-white/80 px-4 py-3 backdrop-blur">
         <div className="min-w-0">
@@ -121,5 +123,13 @@ export default function PublicProjectPage() {
         className="min-h-0 w-full flex-1 bg-white"
       />
     </div>
+    );
+  }
+
+  return (
+    <>
+      {publicPath ? <VisitPing path={publicPath} /> : null}
+      {body}
+    </>
   );
 }

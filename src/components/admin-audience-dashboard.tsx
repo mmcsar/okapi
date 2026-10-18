@@ -10,6 +10,9 @@ type Totals = {
   chats7d: number;
   generates7d: number;
   guests7d: number;
+  visits7d: number;
+  visitors7d: number;
+  guestVisitors7d: number;
 };
 
 type DayRow = {
@@ -17,6 +20,15 @@ type DayRow = {
   signups: number;
   chats: number;
   generates: number;
+  visits: number;
+};
+
+type Visit = {
+  at: string;
+  path: string;
+  city: string;
+  country: string;
+  name: string;
 };
 
 type Person = {
@@ -39,11 +51,29 @@ type Payload = {
   error?: string;
   setupRequired?: boolean;
   usageReady?: boolean;
+  visitsReady?: boolean;
   truncated?: boolean;
   totals?: Totals;
   days?: DayRow[];
+  visits?: Visit[];
   people?: Person[];
 };
+
+const PATH_LABEL: Record<string, string> = {
+  home: "Accueil",
+  studio: "Studio",
+  projects: "Projets",
+  automations: "Automatisations",
+  settings: "Paramètres",
+  billing: "Abonnement",
+  login: "Connexion",
+};
+
+function pathLabel(path: string) {
+  if (PATH_LABEL[path]) return PATH_LABEL[path];
+  if (path.startsWith("p/")) return `Page publique · ${path.slice(2)}`;
+  return path;
+}
 
 function fmtInt(n: number) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(
@@ -79,9 +109,11 @@ export function AdminAudienceDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [setupRequired, setSetupRequired] = useState(false);
   const [usageReady, setUsageReady] = useState(true);
+  const [visitsReady, setVisitsReady] = useState(true);
   const [truncated, setTruncated] = useState(false);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [days, setDays] = useState<DayRow[]>([]);
+  const [visits, setVisits] = useState<Visit[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
 
   const load = useCallback(async () => {
@@ -96,13 +128,16 @@ export function AdminAudienceDashboard() {
         setSetupRequired(Boolean(json.setupRequired));
         setTotals(null);
         setDays([]);
+        setVisits([]);
         setPeople([]);
         return;
       }
       setTotals(json.totals ?? null);
       setDays(json.days ?? []);
+      setVisits(json.visits ?? []);
       setPeople(json.people ?? []);
       setUsageReady(json.usageReady !== false);
+      setVisitsReady(json.visitsReady !== false);
       setTruncated(Boolean(json.truncated));
     } catch {
       setError("Audience indisponible.");
@@ -118,7 +153,9 @@ export function AdminAudienceDashboard() {
 
   const maxBar = Math.max(
     1,
-    ...days.map((d) => d.signups + d.chats + d.generates),
+    ...days.map((d) =>
+      visitsReady ? d.visits : d.signups + d.chats + d.generates,
+    ),
   );
 
   return (
@@ -165,6 +202,18 @@ export function AdminAudienceDashboard() {
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
               {
+                label: "Passages · 7 j",
+                value: fmtInt(totals.visits7d || 0),
+                hint: visitsReady
+                  ? "Accueil, Studio, pages publiques"
+                  : "Lance 20261018_okapi_visits.sql",
+              },
+              {
+                label: "Visiteurs · 7 j",
+                value: fmtInt(totals.visitors7d || 0),
+                hint: `${fmtInt(totals.guestVisitors7d || 0)} sans compte`,
+              },
+              {
                 label: "Comptes",
                 value: fmtInt(totals.accounts),
                 hint:
@@ -175,17 +224,7 @@ export function AdminAudienceDashboard() {
               {
                 label: "Actifs · 7 j",
                 value: fmtInt(totals.active7d),
-                hint: "Connexion, projet ou usage",
-              },
-              {
-                label: "Visiteurs sans compte · 7 j",
-                value: fmtInt(totals.guests7d),
-                hint: "Chat ou génération, identité masquée",
-              },
-              {
-                label: "Usage · 7 j",
-                value: `${fmtInt(totals.chats7d)} / ${fmtInt(totals.generates7d)}`,
-                hint: "Messages · générations",
+                hint: `${fmtInt(totals.chats7d)} msg · ${fmtInt(totals.generates7d)} gén.`,
               },
             ].map((card) => (
               <article
@@ -208,14 +247,18 @@ export function AdminAudienceDashboard() {
               14 derniers jours
             </h3>
             <p className="mt-1 text-xs text-okapi-ink/45">
-              Inscriptions, messages et générations.
+              {visitsReady
+                ? "Passages sur la plateforme."
+                : "Lance 20261018_okapi_visits.sql pour les passages."}
               {usageReady
                 ? ""
                 : " Lance 20261017_usage_daily.sql pour le détail chat / génération."}
             </p>
             <div className="mt-4 flex items-end gap-1 overflow-x-auto">
               {days.map((row) => {
-                const total = row.signups + row.chats + row.generates;
+                const total = visitsReady
+                  ? row.visits
+                  : row.signups + row.chats + row.generates;
                 const h = Math.max(4, Math.round((total / maxBar) * 72));
                 return (
                   <div
@@ -237,6 +280,42 @@ export function AdminAudienceDashboard() {
                 );
               })}
             </div>
+          </section>
+
+          <section className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/80 p-5">
+            <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+              Passages récents
+            </h3>
+            <p className="mt-1 text-xs text-okapi-ink/45">
+              Le nom apparaît seulement si la personne est connectée.
+            </p>
+            {visits.length === 0 ? (
+              <p className="mt-3 text-sm text-okapi-ink/50">
+                Aucun passage enregistré.
+              </p>
+            ) : (
+              <ul className="mt-3 divide-y divide-[var(--okapi-stroke)]">
+                {visits.map((visit, index) => (
+                  <li
+                    key={`${visit.at}-${visit.path}-${index}`}
+                    className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold text-okapi-ink">
+                        {visit.name || "Visiteur"}
+                      </p>
+                      <p className="text-xs text-okapi-ink/45">
+                        {pathLabel(visit.path)}
+                        {visit.city
+                          ? ` · ${visit.city}${visit.country ? `, ${visit.country}` : ""}`
+                          : ""}
+                      </p>
+                    </div>
+                    <p className="text-xs text-okapi-ink/45">{fmtWhen(visit.at)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/80 p-5">
