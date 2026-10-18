@@ -10,10 +10,25 @@ import { AdminOpsDashboard } from "@/components/admin-ops-dashboard";
 import { AdminSystemDashboard } from "@/components/admin-system-dashboard";
 
 type AdminTab = "ops" | "clients" | "executive" | "audience" | "system";
+type LoginStep = "password" | "setup" | "totp";
+
+function formatPhone(phone: string) {
+  const digits = phone.replace(/[^\d+]/g, "");
+  if (digits.startsWith("+45") && digits.length >= 10) {
+    const rest = digits.slice(3);
+    return `+45 ${rest.slice(0, 2)} ${rest.slice(2, 4)} ${rest.slice(4, 6)} ${rest.slice(6)}`.trim();
+  }
+  return phone;
+}
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [code, setCode] = useState("");
+  const [totp, setTotp] = useState("");
+  const [step, setStep] = useState<LoginStep>("password");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [manualKey, setManualKey] = useState("");
+  const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<AdminTab>("ops");
@@ -34,9 +49,25 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify(step === "password" ? { code } : { totp }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        step?: "setup" | "totp";
+        qrDataUrl?: string;
+        manualKey?: string;
+        phone?: string;
+      };
+      if (data.step === "setup" || data.step === "totp") {
+        setStep(data.step);
+        setPhone(data.phone || "");
+        setQrDataUrl(data.qrDataUrl || "");
+        setManualKey(data.manualKey || "");
+        setTotp("");
+        setError(null);
+        return;
+      }
       if (!res.ok || !data.ok) {
         setError(data.error ?? "Accès refusé");
         setAuthed(false);
@@ -44,6 +75,8 @@ export default function AdminPage() {
       }
       setAuthed(true);
       setCode("");
+      setTotp("");
+      setStep("password");
     } finally {
       setLoading(false);
     }
@@ -83,22 +116,59 @@ export default function AdminPage() {
             Admin Okapi
           </h1>
           <p className="mt-2 text-sm text-okapi-ink/55">
-            Zone privée MMC — identité, paiements, clients. Pas dans le menu
-            user.
+            {step === "password"
+              ? "Mot de passe, puis code à 6 chiffres de l’application."
+              : `Code TOTP pour ${formatPhone(phone || "+4550276685")}.`}
           </p>
-          <label className="mt-6 block text-left">
-            <span className="mb-1.5 block text-xs font-medium text-okapi-ink/50">
-              Code admin
-            </span>
-            <input
-              type="password"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className="w-full rounded-2xl border border-[var(--okapi-stroke)] bg-white px-4 py-3 text-sm outline-none focus:border-okapi-leaf/40"
-              placeholder="••••••••"
-              autoComplete="current-password"
-            />
-          </label>
+          {step === "setup" && qrDataUrl ? (
+            <div className="mt-5 text-center">
+              {/* Data URL locale : next/image ne gère pas ce QR. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={qrDataUrl}
+                alt="QR code TOTP Okapi"
+                className="mx-auto h-52 w-52 rounded-2xl bg-white p-2"
+              />
+              <p className="mt-3 text-xs text-okapi-ink/55">
+                Scanne avec Google Authenticator, Aegis ou Authy. Le compte
+                s’appelle Okapi {formatPhone(phone || "+4550276685")}.
+              </p>
+              {manualKey ? (
+                <p className="mt-2 break-all font-mono text-[11px] text-okapi-ink/45">
+                  {manualKey.replace(/(.{4})/g, "$1 ").trim()}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {step === "password" ? (
+            <label className="mt-6 block text-left">
+              <span className="mb-1.5 block text-xs font-medium text-okapi-ink/50">
+                Code admin
+              </span>
+              <input
+                type="password"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className="w-full rounded-2xl border border-[var(--okapi-stroke)] bg-white px-4 py-3 text-sm outline-none focus:border-okapi-leaf/40"
+                placeholder="••••••••"
+                autoComplete="current-password"
+              />
+            </label>
+          ) : (
+            <label className="mt-6 block text-left">
+              <span className="mb-1.5 block text-xs font-medium text-okapi-ink/50">
+                Code à 6 chiffres
+              </span>
+              <input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={totp}
+                onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="w-full rounded-2xl border border-[var(--okapi-stroke)] bg-white px-4 py-3 text-center font-mono text-lg tracking-[0.3em] outline-none focus:border-okapi-leaf/40"
+                placeholder="000000"
+              />
+            </label>
+          )}
           {error ? (
             <p className="mt-3 text-sm text-okapi-amber-deep">{error}</p>
           ) : null}
@@ -107,8 +177,25 @@ export default function AdminPage() {
             disabled={loading}
             className="mt-5 w-full rounded-2xl bg-okapi-forest px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {loading ? "Vérification…" : "Entrer"}
+            {loading
+              ? "Vérification…"
+              : step === "password"
+                ? "Continuer"
+                : "Valider le code"}
           </button>
+          {step !== "password" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setStep("password");
+                setTotp("");
+                setError(null);
+              }}
+              className="mt-3 w-full text-sm text-okapi-ink/45"
+            >
+              Revenir au mot de passe
+            </button>
+          ) : null}
           <Link
             href="/"
             className="mt-4 block text-center text-sm text-okapi-ink/45 hover:text-okapi-forest"
@@ -199,8 +286,8 @@ export default function AdminPage() {
           )}
 
           <p className="mt-6 text-[11px] text-okapi-ink/40">
-            Accès protégé par `OKAPI_ADMIN_CODE` (≥ 12 car.) + session AES
-            (`OKAPI_AES_KEY`). Invisible dans le menu utilisateur.
+            Accès protégé par mot de passe, code TOTP et session AES. Invisible
+            dans le menu utilisateur.
           </p>
         </div>
       </div>
