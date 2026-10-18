@@ -3,12 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
+import { AdminAudienceDashboard } from "@/components/admin-audience-dashboard";
 import { AdminClientsDashboard } from "@/components/admin-clients-dashboard";
 import { AdminExecutiveDashboard } from "@/components/admin-executive-dashboard";
 import { AdminOpsDashboard } from "@/components/admin-ops-dashboard";
 import { AdminSystemDashboard } from "@/components/admin-system-dashboard";
 
-type AdminTab = "ops" | "clients" | "executive" | "system";
+type AdminTab = "ops" | "clients" | "executive" | "audience" | "system";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -165,6 +166,7 @@ export default function AdminPage() {
               { id: "ops" as const, label: "Ops MMC" },
               { id: "clients" as const, label: "Clients" },
               { id: "executive" as const, label: "Exécutif" },
+              { id: "audience" as const, label: "Audience" },
               { id: "system" as const, label: "Système" },
             ] as const
           ).map((t) => (
@@ -190,6 +192,8 @@ export default function AdminPage() {
             <AdminClientsDashboard />
           ) : tab === "executive" ? (
             <AdminExecutiveDashboard />
+          ) : tab === "audience" ? (
+            <AdminAudienceDashboard />
           ) : (
             <AdminSystemDashboard />
           )}

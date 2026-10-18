@@ -206,23 +206,6 @@ grant select on table public.projects to anon;
 revoke all on table public.admin_clients from anon, authenticated;
 grant all on table public.admin_clients to service_role;
 
--- -----------------------------------------------------------------------------
--- 7. Seed CRM (si table vide)
--- -----------------------------------------------------------------------------
-insert into public.admin_clients
-  (name, company, city, stage, owner, value_usd, next_action, deadline, workload_pct, overdue_days)
-select * from (values
-  ('Amina Kalala', 'Café Gombe SARL', 'Kinshasa', 'active', 'Grace', 4200, 'Livrer v2 boutique', date '2026-09-18', 72, 0),
-  ('Patrick Mwamba', 'Univ Tech Lubumbashi', 'Lubumbashi', 'proposal', 'David', 8900, 'Envoyer devis formation', date '2026-09-12', 55, 4),
-  ('Nadia Okito', 'Boutique Mode Ngaliema', 'Kinshasa', 'qualified', 'Grace', 2100, 'Demo WhatsApp catalog', date '2026-09-15', 40, 1),
-  ('Jean Batumike', 'Mining Light Kolwezi', 'Kolwezi', 'prospect', 'Christian', 15000, 'Appel découverte', date '2026-09-20', 25, 0),
-  ('Sarah Ilunga', 'Restaurant Lingwala', 'Kinshasa', 'proposal', 'David', 3100, 'Valider menu digital', date '2026-09-10', 48, 10),
-  ('Eric Tshibanda', 'Taxi Kin Express', 'Kinshasa', 'qualified', 'Christian', 5600, 'Prototype suivi courses', date '2026-09-22', 33, 0),
-  ('Fatou Mbala', 'Clinique Goma Care', 'Goma', 'active', 'Grace', 7800, 'Renouvellement annuel', date '2026-09-25', 60, 0),
-  ('Hugo Kabongo', 'AgriConnect Bandundu', 'Bandundu', 'prospect', 'David', 2400, 'Relance WhatsApp', date '2026-09-08', 18, 24)
-) as v(name, company, city, stage, owner, value_usd, next_action, deadline, workload_pct, overdue_days)
-where not exists (select 1 from public.admin_clients limit 1);
-
 -- =============================================================================
 -- Fin. Vérifie : Table Editor → profiles, projects, admin_clients
 -- Auth : active Email dans Authentication → Providers

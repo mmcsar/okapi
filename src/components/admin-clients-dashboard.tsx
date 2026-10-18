@@ -5,7 +5,6 @@ import {
   CLIENT_STAGES,
   formatFrDate,
   formatUsd,
-  SEED_CLIENTS,
   type AdminClient,
   type ClientStage,
 } from "@/data/admin-clients";
@@ -57,13 +56,13 @@ export function AdminClientsDashboard() {
       };
       if (!res.ok || !data.ok) {
         setSetupError(data.error ?? "Impossible de charger les clients.");
-        setClients(SEED_CLIENTS);
+        setClients([]);
         return;
       }
       setClients(data.clients ?? []);
     } catch {
-      setSetupError("Erreur réseau — fallback démo local.");
-      setClients(SEED_CLIENTS);
+      setSetupError("Erreur réseau. Les clients production ne sont pas chargés.");
+      setClients([]);
     } finally {
       setLoading(false);
     }
@@ -114,11 +113,11 @@ export function AdminClientsDashboard() {
     .filter((c) => c.stage === "active")
     .reduce((s, c) => s + c.valueUsd, 0);
   const remaining = Math.max(pipelineValue - activeValue, 0);
-  const target = Math.round(pipelineValue * 0.75 || 1);
-  const progressToTarget = Math.min(
-    100,
-    Math.round((activeValue / target) * 100),
-  );
+  const target = Math.round(pipelineValue * 0.75);
+  const progressToTarget =
+    target > 0
+      ? Math.min(100, Math.round((activeValue / target) * 100))
+      : 0;
   const overdueCount = clients.filter((c) => c.overdueDays > 0).length;
 
   const stageCounts = CLIENT_STAGES.map((s) => ({
