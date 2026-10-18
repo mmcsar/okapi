@@ -2,17 +2,47 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 let adminClient: SupabaseClient | null = null;
 
+export const SUPABASE_ADMIN_SETUP_MESSAGE =
+  "Clé secrète Supabase incorrecte. Sur Vercel, SUPABASE_SECRET_KEY doit être la clé service_role (secret, elle commence par ey). Pas la clé anon, pas sb_publishable, pas une clé sk. Puis Redeploy.";
+
+function jwtRole(token: string) {
+  const part = token.split(".")[1];
+  if (!part) return "";
+  try {
+    const payload = JSON.parse(
+      Buffer.from(part, "base64url").toString("utf8"),
+    ) as { role?: unknown };
+    return typeof payload.role === "string" ? payload.role : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Vraie clé admin : sb_secret_… ou JWT dont le rôle est service_role. */
+export function isSupabaseServiceKey(key: string) {
+  const value = key.trim();
+  if (!value) return false;
+  if (value.startsWith("sb_secret_")) return true;
+  if (value.startsWith("sb_publishable_") || value.startsWith("sk")) return false;
+  if (value.startsWith("eyJ")) return jwtRole(value) === "service_role";
+  return false;
+}
+
 /**
  * Clé serveur Supabase (bypass RLS).
- * Accepte le nouveau format `sb_secret_…` (SUPABASE_SECRET_KEY)
- * ou l’ancien JWT service_role (SUPABASE_SERVICE_ROLE_KEY).
+ * Ignore une clé publique collée par erreur dans SUPABASE_SECRET_KEY
+ * et prend SUPABASE_SERVICE_ROLE_KEY si c’est elle la vraie clé secrète.
  */
 export function getSupabaseAdminKey() {
-  return (
-    process.env.SUPABASE_SECRET_KEY?.trim() ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
-    ""
-  );
+  const candidates = [
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.SUPABASE_SECRET_KEY,
+  ];
+  for (const raw of candidates) {
+    const key = raw?.trim() || "";
+    if (isSupabaseServiceKey(key)) return key;
+  }
+  return "";
 }
 
 export function getSupabaseAdmin() {
@@ -21,7 +51,7 @@ export function getSupabaseAdmin() {
 
   if (!url || !serviceKey) {
     throw new Error(
-      "Clé secrète Supabase manquante. Ajoute SUPABASE_SECRET_KEY (sb_secret_…) ou SUPABASE_SERVICE_ROLE_KEY dans .env.local — Dashboard → Settings → API Keys.",
+      SUPABASE_ADMIN_SETUP_MESSAGE,
     );
   }
 

@@ -6,6 +6,7 @@ import { ID_DOC_OPTIONS, kycStatusLabel } from "@/lib/kyc";
 import {
   getSupabaseAdmin,
   isSupabaseAdminConfigured,
+  SUPABASE_ADMIN_SETUP_MESSAGE,
 } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
@@ -25,7 +26,7 @@ export async function GET() {
     return NextResponse.json(
       {
         error:
-          "Clé secrète Supabase manquante. Pose SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local — Dashboard → API Keys.",
+          SUPABASE_ADMIN_SETUP_MESSAGE,
         setupRequired: true,
       },
       { status: 503 },

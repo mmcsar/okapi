@@ -191,7 +191,7 @@ export function AdminAudienceDashboard() {
           {error}
           {setupRequired ? (
             <span className="mt-1 block text-xs">
-              Vérifie SUPABASE_SECRET_KEY (sb_secret_…) et les migrations SQL.
+              Vercel → SUPABASE_SECRET_KEY = clé service_role (secret, ey…). Puis Redeploy.
             </span>
           ) : null}
         </div>

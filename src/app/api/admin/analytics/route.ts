@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin-auth";
 import {
   getSupabaseAdmin,
   isSupabaseAdminConfigured,
+  SUPABASE_ADMIN_SETUP_MESSAGE,
 } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
@@ -76,8 +77,7 @@ export async function GET() {
   if (!isSupabaseAdminConfigured()) {
     return NextResponse.json(
       {
-        error:
-          "Clé secrète Supabase manquante. Pose SUPABASE_SECRET_KEY (sb_secret_…) dans .env.local — Dashboard → API Keys.",
+        error: SUPABASE_ADMIN_SETUP_MESSAGE,
         setupRequired: true,
       },
       { status: 503 },
