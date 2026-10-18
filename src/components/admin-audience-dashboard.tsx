@@ -39,6 +39,21 @@ type UsageDay = { day: string; chats: number; generates: number };
 
 type Alert = { level: "abuse" | "watch"; who: string; email: string; label: string };
 
+type Guest = {
+  id: string;
+  label: string;
+  city: string;
+  country: string;
+  count: number;
+  count7d: number;
+  lastAt: string | null;
+  passages: { at: string; path: string }[];
+  chats14d: number;
+  generates14d: number;
+  usageDays: UsageDay[];
+  flags: Flag[];
+};
+
 type Person = {
   id: string;
   email: string;
@@ -71,6 +86,7 @@ type Payload = {
   visits?: Visit[];
   people?: Person[];
   alerts?: Alert[];
+  guests?: Guest[];
 };
 
 const PATH_LABEL: Record<string, string> = {
@@ -130,6 +146,7 @@ export function AdminAudienceDashboard() {
   const [visits, setVisits] = useState<Visit[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,6 +163,7 @@ export function AdminAudienceDashboard() {
         setVisits([]);
         setPeople([]);
         setAlerts([]);
+        setGuests([]);
         return;
       }
       setTotals(json.totals ?? null);
@@ -153,6 +171,7 @@ export function AdminAudienceDashboard() {
       setVisits(json.visits ?? []);
       setPeople(json.people ?? []);
       setAlerts(json.alerts ?? []);
+      setGuests(json.guests ?? []);
       setUsageReady(json.usageReady !== false);
       setVisitsReady(json.visitsReady !== false);
       setTruncated(Boolean(json.truncated));
@@ -186,8 +205,8 @@ export function AdminAudienceDashboard() {
             Qui passe sur Okapi
           </h2>
           <p className="mt-1 text-sm text-okapi-ink/55">
-            Comptes, projets, messages, générations, et signalement si quelqu’un
-            sature Okapi.
+            Comptes et visiteurs sans compte : pages, horaires, messages, et
+            signalement si quelqu’un sature Okapi.
           </p>
         </div>
         <button
@@ -396,6 +415,100 @@ export function AdminAudienceDashboard() {
                     <p className="text-xs text-okapi-ink/45">{fmtWhen(visit.at)}</p>
                   </li>
                 ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded-[28px] border border-[var(--okapi-stroke)] bg-white/80 p-5">
+            <h3 className="font-[family-name:var(--font-syne)] text-lg font-bold">
+              Sans compte ({fmtInt(guests.length)})
+            </h3>
+            <p className="mt-1 text-xs text-okapi-ink/45">
+              Personnes qui ouvrent Okapi ou lancent une recherche sans être
+              connectées. Pas d’adresse e-mail.
+            </p>
+            {guests.length === 0 ? (
+              <p className="mt-3 text-sm text-okapi-ink/50">
+                Aucun visiteur sans compte sur 14 jours.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-3">
+                {guests.map((guest, index) => {
+                  const flagged = guest.flags.some((flag) => flag.level === "abuse");
+                  return (
+                    <li
+                      key={guest.id}
+                      className={`rounded-2xl border px-4 py-3 ${
+                        flagged
+                          ? "border-red-200 bg-red-50/70"
+                          : guest.flags.length
+                            ? "border-okapi-amber/40 bg-okapi-amber/5"
+                            : "border-[var(--okapi-stroke)] bg-white/70"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-okapi-ink">
+                            {guest.label} · {index + 1}
+                          </p>
+                          <p className="text-xs text-okapi-ink/50">
+                            Repère {guest.id}
+                            {guest.city
+                              ? ` · ${guest.city}${guest.country ? `, ${guest.country}` : ""}`
+                              : ""}
+                          </p>
+                        </div>
+                        <p className="text-xs text-okapi-ink/45">
+                          {guest.count7d
+                            ? `${fmtInt(guest.count7d)} passages / 7 j`
+                            : "Recherche sans inscription"}
+                        </p>
+                      </div>
+                      {guest.flags.map((flag) => (
+                        <p
+                          key={flag.label}
+                          className={`mt-2 text-xs font-semibold ${
+                            flag.level === "abuse"
+                              ? "text-red-800"
+                              : "text-okapi-amber-deep"
+                          }`}
+                        >
+                          {flag.level === "abuse" ? "Abus" : "À surveiller"} · {flag.label}
+                        </p>
+                      ))}
+                      <p className="mt-2 text-xs text-okapi-ink/55">
+                        Dernier passage {fmtWhen(guest.lastAt)} · {fmtInt(guest.chats14d)} msg
+                        / 14 j · {fmtInt(guest.generates14d)} gén. / 14 j
+                      </p>
+                      {guest.passages.length > 0 ? (
+                        <ul className="mt-2 space-y-0.5">
+                          {guest.passages.map((passage, passageIndex) => (
+                            <li
+                              key={`${passage.at}-${passage.path}-${passageIndex}`}
+                              className="text-sm text-okapi-ink/80"
+                            >
+                              {pathLabel(passage.path)}
+                              <span className="text-xs text-okapi-ink/40">
+                                {" "}
+                                · {fmtWhen(passage.at)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {guest.usageDays.length > 0 ? (
+                        <ul className="mt-2 space-y-0.5">
+                          {guest.usageDays.map((day) => (
+                            <li key={day.day} className="text-xs text-okapi-ink/55">
+                              {fmtDay(day.day)} · {fmtInt(day.chats)} msg ·{" "}
+                              {fmtInt(day.generates)} gén.
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

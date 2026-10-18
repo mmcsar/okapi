@@ -184,7 +184,7 @@ export async function GET() {
   const dayChats = new Map<string, number>();
   const dayGenerates = new Map<string, number>();
   const guestKeys = new Set<string>();
-  const guestFlags: Flag[] = [];
+  const guestUsageDays = new Map<string, Map<string, { chats: number; generates: number }>>();
   let chats7d = 0;
   let generates7d = 0;
 
@@ -223,34 +223,17 @@ export async function GET() {
       usageDaysByUser.set(userId, byDay);
     } else if (chats + generates > 0) {
       if (day >= dayKey(weekAgo)) guestKeys.add(row.quota_key);
-      if (chats >= CHAT_ABUSE) {
-        pushFlag(guestFlags, {
-          level: "abuse",
-          label: `Invité sans compte : ${chats} messages le ${day} (plafond ${CHAT_ABUSE})`,
-        });
-      } else if (chats >= CHAT_WATCH) {
-        pushFlag(guestFlags, {
-          level: "watch",
-          label: `Invité sans compte : ${chats} messages le ${day}`,
-        });
-      }
-      if (generates >= GEN_ABUSE) {
-        pushFlag(guestFlags, {
-          level: "abuse",
-          label: `Invité sans compte : ${generates} générations le ${day} (plafond ${GEN_ABUSE})`,
-        });
-      } else if (generates >= GEN_WATCH) {
-        pushFlag(guestFlags, {
-          level: "watch",
-          label: `Invité sans compte : ${generates} générations le ${day}`,
-        });
-      }
+      const byDay = guestUsageDays.get(row.quota_key) ?? new Map();
+      const slot = byDay.get(day) ?? { chats: 0, generates: 0 };
+      slot.chats += chats;
+      slot.generates += generates;
+      byDay.set(day, slot);
+      guestUsageDays.set(row.quota_key, byDay);
     }
   }
 
-  function usageFlags(userId: string) {
+  function flagsFromDays(byDay: Map<string, { chats: number; generates: number }> | undefined) {
     const flags: Flag[] = [];
-    const byDay = usageDaysByUser.get(userId);
     if (!byDay) return flags;
     for (const [day, slot] of byDay) {
       if (slot.chats >= CHAT_ABUSE) {
@@ -277,6 +260,10 @@ export async function GET() {
       }
     }
     return flags;
+  }
+
+  function usageFlags(userId: string) {
+    return flagsFromDays(usageDaysByUser.get(userId));
   }
 
   const authUsers = usersRes.data?.users ?? [];
@@ -378,7 +365,7 @@ export async function GET() {
       name: string;
       city: string;
       country: string;
-      events: { at: number; path: string }[];
+      events: { at: number; iso: string; path: string }[];
     }
   >();
   for (const row of visitRows) {
@@ -397,7 +384,9 @@ export async function GET() {
     if (row.city) bucket.city = row.city;
     if (row.country) bucket.country = row.country;
     const at = new Date(row.created_at).getTime();
-    if (Number.isFinite(at)) bucket.events.push({ at, path: row.path });
+    if (Number.isFinite(at)) {
+      bucket.events.push({ at, iso: row.created_at, path: row.path });
+    }
     if (row.created_at >= weekAgo) {
       visits7d += 1;
       visitors7d.add(row.visitor_key);
@@ -407,7 +396,22 @@ export async function GET() {
     visitsByKey.set(row.visitor_key, bucket);
   }
 
-  for (const bucket of visitsByKey.values()) {
+  const guests: {
+    id: string;
+    label: string;
+    city: string;
+    country: string;
+    count: number;
+    count7d: number;
+    lastAt: string | null;
+    passages: { at: string; path: string }[];
+    chats14d: number;
+    generates14d: number;
+    usageDays: { day: string; chats: number; generates: number }[];
+    flags: Flag[];
+  }[] = [];
+
+  for (const [key, bucket] of visitsByKey) {
     const flags: Flag[] = [];
     if (bucket.count7d >= VISIT_ABUSE) {
       pushFlag(flags, {
@@ -435,7 +439,6 @@ export async function GET() {
         break;
       }
     }
-    if (!flags.length) continue;
     const person = bucket.userId
       ? people.find((item) => item.id === bucket.userId)
       : undefined;
@@ -443,15 +446,60 @@ export async function GET() {
       for (const flag of flags) pushFlag(person.flags, flag);
       continue;
     }
+    const passages = [...bucket.events]
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 40)
+      .map((event) => ({ at: event.iso, path: event.path }));
     const place = [bucket.city, bucket.country].filter(Boolean).join(", ");
-    const who = bucket.name || "Visiteur sans compte";
-    for (const flag of flags) {
-      pushFlag(guestFlags, {
-        level: flag.level,
-        label: `${who}${place ? ` · ${place}` : ""} — ${flag.label}`,
-      });
-    }
+    guests.push({
+      id: key.slice(0, 8),
+      label: place ? `Sans compte · ${place}` : "Sans compte",
+      city: bucket.city,
+      country: bucket.country,
+      count: bucket.events.length,
+      count7d: bucket.count7d,
+      lastAt: passages[0]?.at ?? null,
+      passages,
+      chats14d: 0,
+      generates14d: 0,
+      usageDays: [] as { day: string; chats: number; generates: number }[],
+      flags,
+    });
   }
+
+  for (const [key, byDay] of guestUsageDays) {
+    let chats14d = 0;
+    let generates14d = 0;
+    const usageDays = [...byDay.entries()]
+      .map(([day, slot]) => {
+        chats14d += slot.chats;
+        generates14d += slot.generates;
+        return { day, chats: slot.chats, generates: slot.generates };
+      })
+      .sort((a, b) => b.day.localeCompare(a.day));
+    guests.push({
+      id: `chat-${key.slice(-8)}`,
+      label: "Sans compte · recherche",
+      city: "",
+      country: "",
+      count: 0,
+      count7d: 0,
+      lastAt: usageDays[0] ? `${usageDays[0].day}T00:00:00.000Z` : null,
+      passages: [],
+      chats14d,
+      generates14d,
+      usageDays,
+      flags: flagsFromDays(byDay),
+    });
+  }
+
+  guests.sort((a, b) => {
+    const rank = (flags: Flag[]) =>
+      flags.some((flag) => flag.level === "abuse") ? 0 : flags.length ? 1 : 2;
+    const byFlag = rank(a.flags) - rank(b.flags);
+    if (byFlag !== 0) return byFlag;
+    return (b.lastAt || "").localeCompare(a.lastAt || "");
+  });
 
   people.sort((a, b) => {
     const rank = (flags: Flag[]) =>
@@ -472,12 +520,14 @@ export async function GET() {
         label: flag.label,
       })),
     ),
-    ...guestFlags.map((flag) => ({
-      level: flag.level,
-      who: "Visiteur",
-      email: "",
-      label: flag.label,
-    })),
+    ...guests.flatMap((guest) =>
+      guest.flags.map((flag) => ({
+        level: flag.level,
+        who: guest.label,
+        email: "",
+        label: flag.label,
+      })),
+    ),
   ];
 
   return NextResponse.json({
@@ -517,5 +567,6 @@ export async function GET() {
     })),
     since,
     people,
+    guests,
   });
 }
