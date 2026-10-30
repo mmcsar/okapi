@@ -1582,6 +1582,7 @@ export function HomeDashboard({
           answer = "";
           let pendingAnswer = "";
           let paintTimer = 0;
+          let painted = false;
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -1593,11 +1594,14 @@ export function HomeDashboard({
               answer += chunk;
             }
             pendingAnswer = stripModelSafetyFooter(answer) || "…";
-            if (!paintTimer) {
+            if (!painted) {
+              painted = true;
+              setAssistant(pendingAnswer);
+            } else if (!paintTimer) {
               paintTimer = window.setTimeout(() => {
                 paintTimer = 0;
                 setAssistant(pendingAnswer);
-              }, 120);
+              }, 40);
             }
           }
           if (paintTimer) window.clearTimeout(paintTimer);

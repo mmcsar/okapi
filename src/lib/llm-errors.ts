@@ -156,7 +156,7 @@ export function friendlyLlmError(err: unknown) {
   const msg = rawMessage(err);
 
   if (
-    /402|payment required|no credits|insufficient_quota|billing|quota|payment|You have no credits|can only afford/i.test(
+    /402|payment required|no credits|insufficient|billing|quota|payment|can only afford/i.test(
       msg,
     )
   ) {

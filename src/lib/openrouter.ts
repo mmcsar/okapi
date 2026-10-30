@@ -17,8 +17,13 @@ type ChatMessage = {
 /** Niveau de raisonnement OpenRouter (Opus 5.5 = adaptive thinking). */
 export type OkapiReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
-/** Route gratuite OpenRouter — utilisée si le modèle payant n’a pas de crédit. */
+/** Dernier secours si le modèle rapide est saturé. */
 const FREE_FALLBACK_MODEL = "openrouter/free";
+/**
+ * Secours chat quand Opus n’a pas de crédit.
+ * Reste Okapi. Nemotron se présentait comme NVIDIA.
+ */
+const FAST_FREE_CHAT_MODEL = "minimax/minimax-m3.1-flash:free";
 /** Pro / Flash par défaut : Opus 5.5 (Flash = effort plus bas, pas un modèle faible). */
 const DEFAULT_PRO_MODEL = "anthropic/claude-opus-5.5";
 const DEFAULT_FLASH_MODEL = "anthropic/claude-opus-5.5";
@@ -36,8 +41,7 @@ function isFreeModel(model: string) {
 
 /**
  * Effort chat.
- * Salutation : pas d’attente.
- * Question normale : medium — assez pour vérifier, sans silence long.
+ * Salutation et question simple : low — le premier mot arrive tout de suite.
  * Calcul, droit, architecture, document : high (Flash) ou xhigh (Pro).
  */
 export function resolveChatReasoningEffort(opts: {
@@ -46,7 +50,7 @@ export function resolveChatReasoningEffort(opts: {
   hard?: boolean;
   greeting?: boolean;
 }): OkapiReasoningEffort | undefined {
-  if (opts.greeting) return undefined;
+  if (opts.greeting) return "low";
   const hard =
     opts.hard ||
     /\b(calcule|calcul|combien|debug|corrige|architecture|juridique|contrat|refacto|poutre|beton|formule|strategie|preuve)\b/i.test(
@@ -55,7 +59,7 @@ export function resolveChatReasoningEffort(opts: {
         .normalize("NFD")
         .replace(/\p{M}/gu, ""),
     );
-  if (!hard) return "medium";
+  if (!hard) return "low";
   if (opts.engine === "pro") return "xhigh";
   return "high";
 }
@@ -134,6 +138,10 @@ async function openRouterFetch(opts: {
   stream?: boolean;
   temperature?: number;
   reasoningEffort?: OkapiReasoningEffort;
+  /** Pas de réflexion interne : le texte visible part tout de suite. */
+  reasoningOff?: boolean;
+  /** Choisit le fournisseur le plus rapide (Flash). */
+  preferFast?: boolean;
 }) {
   const reasoning = isReasoningModel(opts.model);
   // Opus 5.5 : temperature non supportée (400 / dégradé). Effort = le levier qualité.
@@ -143,9 +151,15 @@ async function openRouterFetch(opts: {
     max_tokens: opts.maxTokens,
     stream: opts.stream === true,
   };
-  if (reasoning && opts.reasoningEffort) {
+  if (opts.preferFast) {
+    body.provider = { sort: "latency" };
+  }
+  if (opts.reasoningOff) {
+    body.reasoning = { enabled: false };
+  } else if (reasoning) {
+    // Sans effort, Opus réfléchit longtemps avant le premier mot.
     body.reasoning = {
-      effort: opts.reasoningEffort,
+      effort: opts.reasoningEffort ?? "low",
       exclude: true,
     };
   } else if (typeof opts.temperature === "number") {
@@ -307,7 +321,11 @@ export async function openRouterComplete(opts: {
         (isPaymentBlocked(res.status, msg) || isModelGone(res.status, msg)) &&
         model !== FREE_FALLBACK_MODEL
       ) {
-        return once(FREE_FALLBACK_MODEL, stream);
+        const next =
+          model === FAST_FREE_CHAT_MODEL
+            ? FREE_FALLBACK_MODEL
+            : FAST_FREE_CHAT_MODEL;
+        return once(next, stream);
       }
       throw new Error(
         msg ||
@@ -341,15 +359,9 @@ export async function openRouterComplete(opts: {
 
   let text = await once(primary, wantStream);
 
-  // Stream vide → 1 retry non-stream (souvent plus fiable sur :free)
+  // Stream vide → 1 retry sur le même modèle (Opus), pas un autre.
   if (!text && wantStream) {
     text = await once(primary, false);
-    if (text && opts.onChunk) opts.onChunk(text);
-  }
-
-  // Toujours vide → autre modèle free
-  if (!text && primary !== FREE_FALLBACK_MODEL) {
-    text = await once(FREE_FALLBACK_MODEL, false);
     if (text && opts.onChunk) opts.onChunk(text);
   }
 
@@ -372,7 +384,7 @@ export async function streamOpenRouterChat(opts: {
   const vision = Boolean(opts.vision);
   const engine = opts.engine ?? "flash";
   const primary = openRouterModel(engine, { vision });
-  const fallback = vision ? FREE_VISION_FALLBACK : FREE_FALLBACK_MODEL;
+  const fallback = vision ? FREE_VISION_FALLBACK : FAST_FREE_CHAT_MODEL;
   const messages: ChatMessage[] = [
     { role: "system", content: opts.system },
     ...opts.messages,
@@ -381,11 +393,12 @@ export async function streamOpenRouterChat(opts: {
   const reasoningEffort = opts.reasoningEffort;
   const maxTokens = isReasoningModel(primary)
     ? reasoningEffort === "xhigh"
-      ? 16_000
+      ? 12_000
       : reasoningEffort === "high"
-        ? 8_000
-        : 6_000
-    : 4096;
+        ? 6_000
+        : 2_048
+    : 2048;
+  const preferFast = engine !== "pro";
 
   let upstream = await openRouterFetch({
     key,
@@ -395,6 +408,7 @@ export async function streamOpenRouterChat(opts: {
     stream: true,
     temperature,
     reasoningEffort,
+    preferFast,
   });
 
   if (!upstream.ok) {
@@ -414,13 +428,24 @@ export async function streamOpenRouterChat(opts: {
         key,
         model: fallback,
         messages,
-        maxTokens: isFreeModel(fallback) ? 6000 : maxTokens,
+        maxTokens: isFreeModel(fallback) ? 2_048 : maxTokens,
         stream: true,
         temperature,
-        reasoningEffort: isReasoningModel(fallback)
-          ? reasoningEffort
-          : undefined,
+        reasoningEffort: isReasoningModel(fallback) ? reasoningEffort : undefined,
+        preferFast,
       });
+      if (!upstream.ok && !vision && fallback !== FREE_FALLBACK_MODEL) {
+        await upstream.body?.cancel().catch(() => undefined);
+        upstream = await openRouterFetch({
+          key,
+          model: FREE_FALLBACK_MODEL,
+          messages,
+          maxTokens: 4_096,
+          stream: true,
+          temperature,
+          preferFast: true,
+        });
+      }
     } else {
       throw new Error(
         msg ||
@@ -503,10 +528,11 @@ export async function streamOpenRouterChat(opts: {
             key,
             model: primary,
             messages,
-            maxTokens: 16_000,
+            maxTokens: Math.max(maxTokens, 4_096),
             stream: false,
             temperature,
             reasoningEffort,
+            preferFast,
           });
           if (retry.ok) {
             const data = (await retry.json().catch(() => null)) as {

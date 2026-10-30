@@ -42,10 +42,7 @@ import {
   intelligenceSystemBlock,
   loadUserIntelligenceContext,
 } from "@/lib/okapi-intelligence";
-import {
-  okapiTurnBrief,
-  turnNeedsDeepReasoning,
-} from "@/lib/okapi-reasoning";
+import { okapiTurnBrief } from "@/lib/okapi-reasoning";
 import { getUserFromAuthHeader } from "@/lib/supabase";
 import {
   OKAPI_STUDIO_STACK,
@@ -229,11 +226,8 @@ export async function POST(request: Request) {
   const language = body?.language?.trim() || "auto";
   const lane: OkapiAgentLane =
     body?.lane === "creer" ? "creer" : "conseil";
-  // Conseiller → Pro si payant. Gratuit / invité = Flash seulement (budget Opus).
-  const engine = resolveEngineForPlan(
-    lane === "conseil" ? "pro" : body?.engine,
-    access.paid,
-  );
+  // Flash par défaut : premier mot plus tôt. Pro seulement si l’utilisateur l’a choisi.
+  const engine = resolveEngineForPlan(body?.engine, access.paid);
   // Gouverneurs seulement : réponse figée (DB) — jamais le LLM pour inventer un nom.
   // Ministres / maires / actu → LLM + research grounding (pas de refus « gouverneur »).
   const liveFact = wantsLiveCurrentFact(message);
@@ -275,33 +269,33 @@ export async function POST(request: Request) {
     });
   }
 
-  let researchBlock = "";
-  if (
+  const wantResearch =
     lane === "conseil" &&
     !hasImage &&
     !hasDocument &&
-    !wantsMathDiagram(message)
-  ) {
-    const research = await resolveResearchGrounding(message);
-    if (research) {
-      researchBlock = researchGroundingSystemBlock(research, language);
-    }
-  }
+    !wantsMathDiagram(message);
 
-  let memoryBlock = "";
-  try {
-    const session = await getUserFromAuthHeader(request);
-    if (session) {
-      const memory = await loadUserIntelligenceContext(
-        session.supabase,
-        session.user.id,
-        session.user,
-      );
-      memoryBlock = intelligenceSystemBlock(memory);
-    }
-  } catch {
-    // Invité — chat reste ouvert sans mémoire projets
-  }
+  const [research, memoryBlock] = await Promise.all([
+    wantResearch ? resolveResearchGrounding(message) : Promise.resolve(null),
+    (async () => {
+      try {
+        const session = await getUserFromAuthHeader(request);
+        if (!session) return "";
+        const memory = await loadUserIntelligenceContext(
+          session.supabase,
+          session.user.id,
+          session.user,
+        );
+        return intelligenceSystemBlock(memory);
+      } catch {
+        // Invité — chat reste ouvert sans mémoire projets
+        return "";
+      }
+    })(),
+  ]);
+  const researchBlock = research
+    ? researchGroundingSystemBlock(research, language)
+    : "";
 
   const diagramBlock =
     !hasImage && wantsMathDiagram(message) ? diagramSystemBlock(message) : "";
@@ -345,7 +339,6 @@ export async function POST(request: Request) {
       message,
     );
   const temperature = needsStrict ? 0.15 : lane === "creer" ? 0.4 : 0.35;
-  const deepTurn = turnNeedsDeepReasoning(message, historyEarly.length);
   const greeting =
     /^(salut|bonjour|bonsoir|mbote|hello|hi|hey|merci|ok|oui|non|ca va|cava|cv|bon)\b/i.test(
       message
@@ -358,9 +351,7 @@ export async function POST(request: Request) {
     engine,
     message,
     greeting,
-    hard:
-      !greeting &&
-      (deepTurn || Boolean(diagramBlock) || hasDocument),
+    hard: !greeting && (Boolean(diagramBlock) || hasDocument),
   });
 
   if (provider === "openai") {

@@ -61,7 +61,7 @@ function shapeQuery(query: string) {
 
 async function fetchText(
   url: string,
-  timeoutMs = 7_000,
+  timeoutMs = 1_600,
 ): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -81,7 +81,7 @@ async function fetchText(
 
 async function fetchJson(
   url: string,
-  timeoutMs = 6_000,
+  timeoutMs = 1_600,
 ): Promise<unknown | null> {
   try {
     const res = await fetch(url, {
@@ -185,24 +185,24 @@ async function fromWikipediaFr(query: string) {
   const pageUrls = search?.[3] || [];
   if (!titles.length) return [] as ResearchPacket["snippets"];
 
-  const out: ResearchPacket["snippets"] = [];
-  for (let i = 0; i < Math.min(titles.length, 3); i++) {
-    const title = titles[i];
-    const pageUrl = pageUrls[i];
-    const sumUrl = `https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-    const sum = (await fetchJson(sumUrl)) as {
-      title?: string;
-      extract?: string;
-      content_urls?: { desktop?: { page?: string } };
-    } | null;
-    if (!sum?.extract?.trim()) continue;
-    out.push({
-      title: sum.title || title,
-      text: sum.extract.trim().slice(0, 2000),
-      url: sum.content_urls?.desktop?.page || pageUrl,
-    });
-  }
-  return out;
+  const pages = await Promise.all(
+    titles.slice(0, 2).map(async (title, i) => {
+      const pageUrl = pageUrls[i];
+      const sumUrl = `https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+      const sum = (await fetchJson(sumUrl)) as {
+        title?: string;
+        extract?: string;
+        content_urls?: { desktop?: { page?: string } };
+      } | null;
+      if (!sum?.extract?.trim()) return null;
+      return {
+        title: sum.title || title,
+        text: sum.extract.trim().slice(0, 2000),
+        url: sum.content_urls?.desktop?.page || pageUrl,
+      };
+    }),
+  );
+  return pages.filter((page): page is NonNullable<typeof page> => Boolean(page));
 }
 
 /** Parse un fil RSS générique → snippets scorés vs query. */
@@ -304,6 +304,17 @@ export function wantsResearchGrounding(message: string): boolean {
   return false;
 }
 
+/** Coupe l’attente : si les sources traînent, le modèle répond sans elles. */
+function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /**
  * Récupère des extraits sources pour ancrer la réponse Conseiller.
  */
@@ -317,12 +328,19 @@ export async function resolveResearchGrounding(
   const shaped = shapeQuery(query);
   const newsMode = wantsNews(message) || isRdcTopic(message);
 
-  const [ddg, wiki, radio, actualite] = await Promise.all([
-    fromDuckDuckGo(shaped),
-    fromWikipediaFr(shaped),
-    newsMode ? fromRadioOkapiRss(query) : Promise.resolve([]),
-    newsMode ? fromActualiteCdRss(query) : Promise.resolve([]),
-  ]);
+  // Le chat ne doit pas rester muet pendant qu’une source est lente.
+  const sources = await withBudget(
+    Promise.all([
+      fromDuckDuckGo(shaped),
+      fromWikipediaFr(shaped),
+      newsMode ? fromRadioOkapiRss(query) : Promise.resolve([]),
+      newsMode ? fromActualiteCdRss(query) : Promise.resolve([]),
+    ]),
+    2_400,
+    null,
+  );
+  if (!sources) return null;
+  const [ddg, wiki, radio, actualite] = sources;
 
   const seen = new Set<string>();
   const snippets: ResearchPacket["snippets"] = [];

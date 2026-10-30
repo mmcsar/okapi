@@ -56,15 +56,12 @@ function hashFor(id: NavId) {
 
 function HomeApp() {
   const { user, displayName, signOut, ready, accessToken } = useAuth();
-  const [activeNav, setActiveNav] = useState<NavId>(() =>
-    typeof window !== "undefined" ? parseHash() : "home",
-  );
+  // Toujours "home" au 1er render (SSR = client) — le hash est appliqué dans useEffect.
+  const [activeNav, setActiveNav] = useState<NavId>("home");
   const [resetKey, setResetKey] = useState(0);
   const [studioKick, setStudioKick] = useState(0);
   const [openProject, setOpenProject] = useState<OkapiProject | null>(null);
-  const [openInStudio, setOpenInStudio] = useState(
-    () => typeof window !== "undefined" && parseHash() === "studio",
-  );
+  const [openInStudio, setOpenInStudio] = useState(false);
 
   useEffect(() => {
     const apply = () => {
@@ -212,17 +209,15 @@ function HomeApp() {
           <button
             type="button"
             onClick={startNewProject}
-            className="shrink-0 rounded-xl bg-okapi-amber px-3 py-2 text-xs font-semibold text-white"
+            className="okapi-nav-chip okapi-nav-chip--amber shrink-0 rounded-xl px-3 py-2 text-xs font-semibold"
           >
             + Nouveau
           </button>
           <button
             type="button"
             onClick={() => navigate("home")}
-            className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ${
-              activeNav === "home"
-                ? "bg-okapi-forest text-white"
-                : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
+            className={`okapi-nav-chip shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ${
+              activeNav === "home" ? "okapi-nav-chip--active" : ""
             }`}
           >
             Agent
@@ -230,17 +225,15 @@ function HomeApp() {
           <button
             type="button"
             onClick={() => navigate("studio")}
-            className="shrink-0 rounded-xl border border-[var(--okapi-stroke)] bg-white/80 px-3 py-2 text-xs font-semibold text-okapi-ink/70"
+            className="okapi-nav-chip shrink-0 rounded-xl px-3 py-2 text-xs font-semibold"
           >
             Studio
           </button>
           <button
             type="button"
             onClick={() => navigate("settings")}
-            className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ${
-              activeNav === "settings"
-                ? "bg-okapi-forest text-white"
-                : "border border-[var(--okapi-stroke)] bg-white/80 text-okapi-ink/70"
+            className={`okapi-nav-chip shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ${
+              activeNav === "settings" ? "okapi-nav-chip--active" : ""
             }`}
           >
             Paramètres
