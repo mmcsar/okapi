@@ -177,9 +177,10 @@ body::after {
   animation: glow-pulse 4s ease-in-out infinite;
 }
 
-/* Menu — crème MMC, filet vert forêt → ambre */
+/* Menu — crème MMC, filet vert forêt → ambre.
+   Ne pas forcer position:relative ici : ça écrase Tailwind `fixed`
+   du tiroir mobile et pousse tout l’Accueil hors écran. */
 .okapi-nav-shell {
-  position: relative;
   overflow: hidden;
   background:
     radial-gradient(120% 70% at 0% 0%, rgba(27, 79, 58, 0.1), transparent 46%),

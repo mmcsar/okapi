@@ -284,7 +284,7 @@ export function Sidebar({
       ) : null}
 
       <aside
-        className={`okapi-nav-shell relative z-[40] hidden shrink-0 md:flex md:flex-col ${
+        className={`okapi-nav-shell relative z-[40] hidden shrink-0 overflow-hidden md:flex md:flex-col ${
           compact
             ? "okapi-nav-shell--compact w-[200px] rounded-none border-y-0 border-l-0 p-2.5"
             : "w-[260px] md:rounded-[28px] md:p-3.5"
@@ -294,7 +294,7 @@ export function Sidebar({
       </aside>
 
       <aside
-        className={`okapi-nav-shell fixed inset-y-3 left-3 z-[80] flex w-[min(86vw,280px)] flex-col rounded-[28px] p-3.5 transition-transform md:hidden ${
+        className={`okapi-nav-shell fixed inset-y-3 left-3 z-[80] flex w-[min(86vw,280px)] flex-col overflow-hidden rounded-[28px] p-3.5 transition-transform md:hidden ${
           mobileOpen ? "translate-x-0" : "-translate-x-[130%]"
         }`}
       >

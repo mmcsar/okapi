@@ -17,19 +17,29 @@ type ChatMessage = {
 /** Niveau de raisonnement OpenRouter (Opus 5.5 = adaptive thinking). */
 export type OkapiReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
-/** Dernier secours si le modèle rapide est saturé. */
-const FREE_FALLBACK_MODEL = "openrouter/free";
 /**
- * Secours chat quand Opus n’a pas de crédit.
- * Reste Okapi. Nemotron se présentait comme NVIDIA.
+ * Secours chat quand Opus n’a plus de crédit.
+ * MiniMax :free retiré (oct 2026). Chaîne testée — éviter Nemotron (réponses vides).
  */
-const FAST_FREE_CHAT_MODEL = "minimax/minimax-m3.1-flash:free";
+const FREE_CHAT_FALLBACKS = [
+  process.env.OPENROUTER_MODEL_FREE?.trim(),
+  "liquid/lfm-2.5-2.6b:free",
+  "google/gemma-4-26b-a4b-it:free",
+  "dots-studio/dots-3-note-preview:free",
+  "openrouter/free",
+].filter((m, i, arr): m is string => Boolean(m) && arr.indexOf(m) === i);
+
+const FREE_FALLBACK_MODEL =
+  FREE_CHAT_FALLBACKS[FREE_CHAT_FALLBACKS.length - 1] || "openrouter/free";
+const FAST_FREE_CHAT_MODEL = FREE_CHAT_FALLBACKS[0] || FREE_FALLBACK_MODEL;
 /** Pro / Flash par défaut : Opus 5.5 (Flash = effort plus bas, pas un modèle faible). */
 const DEFAULT_PRO_MODEL = "anthropic/claude-opus-5.5";
 const DEFAULT_FLASH_MODEL = "anthropic/claude-opus-5.5";
 /** Fallback vision (doit supporter les images). */
 const FREE_VISION_FALLBACK =
-  process.env.OPENROUTER_MODEL_VISION_FREE?.trim() || "openrouter/free";
+  process.env.OPENROUTER_MODEL_VISION_FREE?.trim() ||
+  FREE_CHAT_FALLBACKS[0] ||
+  "openrouter/free";
 
 function isReasoningModel(model: string) {
   return /claude-opus|claude-sonnet-5|anthropic\/claude/i.test(model);
@@ -318,14 +328,24 @@ export async function openRouterComplete(opts: {
       } | null;
       const msg = failBody?.error?.message || "";
       if (
-        (isPaymentBlocked(res.status, msg) || isModelGone(res.status, msg)) &&
-        model !== FREE_FALLBACK_MODEL
+        (isPaymentBlocked(res.status, msg) ||
+          isModelGone(res.status, msg) ||
+          res.status === 429 ||
+          res.status === 503) &&
+        !isFreeModel(model)
       ) {
-        const next =
-          model === FAST_FREE_CHAT_MODEL
-            ? FREE_FALLBACK_MODEL
-            : FAST_FREE_CHAT_MODEL;
-        return once(next, stream);
+        return once(FAST_FREE_CHAT_MODEL, stream);
+      }
+      if (
+        (isPaymentBlocked(res.status, msg) ||
+          isModelGone(res.status, msg) ||
+          res.status === 429 ||
+          res.status === 503) &&
+        isFreeModel(model)
+      ) {
+        const idx = FREE_CHAT_FALLBACKS.indexOf(model);
+        const next = FREE_CHAT_FALLBACKS[idx + 1];
+        if (next) return once(next, stream);
       }
       throw new Error(
         msg ||
@@ -359,9 +379,9 @@ export async function openRouterComplete(opts: {
 
   let text = await once(primary, wantStream);
 
-  // Stream vide → 1 retry sur le même modèle (Opus), pas un autre.
+  // Stream vide → non-stream sur free (Opus à crédit 0 renverrait encore vide).
   if (!text && wantStream) {
-    text = await once(primary, false);
+    text = await once(FAST_FREE_CHAT_MODEL, false);
     if (text && opts.onChunk) opts.onChunk(text);
   }
 
@@ -400,75 +420,72 @@ export async function streamOpenRouterChat(opts: {
     : 2048;
   const preferFast = engine !== "pro";
 
-  let upstream = await openRouterFetch({
-    key,
-    model: primary,
-    messages,
-    maxTokens,
-    stream: true,
-    temperature,
-    reasoningEffort,
-    preferFast,
-  });
-
-  if (!upstream.ok) {
-    const failBody = (await upstream.json().catch(() => null)) as {
-      error?: { message?: string };
-    } | null;
-    const msg = failBody?.error?.message || "";
-    const canRetry =
-      primary !== fallback &&
-      (isPaymentBlocked(upstream.status, msg) ||
-        isModelGone(upstream.status, msg) ||
-        (vision &&
-          /vision|image|multimodal|content type|not support/i.test(msg)));
-
-    if (canRetry) {
-      upstream = await openRouterFetch({
+  async function tryModels(
+    models: string[],
+    stream: boolean,
+  ): Promise<Response | null> {
+    let last: Response | null = null;
+    for (const model of models) {
+      if (last?.body) await last.body.cancel().catch(() => undefined);
+      last = await openRouterFetch({
         key,
-        model: fallback,
+        model,
         messages,
-        maxTokens: isFreeModel(fallback) ? 2_048 : maxTokens,
-        stream: true,
+        maxTokens: isFreeModel(model)
+          ? Math.min(maxTokens, 2_048)
+          : maxTokens,
+        stream,
         temperature,
-        reasoningEffort: isReasoningModel(fallback) ? reasoningEffort : undefined,
-        preferFast,
+        reasoningEffort: isReasoningModel(model) ? reasoningEffort : undefined,
+        preferFast: preferFast || isFreeModel(model),
       });
-      if (!upstream.ok && !vision && fallback !== FREE_FALLBACK_MODEL) {
-        await upstream.body?.cancel().catch(() => undefined);
-        upstream = await openRouterFetch({
-          key,
-          model: FREE_FALLBACK_MODEL,
-          messages,
-          maxTokens: 4_096,
-          stream: true,
-          temperature,
-          preferFast: true,
-        });
+      if (last.ok && last.body) return last;
+      const failBody = (await last.json().catch(() => null)) as {
+        error?: { message?: string };
+      } | null;
+      const msg = failBody?.error?.message || "";
+      // Continuer la chaîne sur crédit / modèle mort / surcharge / param invalide
+      const keepGoing =
+        isPaymentBlocked(last.status, msg) ||
+        isModelGone(last.status, msg) ||
+        last.status === 429 ||
+        last.status === 400 ||
+        last.status === 503 ||
+        (vision &&
+          /vision|image|multimodal|content type|not support/i.test(msg));
+      if (!keepGoing) {
+        throw new Error(
+          msg ||
+            (last.status === 402
+              ? "Le crédit IA Okapi est épuisé."
+              : `Erreur IA Okapi (${last.status})`),
+        );
       }
-    } else {
-      throw new Error(
-        msg ||
-          (upstream.status === 402
-            ? "Le crédit IA Okapi est épuisé."
-            : upstream.status === 429
-              ? "Okapi reçoit beaucoup de demandes. Réessaie dans un instant."
-              : `Erreur IA Okapi (${upstream.status})`),
-      );
     }
+    return last;
   }
 
-  if (!upstream.ok || !upstream.body) {
-    const fail = (await upstream.json().catch(() => null)) as {
-      error?: { message?: string };
-    } | null;
+  const paidThenFree = vision
+    ? [primary, fallback].filter((m, i, a) => a.indexOf(m) === i)
+    : [primary, ...FREE_CHAT_FALLBACKS].filter(
+        (m, i, a) => a.indexOf(m) === i,
+      );
+
+  let upstream = await tryModels(paidThenFree, true);
+
+  if (!upstream?.ok || !upstream.body) {
+    const fail = upstream
+      ? ((await upstream.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null)
+      : null;
     throw new Error(
       fail?.error?.message ||
-        (upstream.status === 402
-          ? "Le crédit IA Okapi est épuisé."
-          : upstream.status === 429
+        (upstream?.status === 402
+          ? "Le crédit IA Okapi est épuisé. Recharge OpenRouter ou pose une clé avec crédit."
+          : upstream?.status === 429
             ? "Okapi reçoit beaucoup de demandes. Réessaie dans un instant."
-            : `Erreur IA Okapi (${upstream.status})`),
+            : "Okapi n’a pas pu répondre. Réessaie dans quelques secondes."),
     );
   }
 
@@ -524,24 +541,36 @@ export async function streamOpenRouterChat(opts: {
           }
         }
         if (!stripModelSafetyFooter(assembled)) {
-          const retry = await openRouterFetch({
-            key,
-            model: primary,
-            messages,
-            maxTokens: Math.max(maxTokens, 4_096),
-            stream: false,
-            temperature,
-            reasoningEffort,
-            preferFast,
-          });
-          if (retry.ok) {
+          // Stream vide → rejouer en non-stream sur free (pas Opus à crédit 0)
+          const recoverModels = vision
+            ? [primary, fallback]
+            : FREE_CHAT_FALLBACKS;
+          for (const model of recoverModels) {
+            const retry = await openRouterFetch({
+              key,
+              model,
+              messages,
+              maxTokens: isFreeModel(model)
+                ? 2_048
+                : Math.max(maxTokens, 4_096),
+              stream: false,
+              temperature,
+              reasoningEffort: isReasoningModel(model)
+                ? reasoningEffort
+                : undefined,
+              preferFast: true,
+            });
+            if (!retry.ok) continue;
             const data = (await retry.json().catch(() => null)) as {
               choices?: { message?: { content?: unknown } }[];
             } | null;
             const recovered = stripModelSafetyFooter(
               choiceText(data?.choices?.[0]),
             );
-            if (recovered) controller.enqueue(encoder.encode(recovered));
+            if (recovered) {
+              controller.enqueue(encoder.encode(recovered));
+              break;
+            }
           }
         }
         controller.close();

@@ -156,11 +156,11 @@ export function friendlyLlmError(err: unknown) {
   const msg = rawMessage(err);
 
   if (
-    /402|payment required|no credits|insufficient|billing|quota|payment|can only afford/i.test(
+    /402|payment required|no credits|insufficient|billing|quota|payment|can only afford|never purchased credits/i.test(
       msg,
     )
   ) {
-    return "Le crédit IA Okapi est épuisé. Recharge le compte, puis réessaie.";
+    return "Le crédit IA Okapi est épuisé. Recharge OpenRouter (crédits), puis réessaie.";
   }
 
   if (/empty_response|empty response|réponse vide/i.test(msg)) {
